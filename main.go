@@ -19,7 +19,7 @@ func main() {
 	dns.HandleFunc(".", handleRequest)
 
 	server := &dns.Server{
-		Addr: ":5053",
+		Addr: ":53",
 		Net:  "udp",
 	}
 
