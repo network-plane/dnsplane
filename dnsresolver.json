@@ -1,0 +1,8 @@
+{
+    "fallback_server_ip": "192.168.178.21",
+    "fallback_server_port": "53",
+    "timeout": 2,
+    "dns_port": "53",
+    "cache_records": true,
+    "auto_build_ptr_from_a": true
+}
