@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/miekg/dns"
 )
@@ -55,6 +56,11 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 		log.Println("Error getting cache records:", err)
 	}
 
+	if question.Qtype == dns.TypePTR {
+		handlePTRQuestion(question, response)
+		return
+	}
+
 	recordType := dns.TypeToString[question.Qtype]
 	cachedRecord := findRecord(dnsRecords, question.Name, recordType)
 	if cachedRecord != nil {
@@ -67,6 +73,81 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 			handleDNSServers(question, dnsServers, fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 		}
 	}
+}
+
+func handlePTRQuestion(question dns.Question, response *dns.Msg) {
+	ipAddr := convertReverseDNSToIP(question.Name)
+	dnsRecords := getDNSRecords()
+	recordType := dns.TypeToString[question.Qtype]
+
+	rrPointer := findRecord(dnsRecords, ipAddr, recordType)
+	if rrPointer != nil {
+		ptrRecord, ok := (*rrPointer).(*dns.PTR)
+		if !ok {
+			// Handle the case where the record is not a PTR record or cannot be cast
+			log.Println("Found record is not a PTR record or cannot be cast to *dns.PTR")
+			return
+		}
+
+		ptrDomain := ptrRecord.Ptr
+		if !strings.HasSuffix(ptrDomain, ".") {
+			ptrDomain += "."
+		}
+
+		// Now use ptrDomain in the sprintf, ensuring only one trailing dot is present
+		rrString := fmt.Sprintf("%s PTR %s", question.Name, ptrDomain)
+		rr, err := dns.NewRR(rrString)
+		if err == nil {
+			response.Answer = append(response.Answer, rr)
+		} else {
+			// Log the error
+			log.Printf("Error creating PTR record: %s\n", err)
+		}
+
+	}
+}
+
+// convertReverseDNSToIP takes a reverse DNS lookup string and converts it back to an IP address.
+func convertReverseDNSToIP(reverseDNS string) string {
+	// Split the reverse DNS string by "."
+	parts := strings.Split(reverseDNS, ".")
+
+	// Check if the input is valid (should have at least 4 parts before "in-addr" and "arpa")
+	if len(parts) < 6 {
+		return "Invalid input"
+	}
+
+	// Extract the first four segments which represent the reversed IP address
+	ipParts := parts[:4]
+
+	// Reverse the order of the extracted segments
+	for i, j := 0, len(ipParts)-1; i < j; i, j = i+1, j-1 {
+		ipParts[i], ipParts[j] = ipParts[j], ipParts[i]
+	}
+
+	// Join the segments back together to form the original IP address
+	return strings.Join(ipParts, ".")
+}
+
+// convertIPToReverseDNS takes an IP address and converts it to a reverse DNS lookup string.
+func convertIPToReverseDNS(ip string) string {
+	// Split the IP address into its segments
+	parts := strings.Split(ip, ".")
+
+	// Check if the input is a valid IPv4 address (should have exactly 4 parts)
+	if len(parts) != 4 {
+		return "Invalid IP address"
+	}
+
+	// Reverse the order of the IP segments
+	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
+		parts[i], parts[j] = parts[j], parts[i]
+	}
+
+	// Join the reversed segments and append the ".in-addr.arpa" domain
+	reverseDNS := strings.Join(parts, ".") + ".in-addr.arpa"
+
+	return reverseDNS
 }
 
 func processCachedRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
@@ -133,9 +214,27 @@ func handleFallbackServer(question dns.Question, fallbackServer string, response
 	}
 }
 
-func findRecord(records []DNSRecord, name, recordType string) *dns.RR {
+func findRecord(records []DNSRecord, lookupRecord, recordType string) *dns.RR {
 	for _, record := range records {
-		if record.Name == name && record.Type == recordType {
+
+		if recordType == "PTR" {
+			if record.Value == lookupRecord {
+				recordString := fmt.Sprintf("%s %d IN PTR %s.", convertIPToReverseDNS(lookupRecord), record.TTL, strings.TrimRight(record.Name, "."))
+				fmt.Println("recordstring", recordString)
+
+				rr := recordString
+
+				dnsRecord, err := dns.NewRR(rr)
+				if err != nil {
+					fmt.Println("Error creating PTR record", err)
+					return nil // Error handling if the PTR record can't be created
+				}
+				// fmt.Println(dnsRecord.String())
+				return &dnsRecord
+			}
+		}
+
+		if record.Name == lookupRecord && record.Type == recordType {
 			rr := fmt.Sprintf("%s %d IN %s %s", record.Name, record.TTL, record.Type, record.Value)
 			dnsRecord, err := dns.NewRR(rr)
 			if err != nil {
