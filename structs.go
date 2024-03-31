@@ -10,6 +10,7 @@ type DNSServerSettings struct {
 	DNSPort            string `json:"dns_port"`
 	CacheRecords       bool   `json:"cache_records"`
 	AutoBuildPTRFromA  bool   `json:"auto_build_ptr_from_a"`
+	ForwardPTRQueries  bool   `json:"forward_ptr_queries"`
 }
 
 // DNSRecord holds the data for a DNS record
