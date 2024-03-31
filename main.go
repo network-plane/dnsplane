@@ -217,7 +217,7 @@ func handleFallbackServer(question dns.Question, fallbackServer string, response
 func findRecord(records []DNSRecord, lookupRecord, recordType string) *dns.RR {
 	for _, record := range records {
 
-		if recordType == "PTR" {
+		if record.Type == "PTR" || (recordType == "PTR" && dnsServerSettings.AutoBuildPTRFromA) {
 			if record.Value == lookupRecord {
 				recordString := fmt.Sprintf("%s %d IN PTR %s.", convertIPToReverseDNS(lookupRecord), record.TTL, strings.TrimRight(record.Name, "."))
 				fmt.Println("recordstring", recordString)
