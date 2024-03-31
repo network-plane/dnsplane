@@ -56,23 +56,31 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 		log.Println("Error getting cache records:", err)
 	}
 
-	if question.Qtype == dns.TypePTR {
+	switch question.Qtype {
+	case dns.TypePTR:
 		handlePTRQuestion(question, response)
 		return
-	}
-
-	recordType := dns.TypeToString[question.Qtype]
-	cachedRecord := findRecord(dnsRecords, question.Name, recordType)
-	if cachedRecord != nil {
-		processCachedRecord(question, cachedRecord, response)
-	} else {
-		cachedRecord = findCacheRecord(cacheRecords, question.Name, recordType)
+	case dns.TypeA:
+		recordType := dns.TypeToString[question.Qtype]
+		cachedRecord := findRecord(dnsRecords, question.Name, recordType)
 		if cachedRecord != nil {
-			processCacheRecord(question, cachedRecord, response)
+			processCachedRecord(question, cachedRecord, response)
 		} else {
-			handleDNSServers(question, dnsServers, fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+			cachedRecord = findCacheRecord(cacheRecords, question.Name, recordType)
+			if cachedRecord != nil {
+				processCacheRecord(question, cachedRecord, response)
+			} else {
+				handleDNSServers(question, dnsServers, fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+			}
 		}
+	default:
+		handleDNSServers(question, dnsServers, fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+
 	}
+}
+
+func handleAQuestion() {
+
 }
 
 func handlePTRQuestion(question dns.Question, response *dns.Msg) {
