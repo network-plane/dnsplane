@@ -68,3 +68,20 @@ func queryAllDNSServers(question dns.Question, dnsServers []string) <-chan *dns.
 
 	return answers
 }
+
+func handleDNSServers(question dns.Question, dnsServers []string, fallbackServer string, response *dns.Msg) {
+	answers := queryAllDNSServers(question, dnsServers)
+
+	found := false
+	for answer := range answers {
+		if answer.MsgHdr.Authoritative {
+			processAuthoritativeAnswer(question, answer, response)
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		handleFallbackServer(question, fallbackServer, response)
+	}
+}
