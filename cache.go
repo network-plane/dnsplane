@@ -52,19 +52,6 @@ func saveCacheRecords(cacheRecords []CacheRecord) {
 	}
 }
 
-func findCacheRecord(cacheRecords []CacheRecord, name string, recordType string) *dns.RR {
-	now := time.Now()
-	for _, record := range cacheRecords {
-		if record.DNSRecord.Name == name && record.DNSRecord.Type == recordType {
-			if now.Before(record.Expiry) {
-				remainingTTL := uint32(record.Expiry.Sub(now).Seconds())
-				return dnsRecordToRR(&record.DNSRecord, remainingTTL)
-			}
-		}
-	}
-	return nil
-}
-
 func addToCache(cacheRecords []CacheRecord, record *dns.RR) []CacheRecord {
 
 	if !dnsServerSettings.CacheRecords {
