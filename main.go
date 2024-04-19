@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"log"
 	"os"
@@ -25,12 +26,49 @@ func main() {
 		Net:  "udp",
 	}
 
-	log.Printf("Starting DNS server on %s\n", server.Addr)
-	err := server.ListenAndServe()
-	if err != nil {
-		fmt.Println("Error starting server:", err)
-		os.Exit(1)
+	go func() {
+		log.Printf("Starting DNS server on %s\n", server.Addr)
+		err := server.ListenAndServe()
+		if err != nil {
+			fmt.Println("Error starting server:", err)
+			os.Exit(1)
+		}
+	}()
+
+	// Interactive prompt running in the main goroutine
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print("> ")
+		command, _ := reader.ReadString('\n')
+
+		switch command = strings.TrimSpace(command); command {
+		case "stats":
+			showStats() // Implement this function based on your needs
+		case "exit":
+			fmt.Println("Shutting down the server.")
+			server.Shutdown() // Gracefully shutdown the server
+			return
+		case "":
+			continue
+		case "?", "help", "h":
+			fmt.Println("Available commands:")
+			fmt.Println("  stats - Show server statistics")
+			fmt.Println("  exit - Shutdown the server")
+		default:
+			fmt.Println("Unknown command:", command)
+		}
 	}
+}
+
+func showStats() {
+	// Implement this function based on your needs
+	fmt.Println("Stats:")
+	fmt.Println("Total A Records:", len(getDNSRecords()))
+	fmt.Println("Total DNS Servers:", len(getDNSServers()))
+
+	fmt.Println("Total queries received:", "N/A")
+	fmt.Println("Total queries answered:", "N/A")
+	fmt.Println("Total queries forwarded:", "N/A")
 }
 
 func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
@@ -60,9 +98,11 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 	case dns.TypePTR:
 		handlePTRQuestion(question, response)
 		return
+
 	case dns.TypeA:
 		recordType := dns.TypeToString[question.Qtype]
 		cachedRecord := findRecord(dnsRecords, question.Name, recordType)
+
 		if cachedRecord != nil {
 			processCachedRecord(question, cachedRecord, response)
 		} else {
@@ -73,6 +113,7 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 				handleDNSServers(question, dnsServers, fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 			}
 		}
+
 	default:
 		handleDNSServers(question, dnsServers, fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 
@@ -163,38 +204,6 @@ func handleFallbackServer(question dns.Question, fallbackServer string, response
 	} else {
 		fmt.Printf("Query: %s, No response\n", question.Name)
 	}
-}
-
-func findRecord(records []DNSRecord, lookupRecord, recordType string) *dns.RR {
-	for _, record := range records {
-
-		if record.Type == "PTR" || (recordType == "PTR" && dnsServerSettings.AutoBuildPTRFromA) {
-			if record.Value == lookupRecord {
-				recordString := fmt.Sprintf("%s %d IN PTR %s.", convertIPToReverseDNS(lookupRecord), record.TTL, strings.TrimRight(record.Name, "."))
-				fmt.Println("recordstring", recordString)
-
-				rr := recordString
-
-				dnsRecord, err := dns.NewRR(rr)
-				if err != nil {
-					fmt.Println("Error creating PTR record", err)
-					return nil // Error handling if the PTR record can't be created
-				}
-				// fmt.Println(dnsRecord.String())
-				return &dnsRecord
-			}
-		}
-
-		if record.Name == lookupRecord && record.Type == recordType {
-			rr := fmt.Sprintf("%s %d IN %s %s", record.Name, record.TTL, record.Type, record.Value)
-			dnsRecord, err := dns.NewRR(rr)
-			if err != nil {
-				return nil
-			}
-			return &dnsRecord
-		}
-	}
-	return nil
 }
 
 func dnsRecordToRR(dnsRecord *DNSRecord, ttl uint32) *dns.RR {
