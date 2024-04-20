@@ -43,3 +43,14 @@ func addRecord(fullCommand []string) {
 
 	fmt.Println("Adding DNS record:", dnsRecord)
 }
+
+func listRecords() {
+	records := getDNSRecords()
+	if len(records) == 0 {
+		fmt.Println("No records found.")
+		return
+	}
+	for _, record := range records {
+		fmt.Println(record)
+	}
+}
