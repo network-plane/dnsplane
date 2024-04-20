@@ -2,6 +2,21 @@ package main
 
 import "time"
 
+var (
+	dnsServerSettings DNSServerSettings
+	dnsStats          DNSStats
+)
+
+// DNSStats holds the data for the DNS statistics
+type DNSStats struct {
+	TotalQueries          int `json:"total_queries"`
+	TotalCacheHits        int `json:"total_cache_hits"`
+	TotalBlocks           int `json:"total_blocks"`
+	TotalQueriesForwarded int `json:"total_queries_forwarded"`
+	TotalQueriesAnswered  int `json:"total_queries_answered"`
+	ServerStartTime       time.Time
+}
+
 // DNSServerSettings holds DNS server settings
 type DNSServerSettings struct {
 	FallbackServerIP   string `json:"fallback_server_ip"`
