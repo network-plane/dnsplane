@@ -1,17 +1,15 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/bettercap/readline"
 	"github.com/miekg/dns"
-)
-
-var (
-	dnsServerSettings DNSServerSettings
 )
 
 func main() {
@@ -28,6 +26,7 @@ func main() {
 
 	go func() {
 		log.Printf("Starting DNS server on %s\n", server.Addr)
+		dnsStats.ServerStartTime = time.Now()
 		err := server.ListenAndServe()
 		if err != nil {
 			fmt.Println("Error starting server:", err)
@@ -35,46 +34,148 @@ func main() {
 		}
 	}()
 
-	// Interactive prompt running in the main goroutine
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		fmt.Print("> ")
-		command, _ := reader.ReadString('\n')
+	config := readline.Config{
+		Prompt:          "> ",
+		HistoryFile:     "/tmp/readline_history.tmp",
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+	}
 
-		switch command = strings.TrimSpace(command); command {
+	rl, err := readline.NewEx(&config)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "readline: %v\n", err)
+		return
+	}
+	defer rl.Close()
+
+	// Command auto-completion setup
+	rl.Config.AutoComplete = readline.NewPrefixCompleter(
+		readline.PcItem("stats"),
+		readline.PcItem("exit"),
+		readline.PcItem("quit"),
+		readline.PcItem("q"),
+		readline.PcItem("help"),
+		readline.PcItem("h"),
+		readline.PcItem("?"),
+	)
+
+	for {
+		command, err := rl.Readline()
+		if err != nil { // Handle EOF or interrupt
+			break
+		}
+		fullCommand := strings.Fields(command)
+		command = strings.TrimSpace(command)
+
+		if len(fullCommand) > 0 {
+			// Retrieve only the first word (command)
+			command = fullCommand[0]
+		} else {
+			// No input or only spaces were entered
+			continue
+		}
+
+		switch command {
 		case "stats":
-			showStats() // Implement this function based on your needs
-		case "exit":
-			fmt.Println("Shutting down the server.")
-			server.Shutdown() // Gracefully shutdown the server
+			showStats()
+		case "add":
+			//add DNS record
+			if len(fullCommand) > 1 && fullCommand[1] == "?" {
+				fmt.Println("Enter the DNS record in the format: Name Type Value TTL")
+				fmt.Println("Example: example.com A 127.0.0.1 3600")
+				continue
+			}
+
+			if len(fullCommand) != 5 {
+				fmt.Println("Invalid DNS record format. Please enter the DNS record in the format: Name Type Value TTL")
+				continue
+			}
+
+			//check if type (fullCommand[2]) is valid for DNS type
+			if _, ok := dns.StringToType[fullCommand[2]]; !ok {
+				fmt.Println("Invalid DNS record type. Please enter a valid DNS record type.")
+				continue
+			}
+
+			ttl64, err := strconv.ParseUint(fullCommand[4], 10, 32)
+			if err != nil {
+				fmt.Println("Invalid TTL value. Please enter a valid TTL value.")
+				continue
+			}
+			ttl := uint32(ttl64)
+
+			dnsRecord := DNSRecord{
+				Name:  fullCommand[1],
+				Type:  fullCommand[2],
+				Value: fullCommand[3],
+				TTL:   ttl,
+			}
+
+			fmt.Println("Adding DNS record:", dnsRecord)
+
+		case "exit", "quit", "q":
+			fmt.Println("Shutting down.")
 			return
 		case "":
 			continue
-		case "?", "help", "h":
+		case "help", "h", "?":
 			fmt.Println("Available commands:")
 			fmt.Println("  stats - Show server statistics")
-			fmt.Println("  exit - Shutdown the server")
+			fmt.Println("  exit, quit, q - Shutdown the server")
+			fmt.Println("  help, h, ? - Show help")
 		default:
-			fmt.Println("Unknown command:", command)
+			if command != "" {
+				fmt.Println("Unknown command:", command)
+			}
 		}
 	}
+}
+
+// serverUpTimeFormat formats the time duration since the server start time into a human-readable string.
+func serverUpTimeFormat(startTime time.Time) string {
+	duration := time.Since(startTime)
+
+	days := duration / (24 * time.Hour)
+	duration -= days * 24 * time.Hour
+	hours := duration / time.Hour
+	duration -= hours * time.Hour
+	minutes := duration / time.Minute
+	duration -= minutes * time.Minute
+	seconds := duration / time.Second
+
+	if days > 0 {
+		return fmt.Sprintf("%d days, %d hours, %d minutes, %d seconds", days, hours, minutes, seconds)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("%d hours, %d minutes, %d seconds", hours, minutes, seconds)
+	}
+	if minutes > 0 {
+		return fmt.Sprintf("%d minutes, %d seconds", minutes, seconds)
+	}
+	return fmt.Sprintf("%d seconds", seconds)
 }
 
 func showStats() {
 	// Implement this function based on your needs
 	fmt.Println("Stats:")
+	fmt.Println("Server start time:", dnsStats.ServerStartTime)
+	fmt.Println("Server Up Time:", serverUpTimeFormat(dnsStats.ServerStartTime))
+	fmt.Println()
 	fmt.Println("Total A Records:", len(getDNSRecords()))
 	fmt.Println("Total DNS Servers:", len(getDNSServers()))
-
-	fmt.Println("Total queries received:", "N/A")
-	fmt.Println("Total queries answered:", "N/A")
-	fmt.Println("Total queries forwarded:", "N/A")
+	// fmt.Println("Total Cache Records:", len(getCacheRecords()))
+	fmt.Println()
+	fmt.Println("Total queries received:", dnsStats.TotalQueries)
+	fmt.Println("Total queries answered:", dnsStats.TotalQueriesAnswered)
+	fmt.Println("Total cache hits:", dnsStats.TotalCacheHits)
+	fmt.Println("Total queries forwarded:", dnsStats.TotalQueriesForwarded)
 }
 
 func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
 	response := new(dns.Msg)
 	response.SetReply(request)
 	response.Authoritative = false
+	dnsStats.TotalQueries++
 
 	for _, question := range request.Question {
 		handleQuestion(question, response)
@@ -108,6 +209,7 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 		} else {
 			cachedRecord = findCacheRecord(cacheRecords, question.Name, recordType)
 			if cachedRecord != nil {
+				dnsStats.TotalCacheHits++
 				processCacheRecord(question, cachedRecord, response)
 			} else {
 				handleDNSServers(question, dnsServers, fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
@@ -116,8 +218,8 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 
 	default:
 		handleDNSServers(question, dnsServers, fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
-
 	}
+	dnsStats.TotalQueriesAnswered++
 }
 
 func handleAQuestion() {
