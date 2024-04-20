@@ -113,3 +113,14 @@ func addToCache(cacheRecords []CacheRecord, record *dns.RR) []CacheRecord {
 	saveCacheRecords(cacheRecords)
 	return cacheRecords
 }
+
+func processCachedRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
+	response.Answer = append(response.Answer, *cachedRecord)
+	response.Authoritative = true
+	fmt.Printf("Query: %s, Reply: %s, Method: records.json\n", question.Name, (*cachedRecord).String())
+}
+
+func processCacheRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
+	response.Answer = append(response.Answer, *cachedRecord)
+	fmt.Printf("Query: %s, Reply: %s, Method: cache.json\n", question.Name, (*cachedRecord).String())
+}

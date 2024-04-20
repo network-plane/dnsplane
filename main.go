@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,7 +17,6 @@ func main() {
 	dns.HandleFunc(".", handleRequest)
 
 	dnsServerSettings = getSettings()
-
 	server := &dns.Server{
 		Addr: ":53",
 		Net:  "udp",
@@ -34,6 +32,8 @@ func main() {
 		}
 	}()
 
+	var currentContext string
+	// Setup configuration for readline
 	config := readline.Config{
 		Prompt:          "> ",
 		HistoryFile:     "/tmp/readline_history.tmp",
@@ -48,228 +48,121 @@ func main() {
 	}
 	defer rl.Close()
 
-	// Command auto-completion setup
-	rl.Config.AutoComplete = readline.NewPrefixCompleter(
-		readline.PcItem("stats"),
-		readline.PcItem("exit"),
-		readline.PcItem("quit"),
-		readline.PcItem("q"),
-		readline.PcItem("help"),
-		readline.PcItem("h"),
-		readline.PcItem("?"),
-	)
+	// Set up command auto-completion
+	setupAutocomplete(rl, currentContext)
 
 	for {
+		updatePrompt(rl, currentContext) // Update the prompt based on context
 		command, err := rl.Readline()
 		if err != nil { // Handle EOF or interrupt
 			break
 		}
-		fullCommand := strings.Fields(command)
 		command = strings.TrimSpace(command)
+		args := strings.Fields(command)
 
-		if len(fullCommand) > 0 {
-			// Retrieve only the first word (command)
-			command = fullCommand[0]
-		} else {
-			// No input or only spaces were entered
+		if len(args) == 0 {
 			continue
 		}
 
-		switch command {
-		case "stats":
-			showStats()
-		case "add":
-			//add DNS record
-			if len(fullCommand) > 1 && fullCommand[1] == "?" {
-				fmt.Println("Enter the DNS record in the format: Name Type Value TTL")
-				fmt.Println("Example: example.com A 127.0.0.1 3600")
-				continue
+		if currentContext == "" {
+			// Handle global commands
+			switch args[0] {
+			case "stats":
+				handleStats()
+			case "record":
+				if len(args) > 1 {
+					handleRecord(args, currentContext)
+				} else {
+					currentContext = "record"
+					setupAutocomplete(rl, currentContext)
+				}
+			case "cache":
+				if len(args) > 1 {
+					handleCache(args, currentContext)
+				} else {
+					currentContext = "cache"
+					setupAutocomplete(rl, currentContext)
+				}
+			case "dns":
+				if len(args) > 1 {
+					handleDNS(args, currentContext)
+				} else {
+					currentContext = "dns"
+					setupAutocomplete(rl, currentContext)
+				}
+			case "server":
+				if len(args) > 1 {
+					handleServer(args, currentContext)
+				} else {
+					currentContext = "server"
+					setupAutocomplete(rl, currentContext)
+				}
+			case "exit", "quit", "q":
+				fmt.Println("Shutting down.")
+				os.Exit(1)
+				return
+			case "help", "h", "?":
+				mainHelp()
+			default:
+				fmt.Println("Unknown command:", args[0])
 			}
-
-			if len(fullCommand) != 5 {
-				fmt.Println("Invalid DNS record format. Please enter the DNS record in the format: Name Type Value TTL")
-				continue
-			}
-
-			//check if type (fullCommand[2]) is valid for DNS type
-			if _, ok := dns.StringToType[fullCommand[2]]; !ok {
-				fmt.Println("Invalid DNS record type. Please enter a valid DNS record type.")
-				continue
-			}
-
-			ttl64, err := strconv.ParseUint(fullCommand[4], 10, 32)
-			if err != nil {
-				fmt.Println("Invalid TTL value. Please enter a valid TTL value.")
-				continue
-			}
-			ttl := uint32(ttl64)
-
-			dnsRecord := DNSRecord{
-				Name:  fullCommand[1],
-				Type:  fullCommand[2],
-				Value: fullCommand[3],
-				TTL:   ttl,
-			}
-
-			fmt.Println("Adding DNS record:", dnsRecord)
-
-		case "exit", "quit", "q":
-			fmt.Println("Shutting down.")
-			return
-		case "":
-			continue
-		case "help", "h", "?":
-			fmt.Println("Available commands:")
-			fmt.Println("  stats - Show server statistics")
-			fmt.Println("  exit, quit, q - Shutdown the server")
-			fmt.Println("  help, h, ? - Show help")
-		default:
-			if command != "" {
-				fmt.Println("Unknown command:", command)
-			}
-		}
-	}
-}
-
-// serverUpTimeFormat formats the time duration since the server start time into a human-readable string.
-func serverUpTimeFormat(startTime time.Time) string {
-	duration := time.Since(startTime)
-
-	days := duration / (24 * time.Hour)
-	duration -= days * 24 * time.Hour
-	hours := duration / time.Hour
-	duration -= hours * time.Hour
-	minutes := duration / time.Minute
-	duration -= minutes * time.Minute
-	seconds := duration / time.Second
-
-	if days > 0 {
-		return fmt.Sprintf("%d days, %d hours, %d minutes, %d seconds", days, hours, minutes, seconds)
-	}
-	if hours > 0 {
-		return fmt.Sprintf("%d hours, %d minutes, %d seconds", hours, minutes, seconds)
-	}
-	if minutes > 0 {
-		return fmt.Sprintf("%d minutes, %d seconds", minutes, seconds)
-	}
-	return fmt.Sprintf("%d seconds", seconds)
-}
-
-func showStats() {
-	// Implement this function based on your needs
-	fmt.Println("Stats:")
-	fmt.Println("Server start time:", dnsStats.ServerStartTime)
-	fmt.Println("Server Up Time:", serverUpTimeFormat(dnsStats.ServerStartTime))
-	fmt.Println()
-	fmt.Println("Total A Records:", len(getDNSRecords()))
-	fmt.Println("Total DNS Servers:", len(getDNSServers()))
-	// fmt.Println("Total Cache Records:", len(getCacheRecords()))
-	fmt.Println()
-	fmt.Println("Total queries received:", dnsStats.TotalQueries)
-	fmt.Println("Total queries answered:", dnsStats.TotalQueriesAnswered)
-	fmt.Println("Total cache hits:", dnsStats.TotalCacheHits)
-	fmt.Println("Total queries forwarded:", dnsStats.TotalQueriesForwarded)
-}
-
-func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
-	response := new(dns.Msg)
-	response.SetReply(request)
-	response.Authoritative = false
-	dnsStats.TotalQueries++
-
-	for _, question := range request.Question {
-		handleQuestion(question, response)
-	}
-
-	err := writer.WriteMsg(response)
-	if err != nil {
-		log.Println("Error writing response:", err)
-	}
-}
-
-func handleQuestion(question dns.Question, response *dns.Msg) {
-	dnsRecords := getDNSRecords()
-	dnsServers := getDNSServers()
-	cacheRecords, err := getCacheRecords()
-	if err != nil {
-		log.Println("Error getting cache records:", err)
-	}
-
-	switch question.Qtype {
-	case dns.TypePTR:
-		handlePTRQuestion(question, response)
-		return
-
-	case dns.TypeA:
-		recordType := dns.TypeToString[question.Qtype]
-		cachedRecord := findRecord(dnsRecords, question.Name, recordType)
-
-		if cachedRecord != nil {
-			processCachedRecord(question, cachedRecord, response)
 		} else {
-			cachedRecord = findCacheRecord(cacheRecords, question.Name, recordType)
-			if cachedRecord != nil {
-				dnsStats.TotalCacheHits++
-				processCacheRecord(question, cachedRecord, response)
-			} else {
-				handleDNSServers(question, dnsServers, fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+			// Handle subcommands
+			switch currentContext {
+			case "record":
+				if args[0] == "/" {
+					// Exit from record context
+					currentContext = ""
+					setupAutocomplete(rl, currentContext)
+				} else {
+					handleRecord(args, currentContext) // Process record subcommands
+				}
+			case "cache":
+				if args[0] == "/" {
+					currentContext = ""
+					setupAutocomplete(rl, currentContext) // Change context back to global
+				} else {
+					handleCache(args, currentContext)
+				}
+			case "dns":
+				if args[0] == "/" {
+					currentContext = ""
+					setupAutocomplete(rl, currentContext)
+				} else {
+					handleDNS(args, currentContext)
+				}
+			case "server":
+				if args[0] == "/" {
+					currentContext = ""
+					setupAutocomplete(rl, currentContext)
+				} else {
+					handleServer(args, currentContext)
+				}
+			default:
+				fmt.Println("Unknown server subcommand:", args[1])
 			}
 		}
 
-	default:
-		handleDNSServers(question, dnsServers, fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+		// switch args[0] {
+		// case "stats":
+		// 	handleStats()
+		// case "record":
+		// 	handleRecord(args)
+		// case "cache":
+		// 	handleCache(args)
+		// case "dns":
+		// 	handleDNS(args)
+		// case "server":
+		// 	handleServer(args)
+		// case "exit", "quit", "q":
+		// 	fmt.Println("Shutting down.")
+		// 	return
+		// case "help", "h", "?":
+		// 	mainHelp()
+		// default:
+		// 	fmt.Println("Unknown command:", args[0])
+		// }
 	}
-	dnsStats.TotalQueriesAnswered++
-}
-
-func handleAQuestion() {
-
-}
-
-func handlePTRQuestion(question dns.Question, response *dns.Msg) {
-	ipAddr := convertReverseDNSToIP(question.Name)
-	dnsRecords := getDNSRecords()
-	recordType := dns.TypeToString[question.Qtype]
-
-	rrPointer := findRecord(dnsRecords, ipAddr, recordType)
-	if rrPointer != nil {
-		ptrRecord, ok := (*rrPointer).(*dns.PTR)
-		if !ok {
-			// Handle the case where the record is not a PTR record or cannot be cast
-			log.Println("Found record is not a PTR record or cannot be cast to *dns.PTR")
-			return
-		}
-
-		ptrDomain := ptrRecord.Ptr
-		if !strings.HasSuffix(ptrDomain, ".") {
-			ptrDomain += "."
-		}
-
-		// Now use ptrDomain in the sprintf, ensuring only one trailing dot is present
-		rrString := fmt.Sprintf("%s PTR %s", question.Name, ptrDomain)
-		rr, err := dns.NewRR(rrString)
-		if err == nil {
-			response.Answer = append(response.Answer, rr)
-		} else {
-			// Log the error
-			log.Printf("Error creating PTR record: %s\n", err)
-		}
-
-	} else {
-		fmt.Println("PTR record not found in records.json")
-		handleDNSServers(question, getDNSServers(), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
-	}
-}
-
-func processCachedRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
-	response.Answer = append(response.Answer, *cachedRecord)
-	response.Authoritative = true
-	fmt.Printf("Query: %s, Reply: %s, Method: records.json\n", question.Name, (*cachedRecord).String())
-}
-
-func processCacheRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
-	response.Answer = append(response.Answer, *cachedRecord)
-	fmt.Printf("Query: %s, Reply: %s, Method: cache.json\n", question.Name, (*cachedRecord).String())
 }
 
 func processAuthoritativeAnswer(question dns.Question, answer *dns.Msg, response *dns.Msg) {
@@ -306,16 +199,6 @@ func handleFallbackServer(question dns.Question, fallbackServer string, response
 	} else {
 		fmt.Printf("Query: %s, No response\n", question.Name)
 	}
-}
-
-func dnsRecordToRR(dnsRecord *DNSRecord, ttl uint32) *dns.RR {
-	recordString := fmt.Sprintf("%s %d IN %s %s", dnsRecord.Name, ttl, dnsRecord.Type, dnsRecord.Value)
-	rr, err := dns.NewRR(recordString)
-	if err != nil {
-		log.Printf("Error converting DnsRecord to dns.RR: %s\n", err)
-		return nil
-	}
-	return &rr
 }
 
 func initializeJSONFiles() {
