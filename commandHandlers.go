@@ -30,7 +30,7 @@ func handleRecord(args []string, currentContext string) {
 	case "update":
 		// updateRecord(args)
 	case "list":
-		// listRecords()
+		listRecords()
 	case "clear":
 		// clearRecords()
 	case "test":
