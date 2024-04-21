@@ -4,200 +4,66 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/bettercap/readline"
+	cli "github.com/jawher/mow.cli"
 	"github.com/miekg/dns"
 )
 
 func main() {
-	initializeJSONFiles()
+	app := cli.App("dnsapp", "DNS Server with optional CLI mode")
 
-	dns.HandleFunc(".", handleRequest)
+	// Command-line options
+	daemon := app.BoolOpt("d daemon", false, "Run as daemon (no interactive mode)")
+	port := app.StringOpt("p port", "53", "Port for DNS server")
 
-	dnsServerSettings = getSettings()
-	server := &dns.Server{
-		Addr: ":53",
-		Net:  "udp",
-	}
+	app.Action = func() {
+		initializeJSONFiles()
 
-	go func() {
-		log.Printf("Starting DNS server on %s\n", server.Addr)
-		dnsStats.ServerStartTime = time.Now()
-		err := server.ListenAndServe()
-		if err != nil {
-			fmt.Println("Error starting server:", err)
-			os.Exit(1)
-		}
-	}()
+		dns.HandleFunc(".", handleRequest)
 
-	var currentContext string
-	// Setup configuration for readline
-	config := readline.Config{
-		Prompt:          "> ",
-		HistoryFile:     "/tmp/readline_history.tmp",
-		InterruptPrompt: "^C",
-		EOFPrompt:       "exit",
-	}
-
-	rl, err := readline.NewEx(&config)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "readline: %v\n", err)
-		return
-	}
-	defer rl.Close()
-
-	// Set up command auto-completion
-	setupAutocomplete(rl, currentContext)
-
-	for {
-		updatePrompt(rl, currentContext) // Update the prompt based on context
-		command, err := rl.Readline()
-		if err != nil { // Handle EOF or interrupt
-			break
-		}
-		command = strings.TrimSpace(command)
-		args := strings.Fields(command)
-
-		if len(args) == 0 {
-			continue
+		dnsServerSettings = getSettings()
+		server := &dns.Server{
+			Addr: fmt.Sprintf(":%s", *port),
+			Net:  "udp",
 		}
 
-		if currentContext == "" {
-			// Handle global commands
-			switch args[0] {
-			case "stats":
-				handleStats()
-			case "record":
-				if len(args) > 1 {
-					handleRecord(args, currentContext)
-				} else {
-					currentContext = "record"
-					setupAutocomplete(rl, currentContext)
-				}
-			case "cache":
-				if len(args) > 1 {
-					handleCache(args, currentContext)
-				} else {
-					currentContext = "cache"
-					setupAutocomplete(rl, currentContext)
-				}
-			case "dns":
-				if len(args) > 1 {
-					handleDNS(args, currentContext)
-				} else {
-					currentContext = "dns"
-					setupAutocomplete(rl, currentContext)
-				}
-			case "server":
-				if len(args) > 1 {
-					handleServer(args, currentContext)
-				} else {
-					currentContext = "server"
-					setupAutocomplete(rl, currentContext)
-				}
-			case "exit", "quit", "q":
-				fmt.Println("Shutting down.")
+		go func() {
+			log.Printf("Starting DNS server on %s\n", server.Addr)
+			dnsStats.ServerStartTime = time.Now()
+			if err := server.ListenAndServe(); err != nil {
+				fmt.Println("Error starting server:", err)
 				os.Exit(1)
-				return
-			case "help", "h", "?":
-				mainHelp()
-			default:
-				fmt.Println("Unknown command:", args[0])
 			}
+		}()
+
+		// If running in daemon mode, exit after starting the server
+		if *daemon {
+			select {} // Keeps the program alive
 		} else {
-			// Handle subcommands
-			switch currentContext {
-			case "record":
-				if args[0] == "/" {
-					// Exit from record context
-					currentContext = ""
-					setupAutocomplete(rl, currentContext)
-				} else {
-					handleRecord(args, currentContext) // Process record subcommands
-				}
-			case "cache":
-				if args[0] == "/" {
-					currentContext = ""
-					setupAutocomplete(rl, currentContext) // Change context back to global
-				} else {
-					handleCache(args, currentContext)
-				}
-			case "dns":
-				if args[0] == "/" {
-					currentContext = ""
-					setupAutocomplete(rl, currentContext)
-				} else {
-					handleDNS(args, currentContext)
-				}
-			case "server":
-				if args[0] == "/" {
-					currentContext = ""
-					setupAutocomplete(rl, currentContext)
-				} else {
-					handleServer(args, currentContext)
-				}
-			default:
-				fmt.Println("Unknown server subcommand:", args[1])
+			// Interactive Mode
+			config := readline.Config{
+				Prompt:          "> ",
+				HistoryFile:     "/tmp/readline_history.tmp",
+				InterruptPrompt: "^C",
+				EOFPrompt:       "exit",
 			}
+
+			rl, err := readline.NewEx(&config)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "readline: %v\n", err)
+				return
+			}
+			defer rl.Close()
+
+			handleCommandLoop(rl) // Call the function for command handling
 		}
-
-		// switch args[0] {
-		// case "stats":
-		// 	handleStats()
-		// case "record":
-		// 	handleRecord(args)
-		// case "cache":
-		// 	handleCache(args)
-		// case "dns":
-		// 	handleDNS(args)
-		// case "server":
-		// 	handleServer(args)
-		// case "exit", "quit", "q":
-		// 	fmt.Println("Shutting down.")
-		// 	return
-		// case "help", "h", "?":
-		// 	mainHelp()
-		// default:
-		// 	fmt.Println("Unknown command:", args[0])
-		// }
 	}
-}
 
-func processAuthoritativeAnswer(question dns.Question, answer *dns.Msg, response *dns.Msg) {
-	response.Answer = append(response.Answer, answer.Answer...)
-	response.Authoritative = true
-	fmt.Printf("Query: %s, Reply: %s, Method: DNS server: %s\n", question.Name, answer.Answer[0].String(), answer.Answer[0].Header().Name[:len(answer.Answer[0].Header().Name)-1])
-
-	// Cache the authoritative answers
-	cacheRecords, err := getCacheRecords()
+	err := app.Run(os.Args)
 	if err != nil {
-		log.Println("Error getting cache records:", err)
-	}
-	for _, authoritativeAnswer := range answer.Answer {
-		cacheRecords = addToCache(cacheRecords, &authoritativeAnswer)
-	}
-	saveCacheRecords(cacheRecords)
-}
-
-func handleFallbackServer(question dns.Question, fallbackServer string, response *dns.Msg) {
-	fallbackResponse, _ := queryAuthoritative(question.Name, fallbackServer)
-	if fallbackResponse != nil {
-		response.Answer = append(response.Answer, fallbackResponse.Answer...)
-		fmt.Printf("Query: %s, Reply: %s, Method: Fallback DNS server: %s\n", question.Name, fallbackResponse.Answer[0].String(), fallbackServer)
-
-		// Cache the fallback server answers
-		cacheRecords, err := getCacheRecords()
-		if err != nil {
-			log.Println("Error getting cache records:", err)
-		}
-		for _, fallbackAnswer := range fallbackResponse.Answer {
-			cacheRecords = addToCache(cacheRecords, &fallbackAnswer)
-		}
-		saveCacheRecords(cacheRecords)
-	} else {
-		fmt.Printf("Query: %s, No response\n", question.Name)
+		log.Fatal(err)
 	}
 }
 
