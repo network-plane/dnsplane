@@ -5,6 +5,7 @@ import "time"
 var (
 	dnsServerSettings DNSServerSettings
 	dnsStats          DNSStats
+	appversion        = "0.1.1"
 )
 
 // DNSStats holds the data for the DNS statistics
