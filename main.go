@@ -15,6 +15,7 @@ import (
 
 func main() {
 	app := cli.App("dnsapp", "DNS Server with optional CLI mode")
+	app.Version("v version", fmt.Sprintf("DNS Resolver %s", appversion))
 
 	// Command-line options
 	daemon := app.BoolOpt("d daemon", false, "Run as daemon (no interactive mode)")
