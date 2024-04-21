@@ -4,6 +4,7 @@ go 1.19
 
 require (
 	github.com/bettercap/readline v0.0.0-20210228151553-655e48bcb7bf
+	github.com/jawher/mow.cli v1.2.0
 	github.com/miekg/dns v1.1.58
 )
 
