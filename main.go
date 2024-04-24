@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bettercap/readline"
+	"github.com/gin-gonic/gin"
 	cli "github.com/jawher/mow.cli"
 	"github.com/miekg/dns"
 )
@@ -22,11 +23,17 @@ func main() {
 	port := app.StringOpt("p port", "53", "Port for DNS server")
 	remoteUnix := app.StringOpt("u remote-unix", "/tmp/dnsresolver.socket", "Path to UNIX domain socket")
 	clientMode := app.BoolOpt("c client-mode", false, "Run in client mode (connect to UNIX socket)")
+	apiMode := app.BoolOpt("a api", false, "Enable the REST API")
+	apiport := app.StringOpt("apiport", "8080", "Port for the REST API")
 
 	app.Action = func() {
 		if *clientMode && *remoteUnix != "" {
 			connectToUnixSocket(*remoteUnix) // Connect to UNIX socket as client
 			return
+		}
+
+		if *apiMode {
+			go startGinAPI(*apiport) // Start the REST API
 		}
 
 		initializeJSONFiles()
@@ -59,7 +66,7 @@ func main() {
 			// Interactive Mode
 			config := readline.Config{
 				Prompt:          "> ",
-				HistoryFile:     "/tmp/readline_history.tmp",
+				HistoryFile:     "/tmp/dnsresolver.history",
 				InterruptPrompt: "^C",
 				EOFPrompt:       "exit",
 			}
@@ -78,6 +85,20 @@ func main() {
 	err := app.Run(os.Args)
 	if err != nil {
 		log.Fatal(err)
+	}
+}
+
+func startGinAPI(apiport string) {
+	// Create a Gin router
+	r := gin.Default()
+
+	// Add routes for the API
+	r.GET("/dns/records", listRecordsGin) // List all DNS records
+	r.POST("/dns/records", addRecordGin)  // Add a new DNS record
+
+	// Start the server
+	if err := r.Run(fmt.Sprintf(":", apiport)); err != nil {
+		log.Fatal("Error starting API:", err)
 	}
 }
 
