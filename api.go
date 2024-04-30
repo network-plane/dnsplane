@@ -1,6 +1,11 @@
 package main
 
-import "github.com/gin-gonic/gin"
+import (
+	"fmt"
+	"log"
+
+	"github.com/gin-gonic/gin"
+)
 
 // Wrapper for existing addRecord function
 func addRecordGin(c *gin.Context) {
@@ -20,4 +25,18 @@ func listRecordsGin(c *gin.Context) {
 	// Call the existing listRecords function
 	listRecords()
 	c.JSON(200, gin.H{"status": "Listed"})
+}
+
+func startGinAPI(apiport string) {
+	// Create a Gin router
+	r := gin.Default()
+
+	// Add routes for the API
+	r.GET("/dns/records", listRecordsGin) // List all DNS records
+	r.POST("/dns/records", addRecordGin)  // Add a new DNS record
+
+	// Start the server
+	if err := r.Run(fmt.Sprintf(":%s", apiport)); err != nil {
+		log.Fatal("Error starting API:", err)
+	}
 }
