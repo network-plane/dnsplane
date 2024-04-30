@@ -54,3 +54,13 @@ func listRecords() {
 		fmt.Println(record)
 	}
 }
+
+func removeRecord(fullCommand []string) {
+	if len(fullCommand) < 2 {
+		fmt.Println("Please specify the record to remove.")
+		return
+	}
+
+	// Remove A Record from dnsRecord
+	fmt.Println("Removing DNS record:", fullCommand[1])
+}
