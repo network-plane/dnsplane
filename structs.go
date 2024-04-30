@@ -5,6 +5,7 @@ import "time"
 var (
 	dnsServerSettings DNSServerSettings
 	dnsStats          DNSStats
+	dnsRecords        []DNSRecord
 	appversion        = "0.1.1"
 )
 
