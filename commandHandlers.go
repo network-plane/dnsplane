@@ -36,7 +36,7 @@ func handleRecord(args []string, currentContext string) {
 	case "test":
 		// testRecord(args)
 	case "load":
-		// loadRecords(args)
+		loadDNSRecords()
 	case "save":
 		// saveRecords(args)
 	case "?":
