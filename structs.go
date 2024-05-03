@@ -5,7 +5,9 @@ import "time"
 var (
 	dnsServerSettings DNSServerSettings
 	dnsStats          DNSStats
-	appversion        = "0.1.1"
+	dnsRecords        []DNSRecord
+	cacheRecords      []CacheRecord
+	appversion        = "0.1.2"
 )
 
 // DNSStats holds the data for the DNS statistics
@@ -44,9 +46,9 @@ type Servers struct {
 }
 
 // Records holds the data for the DNS records
-type Records struct {
-	Records []DNSRecord `json:"records"`
-}
+// type Records struct {
+// 	Records []DNSRecord `json:"records"`
+// }
 
 // CacheRecord holds the data for the cache records
 type CacheRecord struct {
