@@ -25,13 +25,6 @@ func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
 }
 
 func handleQuestion(question dns.Question, response *dns.Msg) {
-	dnsRecords := loadDNSRecords()
-	dnsServers := loadDNSServers()
-	cacheRecords, err := getCacheRecords()
-	if err != nil {
-		log.Println("Error getting cache records:", err)
-	}
-
 	switch question.Qtype {
 	case dns.TypePTR:
 		handlePTRQuestion(question, response)
@@ -94,7 +87,7 @@ func handlePTRQuestion(question dns.Question, response *dns.Msg) {
 
 	} else {
 		fmt.Println("PTR record not found in records.json")
-		handleDNSServers(question, getDNSServers(), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+		handleDNSServers(question, loadDNSServers(), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 	}
 }
 
@@ -113,14 +106,6 @@ func processAuthoritativeAnswer(question dns.Question, answer *dns.Msg, response
 	response.Authoritative = true
 	fmt.Printf("Query: %s, Reply: %s, Method: DNS server: %s\n", question.Name, answer.Answer[0].String(), answer.Answer[0].Header().Name[:len(answer.Answer[0].Header().Name)-1])
 
-	// Cache the authoritative answers
-	cacheRecords, err := getCacheRecords()
-	if err != nil {
-		log.Println("Error getting cache records:", err)
-	}
-	for _, authoritativeAnswer := range answer.Answer {
-		cacheRecords = addToCache(cacheRecords, &authoritativeAnswer)
-	}
 	saveCacheRecords(cacheRecords)
 }
 
@@ -130,14 +115,6 @@ func handleFallbackServer(question dns.Question, fallbackServer string, response
 		response.Answer = append(response.Answer, fallbackResponse.Answer...)
 		fmt.Printf("Query: %s, Reply: %s, Method: Fallback DNS server: %s\n", question.Name, fallbackResponse.Answer[0].String(), fallbackServer)
 
-		// Cache the fallback server answers
-		cacheRecords, err := getCacheRecords()
-		if err != nil {
-			log.Println("Error getting cache records:", err)
-		}
-		for _, fallbackAnswer := range fallbackResponse.Answer {
-			cacheRecords = addToCache(cacheRecords, &fallbackAnswer)
-		}
 		saveCacheRecords(cacheRecords)
 	} else {
 		fmt.Printf("Query: %s, No response\n", question.Name)
