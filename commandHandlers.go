@@ -24,17 +24,15 @@ func handleRecord(args []string, currentContext string) {
 
 	switch args[argPos] {
 	case "add":
-		addRecord(args)
+		addDNSRecord(args)
 	case "remove":
-		removeRecord(args)
+		removeDNSRecord(args)
 	case "update":
 		// updateRecord(args)
 	case "list":
 		listRecords()
 	case "clear":
-		// clearRecords()
-	case "test":
-		// testRecord(args)
+		clearDNSRecords()
 	case "load":
 		loadDNSRecords()
 	case "save":

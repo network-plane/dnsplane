@@ -7,7 +7,7 @@ import (
 	"github.com/miekg/dns"
 )
 
-func addRecord(fullCommand []string) {
+func addDNSRecord(fullCommand []string) {
 
 	if len(fullCommand) > 1 && fullCommand[1] == "?" {
 		fmt.Println("Enter the DNS record in the format: Name Type Value TTL")
@@ -87,7 +87,7 @@ func listRecords() {
 	}
 }
 
-func removeRecord(fullCommand []string) {
+func removeDNSRecord(fullCommand []string) {
 	if len(fullCommand) > 1 && fullCommand[1] == "?" {
 		fmt.Println("Enter the DNS record in the format: Name Type Value TTL")
 		fmt.Println("Example: example.com A")
@@ -177,4 +177,9 @@ func removeAndPrint(record DNSRecord) {
 			return
 		}
 	}
+}
+
+func clearDNSRecords() {
+	dnsRecords = []DNSRecord{}
+	fmt.Println("All records cleared.")
 }
