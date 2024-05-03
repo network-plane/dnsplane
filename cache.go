@@ -11,37 +11,13 @@ import (
 	"github.com/miekg/dns"
 )
 
-func getCacheRecords() ([]CacheRecord, error) {
-	var cacheRecords []CacheRecord
-	var records Records
-
-	data, err := os.ReadFile("cache.json")
-	if err != nil {
-		return cacheRecords, err
-	}
-
-	err = json.Unmarshal(data, &records)
-	if err != nil {
-		return cacheRecords, err
-	}
-
-	cacheRecords = make([]CacheRecord, len(records.Records))
-	for i, record := range records.Records {
-		cacheRecords[i].DNSRecord = record
-		cacheRecords[i].Timestamp = time.Now()
-		cacheRecords[i].Expiry = record.LastQuery.Add(time.Duration(record.TTL) * time.Second)
-	}
-	return cacheRecords, nil
-}
-
 func saveCacheRecords(cacheRecords []CacheRecord) {
-	records := Records{Records: make([]DNSRecord, len(cacheRecords))}
 	for i, cacheRecord := range cacheRecords {
-		records.Records[i] = cacheRecord.DNSRecord
-		records.Records[i].TTL = uint32(cacheRecord.Expiry.Sub(cacheRecord.Timestamp).Seconds())
-		records.Records[i].LastQuery = cacheRecord.LastQuery
+		dnsRecords[i] = cacheRecord.DNSRecord
+		dnsRecords[i].TTL = uint32(cacheRecord.Expiry.Sub(cacheRecord.Timestamp).Seconds())
+		dnsRecords[i].LastQuery = cacheRecord.LastQuery
 	}
-	data, err := json.MarshalIndent(records, "", "  ")
+	data, err := json.MarshalIndent(dnsRecords, "", "  ")
 	if err != nil {
 		log.Println("Error marshalling cache records:", err)
 		return
