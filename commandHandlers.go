@@ -37,6 +37,8 @@ func handleRecord(args []string, currentContext string) {
 		// testRecord(args)
 	case "load":
 		// loadRecords(args)
+	case "save":
+		// saveRecords(args)
 	case "?":
 		recordHelp()
 	default:
