@@ -18,14 +18,14 @@ func main() {
 	app.Version("v version", fmt.Sprintf("DNS Resolver %s", appversion))
 
 	// Command-line options
-	daemon := app.BoolOpt("d daemon", false, "Run as daemon (no interactive mode)")
-	port := app.StringOpt("p port", "53", "Port for DNS server")
-	remoteUnix := app.StringOpt("u remote-unix", "/tmp/dnsresolver.socket", "Path to UNIX domain socket")
-	clientMode := app.BoolOpt("c client-mode", false, "Run in client mode (connect to UNIX socket)")
-	apiMode := app.BoolOpt("a api", false, "Enable the REST API")
+	daemon := app.BoolOpt("daemon", false, "Run as daemon (no interactive mode)")
+	port := app.StringOpt("port", "53", "Port for DNS server")
+	remoteUnix := app.StringOpt("remote-unix", "/tmp/dnsresolver.socket", "Path to UNIX domain socket")
+	clientMode := app.BoolOpt("client-mode", false, "Run in client mode (connect to UNIX socket)")
+	apiMode := app.BoolOpt("api", false, "Enable the REST API")
 	apiport := app.StringOpt("apiport", "8080", "Port for the REST API")
-	mdnsMode := app.BoolOpt("m mdns", false, "Enable mDNS server")
-	mdnsPort := app.StringOpt("m mdns-port", "5353", "Port for mDNS server")
+	mdnsMode := app.BoolOpt("mdns", false, "Enable mDNS server")
+	mdnsPort := app.StringOpt("mdns-port", "5353", "Port for mDNS server")
 
 	app.Action = func() {
 		//if we run in client mode we dont need to run the rest of the code
