@@ -24,21 +24,29 @@ func main() {
 	clientMode := app.BoolOpt("c client-mode", false, "Run in client mode (connect to UNIX socket)")
 
 	app.Action = func() {
+		//if we run in client mode we dont need to run the rest of the code
 		if *clientMode && *remoteUnix != "" {
 			connectToUnixSocket(*remoteUnix) // Connect to UNIX socket as client
 			return
 		}
 
+		//Create JSON files if they don't exist
 		initializeJSONFiles()
 
+		//Load Data
+		dnsRecords = loadDNSRecords()
+		dnsServerSettings = loadSettings()
+
+		// Set up the DNS server handler
 		dns.HandleFunc(".", handleRequest)
 
-		dnsServerSettings = getSettings()
+		// Configure the DNS server settings
 		server := &dns.Server{
 			Addr: fmt.Sprintf(":%s", *port),
 			Net:  "udp",
 		}
 
+		// Start the DNS server
 		go func() {
 			log.Printf("Starting DNS server on %s\n", server.Addr)
 			dnsStats.ServerStartTime = time.Now()
