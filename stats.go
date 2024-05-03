@@ -30,14 +30,13 @@ func serverUpTimeFormat(startTime time.Time) string {
 }
 
 func showStats() {
-	// Implement this function based on your needs
 	fmt.Println("Stats:")
 	fmt.Println("Server start time:", dnsStats.ServerStartTime)
 	fmt.Println("Server Up Time:", serverUpTimeFormat(dnsStats.ServerStartTime))
 	fmt.Println()
-	fmt.Println("Total A Records:", len(getDNSRecords()))
-	fmt.Println("Total DNS Servers:", len(getDNSServers()))
-	// fmt.Println("Total Cache Records:", len(getCacheRecords()))
+	fmt.Println("Total Records:", len(dnsRecords))
+	fmt.Println("Total DNS Servers:", len(loadDNSServers()))
+	fmt.Println("Total Cache Records:", len(cacheRecords))
 	fmt.Println()
 	fmt.Println("Total queries received:", dnsStats.TotalQueries)
 	fmt.Println("Total queries answered:", dnsStats.TotalQueriesAnswered)
