@@ -4,6 +4,7 @@ import "time"
 
 var (
 	dnsServerSettings DNSServerSettings
+	dnsServers        []string
 	dnsStats          DNSStats
 	dnsRecords        []DNSRecord
 	cacheRecords      []CacheRecord

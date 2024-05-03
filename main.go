@@ -41,6 +41,8 @@ func main() {
 		//Load Data
 		dnsRecords = loadDNSRecords()
 		dnsServerSettings = loadSettings()
+		cacheRecords = loadCacheRecords()
+		dnsServers = loadDNSServers()
 
 		// Set up the DNS server handler
 		dns.HandleFunc(".", handleRequest)
@@ -97,7 +99,7 @@ func main() {
 func initializeJSONFiles() {
 
 	if _, err := os.Stat("records.json"); os.IsExist(err) {
-		dnsRecords = getDNSRecords()
+		dnsRecords = loadDNSRecords()
 	}
 
 	fmt.Println("records loaded: ", len(dnsRecords))
