@@ -136,13 +136,6 @@ func startMDNSServer(port string) {
 }
 
 func initializeJSONFiles() {
-
-	if _, err := os.Stat("records.json"); os.IsExist(err) {
-		dnsRecords = loadDNSRecords()
-	}
-
-	fmt.Println("records loaded: ", len(dnsRecords))
-
 	createFileIfNotExists("servers.json", `{"servers": ["1.1.1.1:53", "1.0.0.1:53"]}`)
 	createFileIfNotExists("records.json", `{"records": [{"name": "example.com.", "type": "A", "value": "93.184.216.34", "ttl": 3600, "last_query": "0001-01-01T00:00:00Z"}]}`)
 	createFileIfNotExists("cache.json", `{"cache": [{"name": "example.com.","type": "A","value": "127.0.0.1","ttl": 300,"last_query": "0001-01-01T00:00:00Z"}]}`)
