@@ -25,8 +25,8 @@ func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
 }
 
 func handleQuestion(question dns.Question, response *dns.Msg) {
-	dnsRecords := getDNSRecords()
-	dnsServers := getDNSServers()
+	dnsRecords := loadDNSRecords()
+	dnsServers := loadDNSServers()
 	cacheRecords, err := getCacheRecords()
 	if err != nil {
 		log.Println("Error getting cache records:", err)
@@ -65,7 +65,7 @@ func handleAQuestion() {
 
 func handlePTRQuestion(question dns.Question, response *dns.Msg) {
 	ipAddr := convertReverseDNSToIP(question.Name)
-	dnsRecords := getDNSRecords()
+	dnsRecords := loadDNSRecords()
 	recordType := dns.TypeToString[question.Qtype]
 
 	rrPointer := findRecord(dnsRecords, ipAddr, recordType)
