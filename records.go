@@ -45,16 +45,6 @@ func addRecord(fullCommand []string) {
 	fmt.Println("Added:", dnsRecord)
 }
 
-// func listRecords() {
-// 	if len(dnsRecords) == 0 {
-// 		fmt.Println("No records found.")
-// 		return
-// 	}
-// 	for _, record := range dnsRecords {
-// 		fmt.Println(record)
-// 	}
-// }
-
 func listRecords() {
 	if len(dnsRecords) == 0 {
 		fmt.Println("No records found.")
@@ -98,46 +88,93 @@ func listRecords() {
 }
 
 func removeRecord(fullCommand []string) {
-	if len(fullCommand) < 2 {
-		fmt.Println("Please provide the name of the record to remove.")
+	if len(fullCommand) > 1 && fullCommand[1] == "?" {
+		fmt.Println("Enter the DNS record in the format: Name Type Value TTL")
+		fmt.Println("Example: example.com A")
 		return
 	}
 
-	nameToRemove := fullCommand[1]
-	typeToRemove := ""
-	valueToRemove := ""
-	ttlToRemove := ""
-
-	if len(fullCommand) > 2 {
-		typeToRemove = fullCommand[2]
-	}
-	if len(fullCommand) > 3 {
-		valueToRemove = fullCommand[3]
-	}
-	if len(fullCommand) > 4 {
-		ttlToRemove = fullCommand[4]
+	if len(fullCommand) < 2 {
+		fmt.Println("Please specify at least the record name.")
+		return
 	}
 
-	removed := false
+	name := fullCommand[1]
 
-	for i := len(dnsRecords) - 1; i >= 0; i-- {
-		record := dnsRecords[i]
-
-		if record.Name == nameToRemove && (typeToRemove == "" || record.Type == typeToRemove) &&
-			(valueToRemove == "" || record.Value == valueToRemove) &&
-			(ttlToRemove == "" || strconv.FormatUint(uint64(record.TTL), 10) == ttlToRemove) {
-
-			if !removed {
-				fmt.Println("Removed Records:")
-				removed = true
-			}
-			fmt.Println(record)
-			// Remove the record from dnsRecords
-			dnsRecords = append(dnsRecords[:i], dnsRecords[i+1:]...)
+	matchingRecords := []DNSRecord{}
+	for _, record := range dnsRecords {
+		if record.Name == name {
+			matchingRecords = append(matchingRecords, record)
 		}
 	}
 
-	if !removed {
-		fmt.Println("No matching records found for removal.")
+	if len(matchingRecords) == 0 {
+		fmt.Println("No records found with the name:", name)
+		return
+	}
+
+	if len(fullCommand) == 2 {
+		if len(matchingRecords) == 1 {
+			removeAndPrint(matchingRecords[0])
+			return
+		}
+		fmt.Println("Multiple records found with the name:", name)
+		for i, record := range matchingRecords {
+			fmt.Printf("%d. %v\n", i+1, record)
+		}
+		return
+	}
+
+	if len(fullCommand) < 4 {
+		fmt.Println("Please specify at least the record name and type.")
+		return
+	}
+
+	recordType := fullCommand[2]
+	if len(fullCommand) == 4 {
+		matchingTypeRecords := []DNSRecord{}
+		for _, record := range matchingRecords {
+			if record.Type == recordType {
+				matchingTypeRecords = append(matchingTypeRecords, record)
+			}
+		}
+		if len(matchingTypeRecords) == 1 {
+			removeAndPrint(matchingTypeRecords[0])
+		} else {
+			fmt.Println("Multiple records found with the same name and type:")
+			for i, record := range matchingTypeRecords {
+				fmt.Printf("%d. %v\n", i+1, record)
+			}
+		}
+		return
+	}
+
+	if len(fullCommand) == 5 {
+		value := fullCommand[3]
+		ttl64, err := strconv.ParseUint(fullCommand[4], 10, 32)
+		if err != nil {
+			fmt.Println("Invalid TTL value.")
+			return
+		}
+		ttl := uint32(ttl64)
+
+		for i, record := range dnsRecords {
+			if record.Name == name && record.Type == recordType && record.Value == value && record.TTL == ttl {
+				dnsRecords = append(dnsRecords[:i], dnsRecords[i+1:]...)
+				fmt.Println("Removed:", record)
+				return
+			}
+		}
+		fmt.Println("No record found with the specified details.")
+	}
+}
+
+func removeAndPrint(record DNSRecord) {
+	for i, r := range dnsRecords {
+		if r == record {
+			dnsRecords = append(dnsRecords[:i], dnsRecords[i+1:]...)
+			fmt.Println("Removed: ", record)
+			return
+		}
 	}
 }
