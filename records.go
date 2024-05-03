@@ -45,12 +45,11 @@ func addRecord(fullCommand []string) {
 }
 
 func listRecords() {
-	records := getDNSRecords()
-	if len(records) == 0 {
+	if len(dnsRecords) == 0 {
 		fmt.Println("No records found.")
 		return
 	}
-	for _, record := range records {
+	for _, record := range dnsRecords {
 		fmt.Println(record)
 	}
 }
