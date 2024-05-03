@@ -46,11 +46,6 @@ type Servers struct {
 	Servers []string `json:"servers"`
 }
 
-// Records holds the data for the DNS records
-// type Records struct {
-// 	Records []DNSRecord `json:"records"`
-// }
-
 // CacheRecord holds the data for the cache records
 type CacheRecord struct {
 	DNSRecord DNSRecord
