@@ -9,10 +9,7 @@ func mainHelp() {
 	fmt.Printf("%-15s %s\n", "cache", "- Cache Management")
 	fmt.Printf("%-15s %s\n", "dns", "- DNS Server Management")
 	fmt.Printf("%-15s %s\n", "server", "- Server Management")
-	fmt.Printf("%-15s %s\n", "save", "- Save the current settings")
-	fmt.Printf("%-15s %s\n", "reload", "- Reload the settings from the files")
-	fmt.Printf("%-15s %s\n", "exit, quit, q", "- Shutdown the server")
-	fmt.Printf("%-15s %s\n", "help, h, ?", "- Show help")
+	commonHelp()
 }
 
 func recordHelp() {
@@ -25,14 +22,14 @@ func recordHelp() {
 	fmt.Printf("%-15s %s\n", "test", "- Test a DNS record")
 	fmt.Printf("%-15s %s\n", "load", "- Load DNS records from a file")
 	fmt.Printf("%-15s %s\n", "save", "- Save DNS records to a file")
-	fmt.Printf("%-15s %s\n", "?", "- Show help")
+	commonHelp()
 }
 
 func cacheHelp() {
 	fmt.Println("Cache Management Sub Commands:")
 	fmt.Printf("%-15s %s\n", "clear", "- Clear the cache")
 	fmt.Printf("%-15s %s\n", "list", "- List all cache entries")
-	fmt.Printf("%-15s %s\n", "?", "- Show help")
+	commonHelp()
 }
 
 func dnsHelp() {
@@ -45,7 +42,7 @@ func dnsHelp() {
 	fmt.Printf("%-15s %s\n", "test", "- Test a DNS server")
 	fmt.Printf("%-15s %s\n", "load", "- Load DNS servers from a file")
 	fmt.Printf("%-15s %s\n", "save", "- Save DNS servers to a file")
-	fmt.Printf("%-15s %s\n", "?", "- Show help")
+	commonHelp()
 }
 
 func serverHelp() {
@@ -56,6 +53,13 @@ func serverHelp() {
 	fmt.Printf("%-15s %s\n", "status", "- Show server status")
 	fmt.Printf("%-15s %s\n", "fallback", "- Set/List the fallback server")
 	fmt.Printf("%-15s %s\n", "timeout", "- Set/List the server timeout")
-	fmt.Printf("%-15s %s\n", "port", "- Set/List the server port")
-	fmt.Printf("%-15s %s\n", "?", "- Show help")
+	fmt.Printf("%-15s %s\n", "save", "- Save the current settings")
+	fmt.Printf("%-15s %s\n", "load", "- Load the settings from the files")
+	commonHelp()
+}
+
+func commonHelp() {
+	fmt.Printf("%-15s %s\n", "/", "- Go up one level")
+	fmt.Printf("%-15s %s\n", "exit, quit, q", "- Shutdown the server")
+	fmt.Printf("%-15s %s\n", "help, h, ?", "- Show help")
 }
