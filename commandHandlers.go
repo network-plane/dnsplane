@@ -26,7 +26,7 @@ func handleRecord(args []string, currentContext string) {
 	case "add":
 		addRecord(args)
 	case "remove":
-		// removeRecord(args)
+		removeRecord(args)
 	case "update":
 		// updateRecord(args)
 	case "list":
