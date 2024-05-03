@@ -31,21 +31,6 @@ func queryAuthoritative(questionName string, server string) (*dns.Msg, error) {
 	return response, nil
 }
 
-// func queryDNS(domain, server string) (*dns.Msg, error) {
-// 	client := &dns.Client{}
-// 	msg := &dns.Msg{}
-
-// 	msg.SetQuestion(domain, dns.TypeA)
-// 	msg.RecursionDesired = true
-
-// 	response, _, err := client.Exchange(msg, server)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-
-// 	return response, nil
-// }
-
 func queryAllDNSServers(question dns.Question, dnsServers []string) <-chan *dns.Msg {
 	answers := make(chan *dns.Msg, len(dnsServers))
 	var wg sync.WaitGroup
