@@ -6,7 +6,6 @@ import (
 	"os"
 )
 
-
 func loadDataFromJSON[T any](filePath string) T {
 	var result T
 	data, err := os.ReadFile(filePath)
@@ -38,4 +37,12 @@ func loadDNSRecords() []DNSRecord {
 
 func loadSettings() DNSServerSettings {
 	return loadDataFromJSON[DNSServerSettings]("dnsresolver.json")
+}
+
+func loadCacheRecords() []CacheRecord {
+	type cacheType struct {
+		Cache []CacheRecord `json:"cache"`
+	}
+	cache := loadDataFromJSON[cacheType]("cache.json")
+	return cache.Cache
 }
