@@ -80,35 +80,26 @@ func handleGlobalCommands(args []string, rl *readline.Instance, currentContext *
 
 // Handle subcommands based on the current context
 func handleSubcommands(args []string, rl *readline.Instance, currentContext *string) {
+	// Special Handlers
+	switch args[0] {
+	case "/":
+		*currentContext = "" // Change context back to global
+		setupAutocomplete(rl, *currentContext)
+		return
+	case "quit", "q", "exit":
+		fmt.Println("Shutting down.")
+		os.Exit(1)
+	}
+
 	switch *currentContext {
 	case "record":
-		if args[0] == "/" {
-			*currentContext = ""
-			setupAutocomplete(rl, *currentContext) // Change context back to global
-		} else {
-			handleRecord(args, *currentContext) // Process record subcommands
-		}
+		handleRecord(args, *currentContext) // Process record subcommands
 	case "cache":
-		if args[0] == "/" {
-			*currentContext = ""
-			setupAutocomplete(rl, *currentContext) // Change context back to global
-		} else {
-			handleCache(args, *currentContext)
-		}
+		handleCache(args, *currentContext)
 	case "dns":
-		if args[0] == "/" {
-			*currentContext = ""
-			setupAutocomplete(rl, *currentContext) // Change context back to global
-		} else {
-			handleDNS(args, *currentContext)
-		}
+		handleDNS(args, *currentContext)
 	case "server":
-		if args[0] == "/" {
-			*currentContext = ""
-			setupAutocomplete(rl, *currentContext) // Change context back to global
-		} else {
-			handleServer(args, *currentContext)
-		}
+		handleServer(args, *currentContext)
 	default:
 		fmt.Println("Unknown server subcommand:", args[0])
 	}
