@@ -6,41 +6,36 @@ import (
 	"os"
 )
 
-func getDNSServers() []string {
-	var servers Servers
-	data, err := os.ReadFile("servers.json")
+
+func loadDataFromJSON[T any](filePath string) T {
+	var result T
+	data, err := os.ReadFile(filePath)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to read file: %v", err)
 	}
-	err = json.Unmarshal(data, &servers)
+	err = json.Unmarshal(data, &result)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Failed to unmarshal JSON: %v", err)
 	}
+	return result
+}
+
+func loadDNSServers() []string {
+	type serversType struct {
+		Servers []string `json:"servers"`
+	}
+	servers := loadDataFromJSON[serversType]("servers.json")
 	return servers.Servers
 }
 
-func getDNSRecords() []DNSRecord {
-	var records Records
-	data, err := os.ReadFile("records.json")
-	if err != nil {
-		log.Fatal(err)
+func loadDNSRecords() []DNSRecord {
+	type recordsType struct {
+		Records []DNSRecord `json:"records"`
 	}
-	err = json.Unmarshal(data, &records)
-	if err != nil {
-		log.Fatal(err)
-	}
+	records := loadDataFromJSON[recordsType]("records.json")
 	return records.Records
 }
 
-func getSettings() DNSServerSettings {
-	var settings DNSServerSettings
-	data, err := os.ReadFile("dnsresolver.json")
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = json.Unmarshal(data, &settings)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return settings
+func loadSettings() DNSServerSettings {
+	return loadDataFromJSON[DNSServerSettings]("dnsresolver.json")
 }
