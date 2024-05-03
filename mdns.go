@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net"
+	"strings"
 
 	"github.com/miekg/dns"
 )
@@ -58,4 +59,21 @@ func handleMDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	if err := w.WriteMsg(m); err != nil {
 		log.Printf("Failed to write mDNS response: %v\n", err)
 	}
+}
+
+func isMDNSQuery(name string) bool {
+	// Check if the query is for the .local domain
+	if strings.HasSuffix(name, ".local.") {
+		return true
+	}
+
+	// Split the query name by dots
+	parts := strings.Split(name, ".")
+
+	// Check if the query has at least four parts (minimum for an mDNS query)
+	if len(parts) < 3 {
+		return false
+	}
+
+	return false
 }
