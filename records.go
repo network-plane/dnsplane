@@ -42,7 +42,8 @@ func addDNSRecord(fullCommand []string) {
 	}
 
 	dnsRecords = append(dnsRecords, dnsRecord)
-	fmt.Println("Added:", dnsRecord)
+	addedRecToPrint := convertValuesToStrings(getFieldValuesByNamesArray(dnsRecord, []string{"Name", "Type", "Value", "TTL"}))
+	fmt.Println("Added:", addedRecToPrint)
 }
 
 func listRecords() {
@@ -69,7 +70,8 @@ func listRecords() {
 	fmt.Printf(formatString, "Name", "Type", "Value", "TTL")
 
 	for _, record := range dnsRecords {
-		fmt.Printf(formatString, record.Name, record.Type, record.Value, strconv.Itoa(int(record.TTL)))
+		valtoPrint := convertValuesToStrings(getFieldValuesByNamesArray(record, []string{"Name", "Type", "Value", "TTL"}))
+		fmt.Printf(formatString, valtoPrint[0], valtoPrint[1], valtoPrint[2], valtoPrint[3])
 
 		if !record.AddedOn.IsZero() {
 			fmt.Println("Added On:", record.AddedOn)
@@ -161,7 +163,8 @@ func removeDNSRecord(fullCommand []string) {
 		for i, record := range dnsRecords {
 			if record.Name == name && record.Type == recordType && record.Value == value && record.TTL == ttl {
 				dnsRecords = append(dnsRecords[:i], dnsRecords[i+1:]...)
-				fmt.Println("Removed:", record)
+				removedRecToPrint := convertValuesToStrings(getFieldValuesByNamesArray(record, []string{"Name", "Type", "Value", "TTL"}))
+				fmt.Println("Removed:", removedRecToPrint)
 				return
 			}
 		}
@@ -173,7 +176,8 @@ func removeAndPrint(record DNSRecord) {
 	for i, r := range dnsRecords {
 		if r == record {
 			dnsRecords = append(dnsRecords[:i], dnsRecords[i+1:]...)
-			fmt.Println("Removed: ", record)
+			removedRecToPrint := convertValuesToStrings(getFieldValuesByNamesArray(record, []string{"Name", "Type", "Value", "TTL"}))
+			fmt.Println("Removed:", removedRecToPrint)
 			return
 		}
 	}
@@ -234,8 +238,10 @@ func updateDNSRecord(fullCommand []string) {
 			}
 
 			fmt.Println("Updated:")
-			fmt.Println("Old Record:", oldRecord)
-			fmt.Println("New Record:", dnsRecords[i])
+			oldRecToPrint := convertValuesToStrings(getFieldValuesByNamesArray(oldRecord, []string{"Name", "Type", "Value", "TTL"}))
+			fmt.Println("Old Record:", oldRecToPrint)
+			updatedRecToPrint := convertValuesToStrings(getFieldValuesByNamesArray(dnsRecords[i], []string{"Name", "Type", "Value", "TTL"}))
+			fmt.Println("New Record:", updatedRecToPrint)
 			found = true
 			break
 		}
