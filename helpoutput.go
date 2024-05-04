@@ -12,6 +12,30 @@ func mainHelp() {
 	commonHelp()
 }
 
+func checkHelp(arg, currentSub string) bool {
+	continueLoop := true
+	if arg == "?" || arg == "help" || arg == "h" || arg == "ls" || arg == "l" {
+		continueLoop = false
+		subCommandHelp(currentSub)
+	}
+	return continueLoop
+}
+
+func subCommandHelp(context string) {
+	switch context {
+	case "record":
+		recordHelp()
+	case "cache":
+		cacheHelp()
+	case "dns":
+		dnsHelp()
+	case "server":
+		serverHelp()
+	default:
+		fmt.Println("Unknown context:", context)
+	}
+}
+
 func recordHelp() {
 	fmt.Println("Record Management Sub Commands:")
 	fmt.Printf("%-15s %s\n", "add", "- Add a new DNS record")

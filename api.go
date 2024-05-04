@@ -16,7 +16,7 @@ func addRecordGin(c *gin.Context) {
 		return
 	}
 
-	addRecord(request) // Call the existing addRecord function with parsed input
+	addDNSRecord(request) // Call the existing addRecord function with parsed input
 	c.JSON(201, gin.H{"status": "Record added"})
 }
 
