@@ -71,7 +71,7 @@ func handleGlobalCommands(args []string, rl *readline.Instance, currentContext *
 	case "exit", "quit", "q":
 		fmt.Println("Shutting down.")
 		os.Exit(1)
-	case "help", "h", "?":
+	case "help", "h", "?", "ls", "l":
 		mainHelp()
 	default:
 		fmt.Println("Unknown command:", args[0])
