@@ -183,3 +183,65 @@ func clearDNSRecords() {
 	dnsRecords = []DNSRecord{}
 	fmt.Println("All records cleared.")
 }
+
+func updateDNSRecord(fullCommand []string) {
+	if len(fullCommand) > 1 && fullCommand[1] == "?" {
+		fmt.Println("Enter the DNS record in the format: Name Type [NewValue] [NewTTL]")
+		fmt.Println("Example: example.com A 192.168.0.1 7200")
+		return
+	}
+
+	if len(fullCommand) < 3 {
+		println("Invalid DNS record format. Please enter the DNS record in the format: Name Type [NewValue] [NewTTL]")
+		return
+	}
+
+	// Validate the record type
+	if _, ok := dns.StringToType[fullCommand[2]]; !ok {
+		fmt.Println("Invalid DNS record type. Please enter a valid DNS record type.")
+		return
+	}
+
+	name, recordType := fullCommand[1], fullCommand[2]
+	var newValue *string
+	var newTTL *uint32
+
+	// Optional fields: NewValue and NewTTL
+	if len(fullCommand) > 3 {
+		newValue = &fullCommand[3]
+	}
+
+	if len(fullCommand) > 4 {
+		ttl64, err := strconv.ParseUint(fullCommand[4], 10, 32)
+		if err != nil {
+			fmt.Println("Invalid TTL value. Please enter a valid TTL value.")
+			return
+		}
+		ttl := uint32(ttl64)
+		newTTL = &ttl
+	}
+
+	var found bool
+	for i, record := range dnsRecords {
+		if record.Name == name && record.Type == recordType {
+			oldRecord := dnsRecords[i]
+			// Update fields conditionally
+			if newValue != nil {
+				dnsRecords[i].Value = *newValue
+			}
+			if newTTL != nil {
+				dnsRecords[i].TTL = *newTTL
+			}
+
+			fmt.Println("Updated:")
+			fmt.Println("Old Record:", oldRecord)
+			fmt.Println("New Record:", dnsRecords[i])
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		fmt.Println("No matching DNS record found to update.")
+	}
+}
