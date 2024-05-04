@@ -73,7 +73,6 @@ func serverHelp() {
 	fmt.Println("dnsresolve Management Sub Commands:")
 	fmt.Printf("%-15s %s\n", "start", "- Start the server")
 	fmt.Printf("%-15s %s\n", "stop", "- Stop the server")
-	fmt.Printf("%-15s %s\n", "restart", "- Restart the server")
 	fmt.Printf("%-15s %s\n", "status", "- Show server status")
 	fmt.Printf("%-15s %s\n", "fallback", "- Set/List the fallback server")
 	fmt.Printf("%-15s %s\n", "timeout", "- Set/List the server timeout")

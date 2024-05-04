@@ -111,6 +111,11 @@ func handleServer(args []string, currentContext string) {
 
 	if checkHelp(args[argPos], "server") {
 		switch args[argPos] {
+		case "start":
+			// startServer()
+		case "stop":
+			// stopServer()
+
 		case "fallback":
 			// setFallbackServer(args)
 		case "timeout":
