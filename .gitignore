@@ -5,3 +5,6 @@
 dnsresolver
 cache.json
 records.1.json
+records.json
+servers.json
+dnsresolver.json
