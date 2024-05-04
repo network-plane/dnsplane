@@ -35,6 +35,31 @@ func loadDNSRecords() []DNSRecord {
 	return records.Records
 }
 
+func saveDNSRecords() error {
+	type recordsType struct {
+		Records []DNSRecord `json:"records"`
+	}
+
+	// Wrap the global dnsRecords in a struct to match the desired JSON format
+	data := recordsType{Records: dnsRecords}
+
+	// Open the file for writing
+	file, err := os.Create("records.json")
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// Create a JSON encoder and write the data to the file
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ") // Optional: format the JSON output with indentation
+	if err := encoder.Encode(data); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func loadSettings() DNSServerSettings {
 	return loadDataFromJSON[DNSServerSettings]("dnsresolver.json")
 }
