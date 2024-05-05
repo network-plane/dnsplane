@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dnsresolver/dnsrecords"
 	"fmt"
 
 	"github.com/bettercap/readline"
@@ -25,15 +26,15 @@ func handleRecord(args []string, currentContext string) {
 	if checkHelp(args[argPos], "record") {
 		switch args[argPos] {
 		case "add":
-			addDNSRecord(args)
+			dnsrecords.AddRecord(args, gDNSRecords)
 		case "remove":
-			removeDNSRecord(args)
+			dnsrecords.RemoveRecord(args, gDNSRecords)
 		case "update":
-			updateDNSRecord(args)
+			dnsrecords.UpdateRecord(args, gDNSRecords)
 		case "list":
-			listRecords()
+			dnsrecords.ListRecords(gDNSRecords)
 		case "clear":
-			clearDNSRecords()
+			dnsrecords.ClearRecords(gDNSRecords)
 		case "load":
 			loadDNSRecords()
 		case "save":

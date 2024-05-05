@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dnsresolver/dnsrecords"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,11 +14,11 @@ import (
 
 func saveCacheRecords(cacheRecords []CacheRecord) {
 	for i, cacheRecord := range cacheRecords {
-		dnsRecords[i] = cacheRecord.DNSRecord
-		dnsRecords[i].TTL = uint32(cacheRecord.Expiry.Sub(cacheRecord.Timestamp).Seconds())
-		dnsRecords[i].LastQuery = cacheRecord.LastQuery
+		gDNSRecords[i] = cacheRecord.DNSRecord
+		gDNSRecords[i].TTL = uint32(cacheRecord.Expiry.Sub(cacheRecord.Timestamp).Seconds())
+		gDNSRecords[i].LastQuery = cacheRecord.LastQuery
 	}
-	data, err := json.MarshalIndent(dnsRecords, "", "  ")
+	data, err := json.MarshalIndent(gDNSRecords, "", "  ")
 	if err != nil {
 		log.Println("Error marshalling cache records:", err)
 		return
@@ -55,7 +56,7 @@ func addToCache(cacheRecords []CacheRecord, record *dns.RR) []CacheRecord {
 	}
 
 	cacheRecord := CacheRecord{
-		DNSRecord: DNSRecord{
+		DNSRecord: dnsrecords.DNSRecord{
 			Name:  (*record).Header().Name,
 			Type:  dns.TypeToString[(*record).Header().Rrtype],
 			Value: value,

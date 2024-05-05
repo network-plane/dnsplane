@@ -1,36 +1,39 @@
-package main
+// Package dnsrecords contains the functions to add, list, remove, clear and update DNS records.
+package dnsrecords
 
 import (
 	"fmt"
 	"strconv"
 
+	converters "dnsresolver/converters"
+
 	"github.com/miekg/dns"
 )
 
-func addDNSRecord(fullCommand []string) {
-
+// AddRecord adds a new DNS record to the list of DNS records.
+func AddRecord(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	if len(fullCommand) > 1 && fullCommand[1] == "?" {
 		fmt.Println("Enter the DNS record in the format: Name Type Value TTL")
 		fmt.Println("Example: example.com A 127.0.0.1 3600")
-		return
+		return nil
 	}
 
 	//Add A Record to dnsRecord
 	if len(fullCommand) < 5 {
 		println("Invalid DNS record format. Please enter the DNS record in the format: Name Type Value TTL")
-		return
+		return nil
 	}
 
 	//check if type (fullCommand[2]) is valid for DNS type
 	if _, ok := dns.StringToType[fullCommand[3]]; !ok {
 		fmt.Println("Invalid DNS record type. Please enter a valid DNS record type.")
-		return
+		return nil
 	}
 
 	ttl64, err := strconv.ParseUint(fullCommand[5], 10, 32)
 	if err != nil {
 		fmt.Println("Invalid TTL value. Please enter a valid TTL value.")
-		return
+		return nil
 	}
 	ttl := uint32(ttl64)
 
@@ -42,11 +45,13 @@ func addDNSRecord(fullCommand []string) {
 	}
 
 	dnsRecords = append(dnsRecords, dnsRecord)
-	addedRecToPrint := convertValuesToStrings(getFieldValuesByNamesArray(dnsRecord, []string{"Name", "Type", "Value", "TTL"}))
+	addedRecToPrint := converters.ConvertValuesToStrings(converters.GetFieldValuesByNamesArray(dnsRecord, []string{"Name", "Type", "Value", "TTL"}))
 	fmt.Println("Added:", addedRecToPrint)
+	return dnsRecords
 }
 
-func listRecords() {
+// ListRecords lists all the DNS records in the list of DNS records.
+func ListRecords(dnsRecords []DNSRecord) {
 	if len(dnsRecords) == 0 {
 		fmt.Println("No records found.")
 		return
@@ -70,7 +75,7 @@ func listRecords() {
 	fmt.Printf(formatString, "Name", "Type", "Value", "TTL")
 
 	for _, record := range dnsRecords {
-		valtoPrint := convertValuesToStrings(getFieldValuesByNamesArray(record, []string{"Name", "Type", "Value", "TTL"}))
+		valtoPrint := converters.ConvertValuesToStrings(converters.GetFieldValuesByNamesArray(record, []string{"Name", "Type", "Value", "TTL"}))
 		fmt.Printf(formatString, valtoPrint[0], valtoPrint[1], valtoPrint[2], valtoPrint[3])
 
 		if !record.AddedOn.IsZero() {
@@ -89,16 +94,17 @@ func listRecords() {
 	}
 }
 
-func removeDNSRecord(fullCommand []string) {
+// RemoveRecord removes a DNS record from the list of DNS records.
+func RemoveRecord(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	if len(fullCommand) > 1 && fullCommand[1] == "?" {
 		fmt.Println("Enter the DNS record in the format: Name Type Value TTL")
 		fmt.Println("Example: example.com A")
-		return
+		return nil
 	}
 
 	if len(fullCommand) < 2 {
 		fmt.Println("Please specify at least the record name.")
-		return
+		return nil
 	}
 
 	name := fullCommand[1]
@@ -112,24 +118,32 @@ func removeDNSRecord(fullCommand []string) {
 
 	if len(matchingRecords) == 0 {
 		fmt.Println("No records found with the name:", name)
-		return
+		return nil
 	}
 
 	if len(fullCommand) == 2 {
 		if len(matchingRecords) == 1 {
-			removeAndPrint(matchingRecords[0])
-			return
+			// removeAndPrint(matchingRecords[0])
+			for i, r := range dnsRecords {
+				if r == matchingRecords[0] {
+					dnsRecords = append(dnsRecords[:i], dnsRecords[i+1:]...)
+					removedRecToPrint := converters.ConvertValuesToStrings(converters.GetFieldValuesByNamesArray(matchingRecords[0], []string{"Name", "Type", "Value", "TTL"}))
+					fmt.Println("Removed:", removedRecToPrint)
+					return dnsRecords
+				}
+			}
+			return nil
 		}
 		fmt.Println("Multiple records found with the name:", name)
 		for i, record := range matchingRecords {
 			fmt.Printf("%d. %v\n", i+1, record)
 		}
-		return
+		return nil
 	}
 
 	if len(fullCommand) < 4 {
 		fmt.Println("Please specify at least the record name and type.")
-		return
+		return nil
 	}
 
 	recordType := fullCommand[2]
@@ -141,14 +155,22 @@ func removeDNSRecord(fullCommand []string) {
 			}
 		}
 		if len(matchingTypeRecords) == 1 {
-			removeAndPrint(matchingTypeRecords[0])
+			for i, r := range dnsRecords {
+				if r == matchingTypeRecords[0] {
+					dnsRecords = append(dnsRecords[:i], dnsRecords[i+1:]...)
+					removedRecToPrint := converters.ConvertValuesToStrings(converters.GetFieldValuesByNamesArray(matchingTypeRecords[0], []string{"Name", "Type", "Value", "TTL"}))
+					fmt.Println("Removed:", removedRecToPrint)
+					return dnsRecords
+				}
+			}
 		} else {
 			fmt.Println("Multiple records found with the same name and type:")
 			for i, record := range matchingTypeRecords {
 				fmt.Printf("%d. %v\n", i+1, record)
 			}
+			return nil
 		}
-		return
+		return dnsRecords
 	}
 
 	if len(fullCommand) == 5 {
@@ -156,54 +178,48 @@ func removeDNSRecord(fullCommand []string) {
 		ttl64, err := strconv.ParseUint(fullCommand[4], 10, 32)
 		if err != nil {
 			fmt.Println("Invalid TTL value.")
-			return
+			return nil
 		}
 		ttl := uint32(ttl64)
 
 		for i, record := range dnsRecords {
 			if record.Name == name && record.Type == recordType && record.Value == value && record.TTL == ttl {
 				dnsRecords = append(dnsRecords[:i], dnsRecords[i+1:]...)
-				removedRecToPrint := convertValuesToStrings(getFieldValuesByNamesArray(record, []string{"Name", "Type", "Value", "TTL"}))
+				removedRecToPrint := converters.ConvertValuesToStrings(converters.GetFieldValuesByNamesArray(record, []string{"Name", "Type", "Value", "TTL"}))
 				fmt.Println("Removed:", removedRecToPrint)
-				return
+				return dnsRecords
 			}
 		}
 		fmt.Println("No record found with the specified details.")
 	}
+
+	return dnsRecords
 }
 
-func removeAndPrint(record DNSRecord) {
-	for i, r := range dnsRecords {
-		if r == record {
-			dnsRecords = append(dnsRecords[:i], dnsRecords[i+1:]...)
-			removedRecToPrint := convertValuesToStrings(getFieldValuesByNamesArray(record, []string{"Name", "Type", "Value", "TTL"}))
-			fmt.Println("Removed:", removedRecToPrint)
-			return
-		}
-	}
-}
-
-func clearDNSRecords() {
+// ClearRecords clears all the DNS records from the list of DNS records.
+func ClearRecords(dnsRecords []DNSRecord) []DNSRecord {
 	dnsRecords = []DNSRecord{}
 	fmt.Println("All records cleared.")
+	return dnsRecords
 }
 
-func updateDNSRecord(fullCommand []string) {
+// UpdateRecord updates a DNS record in the list of DNS records.
+func UpdateRecord(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	if len(fullCommand) > 1 && fullCommand[1] == "?" {
 		fmt.Println("Enter the DNS record in the format: Name Type [NewValue] [NewTTL]")
 		fmt.Println("Example: example.com A 192.168.0.1 7200")
-		return
+		return nil
 	}
 
 	if len(fullCommand) < 3 {
 		println("Invalid DNS record format. Please enter the DNS record in the format: Name Type [NewValue] [NewTTL]")
-		return
+		return nil
 	}
 
 	// Validate the record type
 	if _, ok := dns.StringToType[fullCommand[2]]; !ok {
 		fmt.Println("Invalid DNS record type. Please enter a valid DNS record type.")
-		return
+		return nil
 	}
 
 	name, recordType := fullCommand[1], fullCommand[2]
@@ -219,7 +235,7 @@ func updateDNSRecord(fullCommand []string) {
 		ttl64, err := strconv.ParseUint(fullCommand[4], 10, 32)
 		if err != nil {
 			fmt.Println("Invalid TTL value. Please enter a valid TTL value.")
-			return
+			return nil
 		}
 		ttl := uint32(ttl64)
 		newTTL = &ttl
@@ -238,16 +254,18 @@ func updateDNSRecord(fullCommand []string) {
 			}
 
 			fmt.Println("Updated:")
-			oldRecToPrint := convertValuesToStrings(getFieldValuesByNamesArray(oldRecord, []string{"Name", "Type", "Value", "TTL"}))
+			oldRecToPrint := converters.ConvertValuesToStrings(converters.GetFieldValuesByNamesArray(oldRecord, []string{"Name", "Type", "Value", "TTL"}))
 			fmt.Println("Old Record:", oldRecToPrint)
-			updatedRecToPrint := convertValuesToStrings(getFieldValuesByNamesArray(dnsRecords[i], []string{"Name", "Type", "Value", "TTL"}))
+			updatedRecToPrint := converters.ConvertValuesToStrings(converters.GetFieldValuesByNamesArray(dnsRecords[i], []string{"Name", "Type", "Value", "TTL"}))
 			fmt.Println("New Record:", updatedRecToPrint)
 			found = true
 			break
 		}
 	}
-
-	if !found {
+	if found {
+		return dnsRecords
+	} else {
 		fmt.Println("No matching DNS record found to update.")
+		return nil
 	}
 }

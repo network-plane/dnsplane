@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dnsresolver/dnsrecords"
 	"encoding/json"
 	"log"
 	"os"
@@ -27,9 +28,9 @@ func loadDNSServers() []string {
 	return servers.Servers
 }
 
-func loadDNSRecords() []DNSRecord {
+func loadDNSRecords() []dnsrecords.DNSRecord {
 	type recordsType struct {
-		Records []DNSRecord `json:"records"`
+		Records []dnsrecords.DNSRecord `json:"records"`
 	}
 	records := loadDataFromJSON[recordsType]("records.json")
 	return records.Records
@@ -37,11 +38,11 @@ func loadDNSRecords() []DNSRecord {
 
 func saveDNSRecords() error {
 	type recordsType struct {
-		Records []DNSRecord `json:"records"`
+		Records []dnsrecords.DNSRecord `json:"records"`
 	}
 
 	// Wrap the global dnsRecords in a struct to match the desired JSON format
-	data := recordsType{Records: dnsRecords}
+	data := recordsType{Records: gDNSRecords}
 
 	// Open the file for writing
 	file, err := os.Create("records.json")

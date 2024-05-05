@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dnsresolver/dnsrecords"
 	"fmt"
 	"log"
 	"strings"
@@ -32,7 +33,7 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 
 	case dns.TypeA:
 		recordType := dns.TypeToString[question.Qtype]
-		cachedRecord := findRecord(dnsRecords, question.Name, recordType)
+		cachedRecord := findRecord(gDNSRecords, question.Name, recordType)
 
 		if cachedRecord != nil {
 			processCachedRecord(question, cachedRecord, response)
@@ -91,7 +92,7 @@ func handlePTRQuestion(question dns.Question, response *dns.Msg) {
 	}
 }
 
-func dnsRecordToRR(dnsRecord *DNSRecord, ttl uint32) *dns.RR {
+func dnsRecordToRR(dnsRecord *dnsrecords.DNSRecord, ttl uint32) *dns.RR {
 	recordString := fmt.Sprintf("%s %d IN %s %s", dnsRecord.Name, ttl, dnsRecord.Type, dnsRecord.Value)
 	rr, err := dns.NewRR(recordString)
 	if err != nil {
