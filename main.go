@@ -44,7 +44,7 @@ func main() {
 		initializeJSONFiles()
 
 		//Load Data
-		dnsRecords = loadDNSRecords()
+		gDNSRecords = loadDNSRecords()
 		dnsServerSettings = loadSettings()
 		cacheRecords = loadCacheRecords()
 		dnsServers = loadDNSServers()

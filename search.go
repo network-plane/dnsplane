@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dnsresolver/dnsrecords"
 	"fmt"
 	"strings"
 	"time"
@@ -21,7 +22,7 @@ func findCacheRecord(cacheRecords []CacheRecord, name string, recordType string)
 	return nil
 }
 
-func findRecord(records []DNSRecord, lookupRecord, recordType string) *dns.RR {
+func findRecord(records []dnsrecords.DNSRecord, lookupRecord, recordType string) *dns.RR {
 	for _, record := range records {
 
 		if record.Type == "PTR" || (recordType == "PTR" && dnsServerSettings.AutoBuildPTRFromA) {

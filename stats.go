@@ -34,7 +34,7 @@ func showStats() {
 	fmt.Println("Server start time:", dnsStats.ServerStartTime)
 	fmt.Println("Server Up Time:", serverUpTimeFormat(dnsStats.ServerStartTime))
 	fmt.Println()
-	fmt.Println("Total Records:", len(dnsRecords))
+	fmt.Println("Total Records:", len(gDNSRecords))
 	fmt.Println("Total DNS Servers:", len(loadDNSServers()))
 	fmt.Println("Total Cache Records:", len(cacheRecords))
 	fmt.Println()
