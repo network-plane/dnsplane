@@ -1,6 +1,6 @@
 # dnsresolver
 
-A DNS Server with multiple management interfaces. 
+A non standard DNS Server with multiple management interfaces. Its main function is it will do the same dns request to multiple DNS servers, if any of the servers replies with an authoritative reply it chooses that, otherwise it provides the reply from the fallback dns server. This will help in case for example you have a local dns server and you connect to work over a VPN and use that DNS server at the same time.
 
 ## Usage/Examples
 
