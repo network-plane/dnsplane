@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dnsresolver/cache"
 	"dnsresolver/dnsrecords"
 	"time"
 )
@@ -10,7 +11,7 @@ var (
 	dnsServers        []string
 	dnsStats          DNSStats
 	gDNSRecords       []dnsrecords.DNSRecord
-	cacheRecords      []CacheRecord
+	cacheRecords      []cache.Record
 	appversion        = "0.1.2"
 )
 
@@ -38,12 +39,4 @@ type DNSServerSettings struct {
 // Servers holds the data for the servers
 type Servers struct {
 	Servers []string `json:"servers"`
-}
-
-// CacheRecord holds the data for the cache records
-type CacheRecord struct {
-	DNSRecord dnsrecords.DNSRecord
-	Expiry    time.Time
-	Timestamp time.Time
-	LastQuery time.Time
 }

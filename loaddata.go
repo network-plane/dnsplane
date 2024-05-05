@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dnsresolver/cache"
 	"dnsresolver/dnsrecords"
 	"encoding/json"
 	"log"
@@ -65,10 +66,27 @@ func loadSettings() DNSServerSettings {
 	return loadDataFromJSON[DNSServerSettings]("dnsresolver.json")
 }
 
-func loadCacheRecords() []CacheRecord {
+func loadCacheRecords() []cache.Record {
 	type cacheType struct {
-		Cache []CacheRecord `json:"cache"`
+		Cache []cache.Record `json:"cache"`
 	}
 	cache := loadDataFromJSON[cacheType]("cache.json")
 	return cache.Cache
+}
+
+func saveCacheRecords(cacheRecords []cache.Record) {
+	for i, cacheRecord := range cacheRecords {
+		gDNSRecords[i] = cacheRecord.DNSRecord
+		gDNSRecords[i].TTL = uint32(cacheRecord.Expiry.Sub(cacheRecord.Timestamp).Seconds())
+		gDNSRecords[i].LastQuery = cacheRecord.LastQuery
+	}
+	data, err := json.MarshalIndent(gDNSRecords, "", "  ")
+	if err != nil {
+		log.Println("Error marshalling cache records:", err)
+		return
+	}
+	err = os.WriteFile("cache.json", data, 0644)
+	if err != nil {
+		log.Println("Error saving cache records:", err)
+	}
 }

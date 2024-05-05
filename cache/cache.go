@@ -1,41 +1,19 @@
-package main
+// Package cache provides a simple in-memory cache
+package cache
 
 import (
 	"dnsresolver/dnsrecords"
-	"encoding/json"
 	"fmt"
-	"log"
-	"os"
 	"strings"
 	"time"
 
 	"github.com/miekg/dns"
 )
 
-func saveCacheRecords(cacheRecords []CacheRecord) {
-	for i, cacheRecord := range cacheRecords {
-		gDNSRecords[i] = cacheRecord.DNSRecord
-		gDNSRecords[i].TTL = uint32(cacheRecord.Expiry.Sub(cacheRecord.Timestamp).Seconds())
-		gDNSRecords[i].LastQuery = cacheRecord.LastQuery
-	}
-	data, err := json.MarshalIndent(gDNSRecords, "", "  ")
-	if err != nil {
-		log.Println("Error marshalling cache records:", err)
-		return
-	}
-	err = os.WriteFile("cache.json", data, 0644)
-	if err != nil {
-		log.Println("Error saving cache records:", err)
-	}
-}
-
-func addToCache(cacheRecords []CacheRecord, record *dns.RR) []CacheRecord {
-
-	if !dnsServerSettings.CacheRecords {
-		return cacheRecords
-	}
-
+// Add a new record to the cache
+func Add(cacheRecords []Record, record *dns.RR) []Record {
 	var value string
+
 	switch r := (*record).(type) {
 	case *dns.A:
 		value = r.A.String()
@@ -55,7 +33,7 @@ func addToCache(cacheRecords []CacheRecord, record *dns.RR) []CacheRecord {
 		value = (*record).String()
 	}
 
-	cacheRecord := CacheRecord{
+	cacheRecord := Record{
 		DNSRecord: dnsrecords.DNSRecord{
 			Name:  (*record).Header().Name,
 			Type:  dns.TypeToString[(*record).Header().Rrtype],
@@ -87,17 +65,5 @@ func addToCache(cacheRecords []CacheRecord, record *dns.RR) []CacheRecord {
 		cacheRecords = append(cacheRecords, cacheRecord)
 	}
 
-	saveCacheRecords(cacheRecords)
 	return cacheRecords
-}
-
-func processCachedRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
-	response.Answer = append(response.Answer, *cachedRecord)
-	response.Authoritative = true
-	fmt.Printf("Query: %s, Reply: %s, Method: records.json\n", question.Name, (*cachedRecord).String())
-}
-
-func processCacheRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
-	response.Answer = append(response.Answer, *cachedRecord)
-	fmt.Printf("Query: %s, Reply: %s, Method: cache.json\n", question.Name, (*cachedRecord).String())
 }
