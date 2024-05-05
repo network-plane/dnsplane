@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dnsresolver/cache"
 	"dnsresolver/dnsrecords"
 	"fmt"
 	"strings"
@@ -9,7 +10,7 @@ import (
 	"github.com/miekg/dns"
 )
 
-func findCacheRecord(cacheRecords []CacheRecord, name string, recordType string) *dns.RR {
+func findCacheRecord(cacheRecords []cache.Record, name string, recordType string) *dns.RR {
 	now := time.Now()
 	for _, record := range cacheRecords {
 		if record.DNSRecord.Name == name && record.DNSRecord.Type == recordType {
