@@ -52,18 +52,19 @@ help, h, ?      - Show help
 - Remote Client (Over TCP)
 
 ## Dependancies & Documentation
-[![Go Mod](https://img.shields.io/github/go-mod/go-version/earentir/dnsresolver)]()
+[![Go Mod](https://img.shields.io/github/go-mod/go-version/earentir/dnsresolver?style=for-the-badge)]()
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/earentir/dnsresolver.svg)](https://pkg.go.dev/github.com/earentir/dnsresolver)
 
-[![Dependancies](https://img.shields.io/librariesio/github/earentir/dnsresolver)](https://libraries.io/github/earentir/dnsresolver)
+[![Dependancies](https://img.shields.io/librariesio/github/earentir/dnsresolver?style=for-the-badge)](https://libraries.io/github/earentir/dnsresolver)
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/8581/badge)](https://www.bestpractices.dev/projects/8581)
 
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/earentir/dnsresolver/badge)](https://securityscorecards.dev/viewer/?uri=github.com/earentir/dnsresolver)
 
-![Code Climate issues](https://img.shields.io/codeclimate/tech-debt/earentir/dnsresolver)
+![Code Climate issues](https://img.shields.io/codeclimate/tech-debt/earentir/dnsresolver?style=for-the-badge)
 
+![GitHub commit activity](https://img.shields.io/github/commit-activity/m/earentir/dnsresolver?style=for-the-badge)
 
 
 ## Contributing
