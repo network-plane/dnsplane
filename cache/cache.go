@@ -41,7 +41,7 @@ func Add(cacheRecords []Record, record *dns.RR) []Record {
 			TTL:   (*record).Header().Ttl,
 		},
 		Expiry:    time.Now().Add(time.Duration((*record).Header().Ttl) * time.Second),
-		Timestamp: time.Now(), // Add this line
+		Timestamp: time.Now(),
 	}
 
 	// Check if the record already exists in the cache

@@ -8,6 +8,7 @@ import (
 	"os"
 )
 
+// loadDataFromJSON reads a JSON file and unmarshals it into a struct
 func loadDataFromJSON[T any](filePath string) T {
 	var result T
 	data, err := os.ReadFile(filePath)
