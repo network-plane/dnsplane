@@ -13,12 +13,16 @@ func mainHelp() {
 }
 
 func checkHelp(arg, currentSub string) bool {
-	continueLoop := true
-	if arg == "?" || arg == "help" || arg == "h" || arg == "ls" || arg == "l" {
-		continueLoop = false
-		subCommandHelp(currentSub)
+	checkArgs := []string{"?", "help", "h", "ls", "l"}
+
+	for _, cmd := range checkArgs {
+		if arg == cmd {
+			subCommandHelp(currentSub)
+			return false
+		}
 	}
-	return continueLoop
+
+	return true
 }
 
 func subCommandHelp(context string) {
