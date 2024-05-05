@@ -14,6 +14,11 @@ A DNS Server with multiple management interfaces.
 ./dnsresolver --daemon
 ```
 
+### start in client mode (it will try to connect to the default unix socket)
+```bash
+./dnsresolver --client-mode
+```
+
 
 ## Config Files
 
