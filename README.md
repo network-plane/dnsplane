@@ -8,6 +8,21 @@ A DNS Server with multiple management interfaces.
 ```bash
 ./dnsresolver
 ```
+It will look like this:
+```bash
+2024/05/06 02:15:15 Starting DNS server on :53
+> ?
+Available commands:
+stats           - Show server statistics
+record          - Record Management
+cache           - Cache Management
+dns             - DNS Server Management
+server          - Server Management
+/               - Go up one level
+exit, quit, q   - Shutdown the server
+help, h, ?      - Show help
+>
+```
 
 ### start as daemon
 ```bash
