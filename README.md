@@ -3,7 +3,8 @@
 A non standard DNS Server with multiple management interfaces. Its main function is it will do the same dns request to multiple DNS servers, if any of the servers replies with an authoritative reply it chooses that, otherwise it provides the reply from the fallback dns server. This will help in case for example you have a local dns server and you connect to work over a VPN and use that DNS server at the same time.
 
 ## Diagram
-![image](https://github.com/earentir/dnsresolver/assets/97396839/1b072319-e81b-4cf3-af77-8e3163141195)
+![image](https://github.com/earentir/dnsresolver/assets/97396839/79acfa3e-8b83-48ec-92be-ed99085b2cc5)
+
 
 
 ## Usage/Examples
