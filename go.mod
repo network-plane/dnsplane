@@ -6,7 +6,7 @@ require (
 	github.com/bettercap/readline v0.0.0-20210228151553-655e48bcb7bf
 	github.com/gin-gonic/gin v1.9.1
 	github.com/jawher/mow.cli v1.2.0
-	github.com/miekg/dns v1.1.58
+	github.com/miekg/dns v1.1.59
 )
 
 require (
