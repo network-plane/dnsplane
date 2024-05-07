@@ -4,7 +4,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"net"
 	"os"
 	"time"
 
@@ -104,35 +103,6 @@ func main() {
 	err := app.Run(os.Args)
 	if err != nil {
 		log.Fatal(err)
-	}
-}
-
-func startMDNSServer(port string) {
-	portInt, _ := strconv.Atoi(port)
-
-	// Set up the multicast address for mDNS
-	addr := &net.UDPAddr{IP: net.ParseIP("224.0.0.251"), Port: portInt}
-
-	// Create a UDP connection to listen on multicast address
-	conn, err := net.ListenMulticastUDP("udp4", nil, addr)
-	if err != nil {
-		log.Fatalf("Error setting up mDNS server: %v", err)
-	}
-
-	// Set reuse address option to allow multiple listeners on the same address
-	if err := conn.SetReadBuffer(65535); err != nil {
-		log.Fatalf("Failed to set read buffer size: %v", err)
-	}
-
-	server := &dns.Server{
-		PacketConn: conn,
-	}
-
-	dns.HandleFunc("local.", handleMDNSRequest)
-
-	log.Printf("Starting mDNS server on %s\n", addr)
-	if err := server.ActivateAndServe(); err != nil {
-		log.Fatalf("Error starting mDNS server: %v", err)
 	}
 }
 
