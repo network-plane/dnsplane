@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	dnsServerSettings DNSServerSettings
+	dnsServerSettings DNSResolverSettings
 	dnsServers        []string
 	dnsStats          DNSStats
 	gDNSRecords       []dnsrecords.DNSRecord
@@ -26,8 +26,8 @@ type DNSStats struct {
 	ServerStartTime       time.Time
 }
 
-// DNSServerSettings holds DNS server settings
-type DNSServerSettings struct {
+// DNSResolverSettings holds DNS server settings
+type DNSResolverSettings struct {
 	FallbackServerIP   string `json:"fallback_server_ip"`
 	FallbackServerPort string `json:"fallback_server_port"`
 	Timeout            int    `json:"timeout"`
