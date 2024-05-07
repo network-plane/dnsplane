@@ -5,7 +5,8 @@ import (
 	"dnsresolver/dnsrecords"
 	"fmt"
 
-	"github.com/bettercap/readline"
+	// "github.com/bettercap/readline"
+	"github.com/chzyer/readline"
 )
 
 func handleStats() {

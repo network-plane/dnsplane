@@ -5,7 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/bettercap/readline"
+	// "github.com/bettercap/readline"
+	"github.com/chzyer/readline"
 )
 
 // Handle the command loop for reading and processing user input
@@ -25,6 +26,10 @@ func handleCommandLoop(rl *readline.Instance) {
 
 		if len(args) == 0 {
 			continue
+		}
+
+		if command == "q" || command == "quit" || command == "exit" {
+
 		}
 
 		if currentContext == "" {
