@@ -3,6 +3,7 @@ package main
 import (
 	"dnsresolver/data"
 	"dnsresolver/dnsrecords"
+	"dnsresolver/dnsserver"
 	"fmt"
 	"log"
 	"strings"
@@ -44,19 +45,19 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 				dnsStats.TotalCacheHits++
 				processCacheRecord(question, cachedRecord, response)
 			} else {
-				handleDNSServers(question, dnsServers, fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+				handleDNSServers(question, dnsserver.GetDNSArray(dnsServers), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 			}
 		}
 
 	default:
-		handleDNSServers(question, dnsServers, fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+		handleDNSServers(question, dnsserver.GetDNSArray(dnsServers), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 	}
 	dnsStats.TotalQueriesAnswered++
 }
 
-func handleAQuestion() {
+// func handleAQuestion() {
 
-}
+// }
 
 func handlePTRQuestion(question dns.Question, response *dns.Msg) {
 	ipAddr := convertReverseDNSToIP(question.Name)
@@ -88,8 +89,8 @@ func handlePTRQuestion(question dns.Question, response *dns.Msg) {
 		}
 
 	} else {
-		fmt.Println("PTR record not found in records.json")
-		handleDNSServers(question, data.LoadDNSServers(), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+		fmt.Println("PTR record not found in dnsrecords.json")
+		handleDNSServers(question, dnsserver.GetDNSArray(dnsServers), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 	}
 }
 
@@ -126,10 +127,10 @@ func handleFallbackServer(question dns.Question, fallbackServer string, response
 func processCachedRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
 	response.Answer = append(response.Answer, *cachedRecord)
 	response.Authoritative = true
-	fmt.Printf("Query: %s, Reply: %s, Method: records.json\n", question.Name, (*cachedRecord).String())
+	fmt.Printf("Query: %s, Reply: %s, Method: dnsrecords.json\n", question.Name, (*cachedRecord).String())
 }
 
 func processCacheRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
 	response.Answer = append(response.Answer, *cachedRecord)
-	fmt.Printf("Query: %s, Reply: %s, Method: cache.json\n", question.Name, (*cachedRecord).String())
+	fmt.Printf("Query: %s, Reply: %s, Method: dnscache.json\n", question.Name, (*cachedRecord).String())
 }
