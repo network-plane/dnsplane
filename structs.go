@@ -12,7 +12,8 @@ var (
 	dnsStats          DNSStats
 	gDNSRecords       []dnsrecords.DNSRecord
 	cacheRecords      []cache.Record
-	appversion        = "0.1.2"
+
+	appversion = "0.1.2"
 )
 
 // DNSStats holds the data for the DNS statistics
@@ -39,4 +40,10 @@ type DNSServerSettings struct {
 // Servers holds the data for the servers
 type Servers struct {
 	Servers []string `json:"servers"`
+}
+
+type cmdHelp struct {
+	Name        string
+	Description string
+	SubCommands map[string]cmdHelp
 }
