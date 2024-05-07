@@ -3,7 +3,6 @@ module dnsresolver
 go 1.19
 
 require (
-	github.com/bettercap/readline v0.0.0-20210228151553-655e48bcb7bf
 	github.com/chzyer/readline v1.5.1
 	github.com/gin-gonic/gin v1.9.1
 	github.com/jawher/mow.cli v1.2.0
