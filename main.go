@@ -9,7 +9,8 @@ import (
 
 	"dnsresolver/data"
 
-	"github.com/bettercap/readline"
+	// "github.com/bettercap/readline"
+	"github.com/chzyer/readline"
 	cli "github.com/jawher/mow.cli"
 	"github.com/miekg/dns"
 )
@@ -83,10 +84,11 @@ func main() {
 		} else {
 			// Interactive Mode
 			config := readline.Config{
-				Prompt:          "> ",
-				HistoryFile:     "/tmp/dnsresolver.history",
-				InterruptPrompt: "^C",
-				EOFPrompt:       "exit",
+				Prompt:            "> ",
+				HistoryFile:       "/tmp/dnsresolver.history",
+				InterruptPrompt:   "^C",
+				EOFPrompt:         "exit",
+				HistorySearchFold: true,
 			}
 
 			rl, err := readline.NewEx(&config)

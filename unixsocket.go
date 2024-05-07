@@ -7,7 +7,8 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/bettercap/readline"
+	// "github.com/bettercap/readline"
+	"github.com/chzyer/readline"
 )
 
 func setupUnixSocketListener(socketPath string) {
