@@ -45,12 +45,12 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 				dnsStats.TotalCacheHits++
 				processCacheRecord(question, cachedRecord, response)
 			} else {
-				handleDNSServers(question, dnsserver.GetDNSArray(dnsServers), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+				handleDNSServers(question, dnsserver.GetDNSArray(dnsServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 			}
 		}
 
 	default:
-		handleDNSServers(question, dnsserver.GetDNSArray(dnsServers), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+		handleDNSServers(question, dnsserver.GetDNSArray(dnsServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 	}
 	dnsStats.TotalQueriesAnswered++
 }
@@ -90,7 +90,7 @@ func handlePTRQuestion(question dns.Question, response *dns.Msg) {
 
 	} else {
 		fmt.Println("PTR record not found in dnsrecords.json")
-		handleDNSServers(question, dnsserver.GetDNSArray(dnsServers), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+		handleDNSServers(question, dnsserver.GetDNSArray(dnsServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 	}
 }
 

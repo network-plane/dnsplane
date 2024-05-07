@@ -17,10 +17,12 @@ func LoadFromJSON[T any](filePath string) T {
 	if err != nil {
 		log.Fatalf("Failed to read file: %v", err)
 	}
+
 	err = json.Unmarshal(data, &result)
 	if err != nil {
 		log.Fatalf("Failed to unmarshal JSON: %v", err)
 	}
+
 	return result
 }
 
@@ -40,7 +42,7 @@ func SaveToJSON[T any](filePath string, data T) error {
 // LoadDNSServers reads the dnsservers.json file and returns the list of DNS servers
 func LoadDNSServers() []dnsserver.DNSServer {
 	type serversType struct {
-		Servers []dnsserver.DNSServer
+		Servers []dnsserver.DNSServer `json:"dnsservers"`
 	}
 
 	servers := LoadFromJSON[serversType]("dnsservers.json")
@@ -50,7 +52,7 @@ func LoadDNSServers() []dnsserver.DNSServer {
 // SaveDNSServer saves the DNS servers to the dnsservers.json file
 func SaveDNSServer(dnsServers []dnsserver.DNSServer) error {
 	type serversType struct {
-		Servers []dnsserver.DNSServer
+		Servers []dnsserver.DNSServer `json:"dnsservers"`
 	}
 
 	data := serversType{Servers: dnsServers}
@@ -86,9 +88,12 @@ func LoadCacheRecords() []cache.Record {
 }
 
 // SaveCacheRecords saves the cache records to the dnscache.json file
-func SaveCacheRecords(cacheRecords []cache.Record) {
-	err := SaveToJSON("dnscache.json", cacheRecords)
-	if err != nil {
-		log.Println("Error saving cache records:", err)
+func SaveCacheRecords(cacheRecords []cache.Record) error {
+	type cacheType struct {
+		Cache []cache.Record `json:"cache"`
 	}
+
+	data := cacheType{Cache: cacheRecords}
+	_ = data
+	return SaveToJSON("dnscache.json", data)
 }
