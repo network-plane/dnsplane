@@ -7,8 +7,8 @@ import (
 
 // Record holds the data for the cache records
 type Record struct {
-	DNSRecord dnsrecords.DNSRecord
-	Expiry    time.Time
-	Timestamp time.Time
-	LastQuery time.Time
+	DNSRecord dnsrecords.DNSRecord `json:"dns_record"`
+	Expiry    time.Time            `json:"expiry,omitempty"`
+	Timestamp time.Time            `json:"timestamp,omitempty"`
+	LastQuery time.Time            `json:"last_query,omitempty"`
 }
