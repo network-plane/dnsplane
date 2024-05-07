@@ -63,7 +63,7 @@ help, h, ?      - Show help
 
 [![Dependancies](https://img.shields.io/librariesio/github/earentir/dnsresolver?style=for-the-badge)](https://libraries.io/github/earentir/dnsresolver)
 
-[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/8581/badge)](https://www.bestpractices.dev/projects/8581)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/8887/badge)](https://www.bestpractices.dev/projects/8887)
 
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/earentir/dnsresolver/badge)](https://securityscorecards.dev/viewer/?uri=github.com/earentir/dnsresolver)
 
