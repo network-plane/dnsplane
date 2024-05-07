@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dnsresolver/data"
 	"dnsresolver/dnsrecords"
 	"fmt"
 
@@ -36,9 +37,9 @@ func handleRecord(args []string, currentContext string) {
 		case "clear":
 			dnsrecords.ClearRecords(gDNSRecords)
 		case "load":
-			loadDNSRecords()
+			data.LoadDNSRecords()
 		case "save":
-			_ = saveDNSRecords()
+			data.SaveDNSRecords(gDNSRecords)
 		default:
 			fmt.Println("Unknown record subcommand:", args[argPos])
 		}
