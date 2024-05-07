@@ -66,7 +66,7 @@ func handleCache(args []string, currentContext string) {
 func handleDNS(args []string, currentContext string) {
 	commands := map[string]func([]string){
 		"add":    func(args []string) { dnsserver.Add(args, dnsServers) },
-		"remove": func(args []string) { /* removeDNSServer(args) */ },
+		"remove": func(args []string) { dnsServers = dnsserver.Remove(args, dnsServers) },
 		"update": func(args []string) { /* updateDNSServer(args) */ },
 		"list":   func(args []string) { dnsserver.List(dnsServers) },
 		"clear":  func(args []string) { /* clearDNSServers() */ },
