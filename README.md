@@ -44,10 +44,10 @@ help, h, ?      - Show help
 
 | File | Usage |
 | --- | --- |
-| records.json | holds dns records |
-| servers.json | |
-| cache.json | |
-| dnsresolver.json | |
+| dnsrecords.json | holds dns records |
+| dnsservers.json | holds the dns servers used for queries |
+| dnscache.json | holds queries already done if their ttl diff is still above 0 |
+| dnsresolver.json | the app config |
 
 ## Roadmap
 
