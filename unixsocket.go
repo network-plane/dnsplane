@@ -48,10 +48,6 @@ func setupUnixSocketListener(socketPath string) {
 
 			command := string(buf[:n]) // Convert buffer to a string for command processing
 			log.Printf("Received command: %s", command)
-
-			// Add logic here to handle the received command, e.g., parsing and execution
-			// For example, you could call a function to process the command:
-			// handleCommand(command)
 		}(conn) // Start the goroutine with the current connection
 	}
 }
