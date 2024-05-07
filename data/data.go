@@ -4,6 +4,7 @@ package data
 import (
 	"dnsresolver/cache"
 	"dnsresolver/dnsrecords"
+	"dnsresolver/dnsserver"
 	"encoding/json"
 	"log"
 	"os"
@@ -36,47 +37,57 @@ func SaveToJSON[T any](filePath string, data T) error {
 	return encoder.Encode(data)
 }
 
-// LoadDNSServers reads the servers.json file and returns the list of DNS servers
-func LoadDNSServers() []string {
+// LoadDNSServers reads the dnsservers.json file and returns the list of DNS servers
+func LoadDNSServers() []dnsserver.DNSServer {
 	type serversType struct {
-		Servers []string `json:"servers"`
+		Servers []dnsserver.DNSServer
 	}
 
-	servers := LoadFromJSON[serversType]("servers.json")
+	servers := LoadFromJSON[serversType]("dnsservers.json")
 	return servers.Servers
 }
 
-// LoadDNSRecords reads the records.json file and returns the list of DNS records
+// SaveDNSServer saves the DNS servers to the dnsservers.json file
+func SaveDNSServer(dnsServers []dnsserver.DNSServer) error {
+	type serversType struct {
+		Servers []dnsserver.DNSServer
+	}
+
+	data := serversType{Servers: dnsServers}
+	return SaveToJSON("dnsservers.json", data)
+}
+
+// LoadDNSRecords reads the dnsrecords.json file and returns the list of DNS records
 func LoadDNSRecords() []dnsrecords.DNSRecord {
 	type recordsType struct {
 		Records []dnsrecords.DNSRecord `json:"records"`
 	}
-	records := LoadFromJSON[recordsType]("records.json")
+	records := LoadFromJSON[recordsType]("dnsrecords.json")
 	return records.Records
 }
 
-// SaveDNSRecords saves the DNS records to the records.json file
+// SaveDNSRecords saves the DNS records to the dnsrecords.json file
 func SaveDNSRecords(gDNSRecords []dnsrecords.DNSRecord) error {
 	type recordsType struct {
 		Records []dnsrecords.DNSRecord `json:"records"`
 	}
 
 	data := recordsType{Records: gDNSRecords}
-	return SaveToJSON("records.json", data)
+	return SaveToJSON("dnsrecords.json", data)
 }
 
-// LoadCacheRecords reads the cache.json file and returns the list of cache records
+// LoadCacheRecords reads the dnscache.json file and returns the list of cache records
 func LoadCacheRecords() []cache.Record {
 	type cacheType struct {
 		Cache []cache.Record `json:"cache"`
 	}
-	cache := LoadFromJSON[cacheType]("cache.json")
+	cache := LoadFromJSON[cacheType]("dnscache.json")
 	return cache.Cache
 }
 
-// SaveCacheRecords saves the cache records to the cache.json file
+// SaveCacheRecords saves the cache records to the dnscache.json file
 func SaveCacheRecords(cacheRecords []cache.Record) {
-	err := SaveToJSON("cache.json", cacheRecords)
+	err := SaveToJSON("dnscache.json", cacheRecords)
 	if err != nil {
 		log.Println("Error saving cache records:", err)
 	}

@@ -3,12 +3,13 @@ package main
 import (
 	"dnsresolver/cache"
 	"dnsresolver/dnsrecords"
+	"dnsresolver/dnsserver"
 	"time"
 )
 
 var (
 	dnsServerSettings DNSResolverSettings
-	dnsServers        []string
+	dnsServers        []dnsserver.DNSServer
 	dnsStats          DNSStats
 	gDNSRecords       []dnsrecords.DNSRecord
 	cacheRecords      []cache.Record
@@ -28,13 +29,20 @@ type DNSStats struct {
 
 // DNSResolverSettings holds DNS server settings
 type DNSResolverSettings struct {
-	FallbackServerIP   string `json:"fallback_server_ip"`
-	FallbackServerPort string `json:"fallback_server_port"`
-	Timeout            int    `json:"timeout"`
-	DNSPort            string `json:"dns_port"`
-	CacheRecords       bool   `json:"cache_records"`
-	AutoBuildPTRFromA  bool   `json:"auto_build_ptr_from_a"`
-	ForwardPTRQueries  bool   `json:"forward_ptr_queries"`
+	FallbackServerIP   string        `json:"fallback_server_ip"`
+	FallbackServerPort string        `json:"fallback_server_port"`
+	Timeout            int           `json:"timeout"`
+	DNSPort            string        `json:"dns_port"`
+	CacheRecords       bool          `json:"cache_records"`
+	AutoBuildPTRFromA  bool          `json:"auto_build_ptr_from_a"`
+	ForwardPTRQueries  bool          `json:"forward_ptr_queries"`
+	FileLocations      fileLocations `json:"file_locations"`
+}
+
+type fileLocations struct {
+	DNSServerFile  string `json:"dnsserver_file"`
+	DNSRecordsFile string `json:"dnsrecords_file"`
+	CacheFile      string `json:"cache_file"`
 }
 
 // Servers holds the data for the servers

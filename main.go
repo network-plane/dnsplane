@@ -110,10 +110,10 @@ func main() {
 }
 
 func initializeJSONFiles() {
-	createFileIfNotExists("servers.json", `{"servers": ["1.1.1.1:53", "1.0.0.1:53"]}`)
-	createFileIfNotExists("records.json", `{"records": [{"name": "example.com.", "type": "A", "value": "93.184.216.34", "ttl": 3600, "last_query": "0001-01-01T00:00:00Z"}]}`)
-	createFileIfNotExists("cache.json", `{"cache": [{"name": "example.com.","type": "A","value": "127.0.0.1","ttl": 300,"last_query": "0001-01-01T00:00:00Z"}]}`)
-	createFileIfNotExists("dnsresolver.json", `{"fallback_server_ip": "192.168.178.21", "fallback_server_port": "53", "timeout": 2, "dns_port": "53", "cache_records": true, "auto_build_ptr_from_a": true}`)
+	createFileIfNotExists("dnsservers.json", `{"dnsservers":[{"address": "1.1.1.1","port": "53","active": false,"local_resolver": false,"adblocker": false }]}`)
+	createFileIfNotExists("dnsrecords.json", `{"records": [{"name": "example.com.", "type": "A", "value": "93.184.216.34", "ttl": 3600, "last_query": "0001-01-01T00:00:00Z"}]}`)
+	createFileIfNotExists("dnscache.json", `{"cache": [{"name": "example.com.","type": "A","value": "127.0.0.1","ttl": 300,"last_query": "0001-01-01T00:00:00Z"}]}`)
+	createFileIfNotExists("dnsresolver.json", `{"fallback_server_ip": "192.168.178.21","fallback_server_port": "53","timeout": 2,"dns_port": "53","cache_records": true,"auto_build_ptr_from_a": true,"forward_ptr_queries": false,"file_locations": {"dnsserver_file": "dnsservers.json","dnsrecords_file": "dnsrecords.json","cache_file": "dnscache.json"}}`)
 }
 
 // loadSettings reads the dnsresolver.json file and returns the DNS server settings
