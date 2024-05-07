@@ -2,29 +2,37 @@ package main
 
 import "fmt"
 
-// helpPrinter prints help for commands.
-func helpPrinter(commands map[string]cmdHelp) {
+// helpPrinter prints help for commands, optionally including subcommands.
+func helpPrinter(commands map[string]cmdHelp, includeSubCommands bool, isSubCmd bool) {
 	for _, cmd := range commands {
-		fmt.Printf("%-15s %s\n", cmd.Name, cmd.Description)
-		if len(cmd.SubCommands) > 0 {
+		if !isSubCmd {
+			fmt.Printf("%-15s %s\n", cmd.Name, cmd.Description)
+		}
+
+		if includeSubCommands && len(cmd.SubCommands) > 0 {
 			for _, subCmd := range cmd.SubCommands {
 				fmt.Printf("  %-15s %s\n", subCmd.Name, subCmd.Description)
 			}
 		}
 	}
-	commonHelp()
 }
 
 // commonHelp prints common help commands.
-func commonHelp() {
-	fmt.Printf("%-15s %s\n", "/", "- Go up one level")
-	fmt.Printf("%-15s %s\n", "exit, quit, q", "- Shutdown the server")
-	fmt.Printf("%-15s %s\n", "help, h, ?", "- Show help")
+func commonHelp(indent bool) {
+	indentation := ""
+	if indent {
+		indentation = "  "
+	}
+	fmt.Printf("%s%-15s %s\n", indentation, "/", "- Go up one level")
+	fmt.Printf("%s%-15s %s\n", indentation, "exit, quit, q", "- Shutdown the server")
+	fmt.Printf("%s%-15s %s\n", indentation, "help, h, ?", "- Show help")
 }
 
+// mainHelp displays the available commands without subcommands.
 func mainHelp() {
 	fmt.Println("Available commands:")
-	helpPrinter(loadCommands())
+	helpPrinter(loadCommands(), false, false)
+	commonHelp(false) // Add common help commands
 }
 
 // checkHelp determines if the argument is for help.
@@ -41,15 +49,25 @@ func checkHelp(arg, currentSub string) bool {
 	return true
 }
 
+// subCommandHelp prints help for a specific context or for all contexts if none is provided.
 func subCommandHelp(context string) {
-	if cmd, exists := loadCommands()[context]; exists {
-		helpPrinter(map[string]cmdHelp{context: cmd})
+	commands := loadCommands()
+
+	if context == "" {
+		// Print only top-level commands if context is empty
+		helpPrinter(commands, false, false)
+		commonHelp(false)
+	} else if cmd, exists := commands[context]; exists {
+		// Print only subcommands if the context is found
+		helpPrinter(map[string]cmdHelp{context: cmd}, true, true)
+		commonHelp(true)
 	} else {
 		fmt.Println("Unknown context:", context)
+		commonHelp(false)
 	}
 }
 
-// Load the command data from a JSON file or a static structure.
+// loadCommands returns a map with command information.
 func loadCommands() map[string]cmdHelp {
 	return map[string]cmdHelp{
 		"record": {
