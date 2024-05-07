@@ -196,12 +196,12 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	return dnsRecords
 }
 
-// Clear all the DNS records from the list of DNS records.
-func Clear(dnsRecords []DNSRecord) []DNSRecord {
-	dnsRecords = []DNSRecord{}
-	fmt.Println("All records cleared.")
-	return dnsRecords
-}
+// // Clear all the DNS records from the list of DNS records.
+// func Clear(dnsRecords []DNSRecord) []DNSRecord {
+// 	dnsRecords = []DNSRecord{}
+// 	fmt.Println("All records cleared.")
+// 	return dnsRecords
+// }
 
 // Update a DNS record in the list of DNS records.
 func Update(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
@@ -264,8 +264,8 @@ func Update(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	}
 	if found {
 		return dnsRecords
-	} else {
-		fmt.Println("No matching DNS record found to update.")
-		return nil
 	}
+
+	fmt.Println("No matching DNS record found to update.")
+	return nil
 }
