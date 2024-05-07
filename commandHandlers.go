@@ -35,11 +35,11 @@ func handleCommand(args []string, context string, commands map[string]func([]str
 
 func handleRecord(args []string, currentContext string) {
 	commands := map[string]func([]string){
-		"add":    func(args []string) { dnsrecords.AddRecord(args, gDNSRecords) },
-		"remove": func(args []string) { dnsrecords.RemoveRecord(args, gDNSRecords) },
-		"update": func(args []string) { dnsrecords.UpdateRecord(args, gDNSRecords) },
-		"list":   func(args []string) { dnsrecords.ListRecords(gDNSRecords) },
-		"clear":  func(args []string) { dnsrecords.ClearRecords(gDNSRecords) },
+		"add":    func(args []string) { dnsrecords.Add(args, gDNSRecords) },
+		"remove": func(args []string) { dnsrecords.Remove(args, gDNSRecords) },
+		"update": func(args []string) { dnsrecords.Update(args, gDNSRecords) },
+		"list":   func(args []string) { dnsrecords.List(gDNSRecords) },
+		"clear":  func(args []string) { gDNSRecords = []dnsrecords.DNSRecord{} },
 		"load":   func(args []string) { data.LoadDNSRecords() },
 		"save":   func(args []string) { data.SaveDNSRecords(gDNSRecords) },
 	}
