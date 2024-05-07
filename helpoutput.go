@@ -2,16 +2,32 @@ package main
 
 import "fmt"
 
-func mainHelp() {
-	fmt.Println("Available commands:")
-	fmt.Printf("%-15s %s\n", "stats", "- Show server statistics")
-	fmt.Printf("%-15s %s\n", "record", "- Record Management")
-	fmt.Printf("%-15s %s\n", "cache", "- Cache Management")
-	fmt.Printf("%-15s %s\n", "dns", "- DNS Server Management")
-	fmt.Printf("%-15s %s\n", "server", "- Server Management")
+// helpPrinter prints help for commands.
+func helpPrinter(commands map[string]cmdHelp) {
+	for _, cmd := range commands {
+		fmt.Printf("%-15s %s\n", cmd.Name, cmd.Description)
+		if len(cmd.SubCommands) > 0 {
+			for _, subCmd := range cmd.SubCommands {
+				fmt.Printf("  %-15s %s\n", subCmd.Name, subCmd.Description)
+			}
+		}
+	}
 	commonHelp()
 }
 
+// commonHelp prints common help commands.
+func commonHelp() {
+	fmt.Printf("%-15s %s\n", "/", "- Go up one level")
+	fmt.Printf("%-15s %s\n", "exit, quit, q", "- Shutdown the server")
+	fmt.Printf("%-15s %s\n", "help, h, ?", "- Show help")
+}
+
+func mainHelp() {
+	fmt.Println("Available commands:")
+	helpPrinter(loadCommands())
+}
+
+// checkHelp determines if the argument is for help.
 func checkHelp(arg, currentSub string) bool {
 	checkArgs := []string{"?", "help", "h", "ls", "l"}
 
@@ -26,67 +42,64 @@ func checkHelp(arg, currentSub string) bool {
 }
 
 func subCommandHelp(context string) {
-	switch context {
-	case "record":
-		recordHelp()
-	case "cache":
-		cacheHelp()
-	case "dns":
-		dnsHelp()
-	case "server":
-		serverHelp()
-	default:
+	if cmd, exists := loadCommands()[context]; exists {
+		helpPrinter(map[string]cmdHelp{context: cmd})
+	} else {
 		fmt.Println("Unknown context:", context)
 	}
 }
 
-func recordHelp() {
-	fmt.Println("Record Management Sub Commands:")
-	fmt.Printf("%-15s %s\n", "add", "- Add a new DNS record")
-	fmt.Printf("%-15s %s\n", "remove", "- Remove a DNS record")
-	fmt.Printf("%-15s %s\n", "update", "- Update a DNS record")
-	fmt.Printf("%-15s %s\n", "list", "- List all DNS records")
-	fmt.Printf("%-15s %s\n", "clear", "- Clear all DNS records")
-	fmt.Printf("%-15s %s\n", "test", "- Test a DNS record")
-	fmt.Printf("%-15s %s\n", "load", "- Load DNS records from a file")
-	fmt.Printf("%-15s %s\n", "save", "- Save DNS records to a file")
-	commonHelp()
-}
-
-func cacheHelp() {
-	fmt.Println("Cache Management Sub Commands:")
-	fmt.Printf("%-15s %s\n", "clear", "- Clear the cache")
-	fmt.Printf("%-15s %s\n", "list", "- List all cache entries")
-	commonHelp()
-}
-
-func dnsHelp() {
-	fmt.Println("DNS Server Management Sub Commands:")
-	fmt.Printf("%-15s %s\n", "add", "- Add a new DNS server")
-	fmt.Printf("%-15s %s\n", "remove", "- Remove a DNS server")
-	fmt.Printf("%-15s %s\n", "update", "- Update a DNS server")
-	fmt.Printf("%-15s %s\n", "list", "- List all DNS servers")
-	fmt.Printf("%-15s %s\n", "clear", "- Clear all DNS servers")
-	fmt.Printf("%-15s %s\n", "test", "- Test a DNS server")
-	fmt.Printf("%-15s %s\n", "load", "- Load DNS servers from a file")
-	fmt.Printf("%-15s %s\n", "save", "- Save DNS servers to a file")
-	commonHelp()
-}
-
-func serverHelp() {
-	fmt.Println("dnsresolve Management Sub Commands:")
-	fmt.Printf("%-15s %s\n", "start", "- Start the server")
-	fmt.Printf("%-15s %s\n", "stop", "- Stop the server")
-	fmt.Printf("%-15s %s\n", "status", "- Show server status")
-	fmt.Printf("%-15s %s\n", "fallback", "- Set/List the fallback server")
-	fmt.Printf("%-15s %s\n", "timeout", "- Set/List the server timeout")
-	fmt.Printf("%-15s %s\n", "save", "- Save the current settings")
-	fmt.Printf("%-15s %s\n", "load", "- Load the settings from the files")
-	commonHelp()
-}
-
-func commonHelp() {
-	fmt.Printf("%-15s %s\n", "/", "- Go up one level")
-	fmt.Printf("%-15s %s\n", "exit, quit, q", "- Shutdown the server")
-	fmt.Printf("%-15s %s\n", "help, h, ?", "- Show help")
+// Load the command data from a JSON file or a static structure.
+func loadCommands() map[string]cmdHelp {
+	return map[string]cmdHelp{
+		"record": {
+			Name:        "record",
+			Description: "- Record Management",
+			SubCommands: map[string]cmdHelp{
+				"add":    {"add", "- Add a new DNS record", nil},
+				"remove": {"remove", "- Remove a DNS record", nil},
+				"update": {"update", "- Update a DNS record", nil},
+				"list":   {"list", "- List all DNS records", nil},
+				"clear":  {"clear", "- Clear all DNS records", nil},
+				"test":   {"test", "- Test a DNS record", nil},
+				"load":   {"load", "- Load DNS records from a file", nil},
+				"save":   {"save", "- Save DNS records to a file", nil},
+			},
+		},
+		"cache": {
+			Name:        "cache",
+			Description: "- Cache Management",
+			SubCommands: map[string]cmdHelp{
+				"clear": {"clear", "- Clear the cache", nil},
+				"list":  {"list", "- List all cache entries", nil},
+			},
+		},
+		"dns": {
+			Name:        "dns",
+			Description: "- DNS Server Management",
+			SubCommands: map[string]cmdHelp{
+				"add":    {"add", "- Add a new DNS server", nil},
+				"remove": {"remove", "- Remove a DNS server", nil},
+				"update": {"update", "- Update a DNS server", nil},
+				"list":   {"list", "- List all DNS servers", nil},
+				"clear":  {"clear", "- Clear all DNS servers", nil},
+				"test":   {"test", "- Test a DNS server", nil},
+				"load":   {"load", "- Load DNS servers from a file", nil},
+				"save":   {"save", "- Save DNS servers to a file", nil},
+			},
+		},
+		"server": {
+			Name:        "server",
+			Description: "- Server Management",
+			SubCommands: map[string]cmdHelp{
+				"start":    {"start", "- Start the server", nil},
+				"stop":     {"stop", "- Stop the server", nil},
+				"status":   {"status", "- Show server status", nil},
+				"fallback": {"fallback", "- Set/List the fallback server", nil},
+				"timeout":  {"timeout", "- Set/List the server timeout", nil},
+				"save":     {"save", "- Save the current settings", nil},
+				"load":     {"load", "- Load the settings from the files", nil},
+			},
+		},
+	}
 }
