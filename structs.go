@@ -45,11 +45,6 @@ type fileLocations struct {
 	CacheFile      string `json:"cache_file"`
 }
 
-// Servers holds the data for the servers
-type Servers struct {
-	Servers []string `json:"servers"`
-}
-
 type cmdHelp struct {
 	Name        string
 	Description string
