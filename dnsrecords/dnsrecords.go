@@ -10,8 +10,8 @@ import (
 	"github.com/miekg/dns"
 )
 
-// AddRecord adds a new DNS record to the list of DNS records.
-func AddRecord(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
+// Add a new DNS record to the list of DNS records.
+func Add(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	if len(fullCommand) > 1 && fullCommand[1] == "?" {
 		fmt.Println("Enter the DNS record in the format: Name Type Value TTL")
 		fmt.Println("Example: example.com A 127.0.0.1 3600")
@@ -50,8 +50,8 @@ func AddRecord(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	return dnsRecords
 }
 
-// ListRecords lists all the DNS records in the list of DNS records.
-func ListRecords(dnsRecords []DNSRecord) {
+// List all the DNS records in the list of DNS records.
+func List(dnsRecords []DNSRecord) {
 	if len(dnsRecords) == 0 {
 		fmt.Println("No records found.")
 		return
@@ -94,8 +94,8 @@ func ListRecords(dnsRecords []DNSRecord) {
 	}
 }
 
-// RemoveRecord removes a DNS record from the list of DNS records.
-func RemoveRecord(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
+// Remove a DNS record from the list of DNS records.
+func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	if len(fullCommand) > 1 && fullCommand[1] == "?" {
 		fmt.Println("Enter the DNS record in the format: Name Type Value TTL")
 		fmt.Println("Example: example.com A")
@@ -196,15 +196,15 @@ func RemoveRecord(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	return dnsRecords
 }
 
-// ClearRecords clears all the DNS records from the list of DNS records.
-func ClearRecords(dnsRecords []DNSRecord) []DNSRecord {
+// Clear all the DNS records from the list of DNS records.
+func Clear(dnsRecords []DNSRecord) []DNSRecord {
 	dnsRecords = []DNSRecord{}
 	fmt.Println("All records cleared.")
 	return dnsRecords
 }
 
-// UpdateRecord updates a DNS record in the list of DNS records.
-func UpdateRecord(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
+// Update a DNS record in the list of DNS records.
+func Update(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	if len(fullCommand) > 1 && fullCommand[1] == "?" {
 		fmt.Println("Enter the DNS record in the format: Name Type [NewValue] [NewTTL]")
 		fmt.Println("Example: example.com A 192.168.0.1 7200")
