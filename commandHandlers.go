@@ -67,9 +67,11 @@ func handleDNS(args []string, currentContext string) {
 	commands := map[string]func([]string){
 		"add":    func(args []string) { dnsserver.Add(args, dnsServers) },
 		"remove": func(args []string) { dnsServers = dnsserver.Remove(args, dnsServers) },
-		"update": func(args []string) { /* updateDNSServer(args) */ },
+		"update": func(args []string) { dnsServers = dnsserver.Update(args, dnsServers) },
 		"list":   func(args []string) { dnsserver.List(dnsServers) },
-		"clear":  func(args []string) { /* clearDNSServers() */ },
+		"clear":  func(args []string) { dnsServers = []dnsserver.DNSServer{} },
+		"load":   func(args []string) { data.LoadDNSServers() },
+		"save":   func(args []string) { data.SaveDNSServers(dnsServers) },
 	}
 	handleCommand(args, "dns", commands)
 }
