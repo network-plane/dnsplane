@@ -67,3 +67,60 @@ func Add(cacheRecords []Record, record *dns.RR) []Record {
 
 	return cacheRecords
 }
+
+// List all records in the cache
+func List(cacheRecords []Record) {
+	fmt.Println("Cache Records:")
+	for i, record := range cacheRecords {
+		fmt.Printf("%d. %s %s %s %d\n", i+1, record.DNSRecord.Name, record.DNSRecord.Type, record.DNSRecord.Value, record.DNSRecord.TTL)
+	}
+}
+
+// Remove a record from the cache
+func Remove(fullCommand []string, cacheRecords []Record) []Record {
+	if len(fullCommand) > 1 && fullCommand[1] == "?" {
+		fmt.Println("Enter the cache record in the format: <Name>")
+		fmt.Println("Example: example.com")
+		return nil
+	}
+
+	if len(fullCommand) < 2 {
+		fmt.Println("Please specify at least the record name.")
+		return nil
+	}
+
+	name := fullCommand[1]
+
+	matchingRecords := []Record{}
+	for _, record := range cacheRecords {
+		if record.DNSRecord.Name == name {
+			matchingRecords = append(matchingRecords, record)
+		}
+	}
+
+	if len(matchingRecords) == 0 {
+		fmt.Println("No records found with the name:", name)
+		return nil
+	}
+
+	if len(fullCommand) == 2 {
+		if len(matchingRecords) == 1 {
+			for i, r := range cacheRecords {
+				if r == matchingRecords[0] {
+					cacheRecords = append(cacheRecords[:i], cacheRecords[i+1:]...)
+					removedRecToPrint := fmt.Sprintf("%s %s %s %d", matchingRecords[0].DNSRecord.Name, matchingRecords[0].DNSRecord.Type, matchingRecords[0].DNSRecord.Value, matchingRecords[0].DNSRecord.TTL)
+					fmt.Println("Removed:", removedRecToPrint)
+					return cacheRecords
+				}
+			}
+			return nil
+		}
+		fmt.Println("Multiple records found with the name:", name)
+		for i, record := range matchingRecords {
+			fmt.Printf("%d. %v\n", i+1, record)
+		}
+		return nil
+	}
+
+	return cacheRecords
+}

@@ -97,8 +97,8 @@ func List(dnsRecords []DNSRecord) {
 // Remove a DNS record from the list of DNS records.
 func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	if len(fullCommand) > 1 && fullCommand[1] == "?" {
-		fmt.Println("Enter the DNS record in the format: <Name> <Type> [Value] [TTL]")
-		fmt.Println("Example: example.com A")
+		fmt.Println("Enter the DNS record in the format: <Name>")
+		fmt.Println("Example: example.com")
 		return nil
 	}
 
