@@ -91,95 +91,59 @@ func handleServer(args []string, currentContext string) {
 func setupAutocomplete(rl *readline.Instance, context string) {
 	updatePrompt(rl, context)
 
+	autocompleteRecord := readline.NewPrefixCompleter(
+		readline.PcItem("add"),
+		readline.PcItem("remove"),
+		readline.PcItem("update"),
+		readline.PcItem("list"),
+		readline.PcItem("clear"),
+		readline.PcItem("load"),
+		readline.PcItem("save"),
+		readline.PcItem("?"),
+	)
+
+	autocompleteCache := readline.NewPrefixCompleter(
+		readline.PcItem("list"),
+		readline.PcItem("remove"),
+		readline.PcItem("clear"),
+		readline.PcItem("load"),
+		readline.PcItem("save"),
+		readline.PcItem("?"),
+	)
+
+	autocompleteServer := readline.NewPrefixCompleter(
+		readline.PcItem("start"),
+		readline.PcItem("stop"),
+		readline.PcItem("status"),
+		readline.PcItem("configure"),
+		readline.PcItem("load"),
+		readline.PcItem("save"),
+		readline.PcItem("?"),
+	)
+
+	autocompleteRoot := readline.NewPrefixCompleter(
+		readline.PcItem("stats"),
+		readline.PcItem("record", autocompleteRecord),
+		readline.PcItem("cache", autocompleteCache),
+		readline.PcItem("dns", autocompleteRecord),
+		readline.PcItem("server", autocompleteServer),
+		readline.PcItem("exit"),
+		readline.PcItem("quit"),
+		readline.PcItem("q"),
+		readline.PcItem("help"),
+		readline.PcItem("h"),
+		readline.PcItem("?"),
+	)
+
 	switch context {
 	case "":
-		rl.Config.AutoComplete = readline.NewPrefixCompleter(
-			readline.PcItem("stats"),
-			readline.PcItem("record",
-				readline.PcItem("add"),
-				readline.PcItem("remove"),
-				readline.PcItem("update"),
-				readline.PcItem("list"),
-				readline.PcItem("clear"),
-				readline.PcItem("load"),
-				readline.PcItem("save"),
-				readline.PcItem("?"),
-			),
-			readline.PcItem("cache",
-				readline.PcItem("list"),
-				readline.PcItem("remove"),
-				readline.PcItem("clear"),
-				readline.PcItem("load"),
-				readline.PcItem("save"),
-				readline.PcItem("?"),
-			),
-			readline.PcItem("dns",
-				readline.PcItem("add"),
-				readline.PcItem("remove"),
-				readline.PcItem("update"),
-				readline.PcItem("list"),
-				readline.PcItem("clear"),
-				readline.PcItem("load"),
-				readline.PcItem("save"),
-				readline.PcItem("?"),
-			),
-			readline.PcItem("server",
-				readline.PcItem("start"),
-				readline.PcItem("stop"),
-				readline.PcItem("status"),
-				readline.PcItem("configure"),
-				readline.PcItem("load"),
-				readline.PcItem("save"),
-				readline.PcItem("?"),
-			),
-			readline.PcItem("exit"),
-			readline.PcItem("quit"),
-			readline.PcItem("q"),
-			readline.PcItem("help"),
-			readline.PcItem("h"),
-			readline.PcItem("?"),
-		)
-	case "record":
-		rl.Config.AutoComplete = readline.NewPrefixCompleter(
-			readline.PcItem("add"),
-			readline.PcItem("remove"),
-			readline.PcItem("update"),
-			readline.PcItem("list"),
-			readline.PcItem("clear"),
-			readline.PcItem("load"),
-			readline.PcItem("save"),
-			readline.PcItem("?"),
-		)
+		rl.Config.AutoComplete = autocompleteRoot
+	case "record", "dns":
+		rl.Config.AutoComplete = autocompleteRecord
 	case "cache":
-		rl.Config.AutoComplete = readline.NewPrefixCompleter(
-			readline.PcItem("list"),
-			readline.PcItem("remove"),
-			readline.PcItem("clear"),
-			readline.PcItem("load"),
-			readline.PcItem("save"),
-			readline.PcItem("?"),
-		)
-	case "dns":
-		rl.Config.AutoComplete = readline.NewPrefixCompleter(
-			readline.PcItem("add"),
-			readline.PcItem("remove"),
-			readline.PcItem("update"),
-			readline.PcItem("list"),
-			readline.PcItem("clear"),
-			readline.PcItem("load"),
-			readline.PcItem("save"),
-			readline.PcItem("?"),
-		)
+		rl.Config.AutoComplete = autocompleteCache
 	case "server":
-		rl.Config.AutoComplete = readline.NewPrefixCompleter(
-			readline.PcItem("start"),
-			readline.PcItem("stop"),
-			readline.PcItem("status"),
-			readline.PcItem("configure"),
-			readline.PcItem("load"),
-			readline.PcItem("save"),
-			readline.PcItem("?"),
-		)
+		rl.Config.AutoComplete = autocompleteServer
 	}
 }
 
