@@ -6,8 +6,9 @@ import (
 	"log"
 	"net"
 	"os"
-	"strconv"
 	"time"
+
+	"dnsresolver/data"
 
 	"github.com/bettercap/readline"
 	cli "github.com/jawher/mow.cli"
@@ -44,10 +45,10 @@ func main() {
 		initializeJSONFiles()
 
 		//Load Data
-		gDNSRecords = loadDNSRecords()
+		gDNSRecords = data.LoadDNSRecords()
 		dnsServerSettings = loadSettings()
-		cacheRecords = loadCacheRecords()
-		dnsServers = loadDNSServers()
+		cacheRecords = data.LoadCacheRecords()
+		dnsServers = data.LoadDNSServers()
 
 		// Set up the DNS server handler
 		dns.HandleFunc(".", handleRequest)
@@ -142,11 +143,14 @@ func initializeJSONFiles() {
 	createFileIfNotExists("dnsresolver.json", `{"fallback_server_ip": "192.168.178.21", "fallback_server_port": "53", "timeout": 2, "dns_port": "53", "cache_records": true, "auto_build_ptr_from_a": true}`)
 }
 
-func createFileIfNotExists(filename, content string) {
-	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		err = os.WriteFile(filename, []byte(content), 0644)
-		if err != nil {
-			log.Fatalf("Error creating %s: %s", filename, err)
-		}
+// loadSettings reads the dnsresolver.json file and returns the DNS server settings
+func loadSettings() DNSServerSettings {
+	return data.LoadFromJSON[DNSServerSettings]("dnsresolver.json")
+}
+
+// saveSettings saves the DNS server settings to the dnsresolver.json file
+func saveSettings(settings DNSServerSettings) {
+	if err := data.SaveToJSON("dnsresolver.json", settings); err != nil {
+		log.Fatalf("Failed to save settings: %v", err)
 	}
 }
