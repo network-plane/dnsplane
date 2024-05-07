@@ -28,8 +28,22 @@ func handleCommandLoop(rl *readline.Instance) {
 			continue
 		}
 
-		if command == "q" || command == "quit" || command == "exit" {
+		// We don't want to save these commands in history
+		excludedCommands := []string{"q", "quit", "exit", "?", "h", "help", "ls", "l", "/"}
 
+		shouldSave := true
+		for _, cmd := range excludedCommands {
+			if command == cmd {
+				shouldSave = false
+				break
+			}
+		}
+
+		if shouldSave {
+			err := rl.SaveHistory(command) // Save command history
+			if err != nil {
+				fmt.Println("Error saving history:", err)
+			}
 		}
 
 		if currentContext == "" {
