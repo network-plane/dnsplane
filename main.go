@@ -84,11 +84,12 @@ func main() {
 		} else {
 			// Interactive Mode
 			config := readline.Config{
-				Prompt:            "> ",
-				HistoryFile:       "/tmp/dnsresolver.history",
-				InterruptPrompt:   "^C",
-				EOFPrompt:         "exit",
-				HistorySearchFold: true,
+				Prompt:                 "> ",
+				HistoryFile:            "/tmp/dnsresolver.history",
+				DisableAutoSaveHistory: true,
+				InterruptPrompt:        "^C",
+				EOFPrompt:              "exit",
+				HistorySearchFold:      true,
 			}
 
 			rl, err := readline.NewEx(&config)
