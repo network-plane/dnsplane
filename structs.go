@@ -14,7 +14,7 @@ var (
 	gDNSRecords       []dnsrecords.DNSRecord
 	cacheRecords      []cache.Record
 
-	appversion = "0.1.2"
+	appversion = "0.1.9"
 )
 
 // DNSStats holds the data for the DNS statistics
