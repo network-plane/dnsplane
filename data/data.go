@@ -49,8 +49,8 @@ func LoadDNSServers() []dnsserver.DNSServer {
 	return servers.Servers
 }
 
-// SaveDNSServer saves the DNS servers to the dnsservers.json file
-func SaveDNSServer(dnsServers []dnsserver.DNSServer) error {
+// SaveDNSServers saves the DNS servers to the dnsservers.json file
+func SaveDNSServers(dnsServers []dnsserver.DNSServer) error {
 	type serversType struct {
 		Servers []dnsserver.DNSServer `json:"dnsservers"`
 	}

@@ -31,7 +31,7 @@ func Add(fullCommand []string, dnsServers []DNSServer) []DNSServer {
 	}
 
 	if len(fullCommand) > 1 && fullCommand[1] == "?" {
-		fmt.Println("Enter the DNS Server in the format: Address Port Active Local AdBlocker")
+		fmt.Println("Enter the DNS Server in the format: <Address> [Port] [Active] [Local] [AdBlocker]")
 		fmt.Println("Example: 1.1.1.1 53 true false false")
 		return nil
 	}
@@ -90,6 +90,70 @@ func Remove(fullCommand []string, dnsServers []DNSServer) []DNSServer {
 	}
 
 	fmt.Println("No DNS server found with the address:", address)
+	return dnsServers
+}
+
+// Update modifies a DNS server's record in the list of DNS servers.
+func Update(fullCommand []string, dnsServers []DNSServer) []DNSServer {
+	if len(fullCommand) < 2 {
+		fmt.Println("Usage: update <Address> [Port] [Active] [Local] [AdBlocker]")
+		return dnsServers
+	}
+
+	address := fullCommand[1]
+	serverIndex := -1
+
+	// Find the server in the existing list
+	for i, server := range dnsServers {
+		if server.Address == address {
+			serverIndex = i
+			break
+		}
+	}
+
+	if serverIndex == -1 {
+		fmt.Println("DNS server not found:", address)
+		return dnsServers
+	}
+
+	server := dnsServers[serverIndex]
+
+	if len(fullCommand) >= 3 {
+		if _, err := strconv.Atoi(fullCommand[2]); err != nil {
+			fmt.Println("Invalid port:", fullCommand[2])
+			return dnsServers
+		}
+		server.Port = fullCommand[2]
+	}
+
+	if len(fullCommand) >= 4 {
+		if active, err := strconv.ParseBool(fullCommand[3]); err == nil {
+			server.Active = active
+		} else {
+			fmt.Println("Invalid value for Active:", fullCommand[3])
+			return dnsServers
+		}
+	}
+
+	if len(fullCommand) >= 5 {
+		if localResolver, err := strconv.ParseBool(fullCommand[4]); err == nil {
+			server.LocalResolver = localResolver
+		} else {
+			fmt.Println("Invalid value for Local Resolver:", fullCommand[4])
+			return dnsServers
+		}
+	}
+
+	if len(fullCommand) >= 6 {
+		if adBlocker, err := strconv.ParseBool(fullCommand[5]); err == nil {
+			server.AdBlocker = adBlocker
+		} else {
+			fmt.Println("Invalid value for AdBlocker:", fullCommand[5])
+			return dnsServers
+		}
+	}
+
+	dnsServers[serverIndex] = server
 	return dnsServers
 }
 
