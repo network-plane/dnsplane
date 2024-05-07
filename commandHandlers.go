@@ -78,13 +78,12 @@ func handleDNS(args []string, currentContext string) {
 
 func handleServer(args []string, currentContext string) {
 	commands := map[string]func([]string){
-		"start":    func(args []string) { /* startServer() */ },
-		"stop":     func(args []string) { /* stopServer() */ },
-		"fallback": func(args []string) { /* setFallbackServer(args) */ },
-		"timeout":  func(args []string) { /* setTimeout(args) */ },
-		"port":     func(args []string) { /* setPort(args) */ },
-		"load":     func(args []string) { dnsServerSettings = loadSettings() },
-		"save":     func(args []string) { saveSettings(dnsServerSettings) },
+		"start":     func(args []string) { /* startServer() */ },
+		"stop":      func(args []string) { /* stopServer() */ },
+		"status":    func(args []string) { /* showServerStatus() */ },
+		"configure": func(args []string) { /* config(args) */ },
+		"load":      func(args []string) { dnsServerSettings = loadSettings() },
+		"save":      func(args []string) { saveSettings(dnsServerSettings) },
 	}
 	handleCommand(args, "server", commands)
 }
@@ -107,8 +106,11 @@ func setupAutocomplete(rl *readline.Instance, context string) {
 				readline.PcItem("?"),
 			),
 			readline.PcItem("cache",
-				readline.PcItem("clear"),
 				readline.PcItem("list"),
+				readline.PcItem("remove"),
+				readline.PcItem("clear"),
+				readline.PcItem("load"),
+				readline.PcItem("save"),
 				readline.PcItem("?"),
 			),
 			readline.PcItem("dns",
@@ -117,15 +119,17 @@ func setupAutocomplete(rl *readline.Instance, context string) {
 				readline.PcItem("update"),
 				readline.PcItem("list"),
 				readline.PcItem("clear"),
-				readline.PcItem("test"),
 				readline.PcItem("load"),
 				readline.PcItem("save"),
 				readline.PcItem("?"),
 			),
 			readline.PcItem("server",
-				readline.PcItem("fallback"),
-				readline.PcItem("timeout"),
-				readline.PcItem("port"),
+				readline.PcItem("start"),
+				readline.PcItem("stop"),
+				readline.PcItem("status"),
+				readline.PcItem("configure"),
+				readline.PcItem("load"),
+				readline.PcItem("save"),
 				readline.PcItem("?"),
 			),
 			readline.PcItem("exit"),
@@ -148,8 +152,11 @@ func setupAutocomplete(rl *readline.Instance, context string) {
 		)
 	case "cache":
 		rl.Config.AutoComplete = readline.NewPrefixCompleter(
-			readline.PcItem("clear"),
 			readline.PcItem("list"),
+			readline.PcItem("remove"),
+			readline.PcItem("clear"),
+			readline.PcItem("load"),
+			readline.PcItem("save"),
 			readline.PcItem("?"),
 		)
 	case "dns":
@@ -159,16 +166,18 @@ func setupAutocomplete(rl *readline.Instance, context string) {
 			readline.PcItem("update"),
 			readline.PcItem("list"),
 			readline.PcItem("clear"),
-			readline.PcItem("test"),
 			readline.PcItem("load"),
 			readline.PcItem("save"),
 			readline.PcItem("?"),
 		)
 	case "server":
 		rl.Config.AutoComplete = readline.NewPrefixCompleter(
-			readline.PcItem("fallback"),
-			readline.PcItem("timeout"),
-			readline.PcItem("port"),
+			readline.PcItem("start"),
+			readline.PcItem("stop"),
+			readline.PcItem("status"),
+			readline.PcItem("configure"),
+			readline.PcItem("load"),
+			readline.PcItem("save"),
 			readline.PcItem("?"),
 		)
 	}
