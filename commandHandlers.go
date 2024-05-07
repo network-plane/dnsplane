@@ -30,10 +30,13 @@ func handleCommand(args []string, context string, commands map[string]func([]str
 		if cmd, found := commands[args[argPos]]; found {
 			cmd(args)
 		} else {
-			if cmd, found := commands[args[argPos+1]]; found {
-				cmd(args[argPos+1:])
-			} else {
-				fmt.Printf("Unknown %s subcommand: %s\n", context, args[argPos+1])
+			// fmt.Println(commands)
+			if len(args) > argPos+1 {
+				if cmd, found := commands[args[argPos+1]]; found {
+					cmd(args[argPos+1:])
+				} else {
+					fmt.Printf("Unknown %s subcommand: %s\n", context, args[argPos+1])
+				}
 			}
 		}
 	}
@@ -78,9 +81,9 @@ func handleDNS(args []string, currentContext string) {
 
 func handleServer(args []string, currentContext string) {
 	commands := map[string]func([]string){
-		"start":     func(args []string) { /* restartDNSServer(dnsServerSettings.DNSPort) */ },
-		"stop":      func(args []string) { /* stopDNSServer() */ },
-		"status":    func(args []string) { fmt.Println("Server Status: ", getServerStatus()) },
+		"start":     func(args []string) {},
+		"stop":      func(args []string) {},
+		"status":    func(args []string) {},
 		"configure": func(args []string) { /* config(args) */ },
 		"load":      func(args []string) { dnsServerSettings = loadSettings() },
 		"save":      func(args []string) { saveSettings(dnsServerSettings) },
@@ -107,7 +110,24 @@ func handleServerStop(args []string, currentContext string) {
 		"api":  func(args []string) { /* stopGinAPI() */ },
 		"dhcp": func(args []string) { /* startDHCP() */ },
 	}
-	handleCommand(args, "start", commands)
+	handleCommand(args, "stop", commands)
+}
+
+func handleServerStatus(args []string, currentContext string) {
+	args = args[1:]
+	commands := map[string]func([]string){
+		"dns":  func(args []string) { fmt.Println("DNS Server Status: ", getServerStatus()) },
+		"mdns": func(args []string) { /* stopMDNSServer() */ },
+		"api":  func(args []string) { /* stopGinAPI() */ },
+		"dhcp": func(args []string) { /* startDHCP() */ },
+	}
+	handleCommand(args, "status", commands)
+}
+
+func handleServerConfigure(args []string, currentContext string) {
+	args = args[1:]
+	commands := map[string]func([]string){}
+	handleCommand(args, "configure", commands)
 }
 
 func setupAutocomplete(rl *readline.Instance, context string) {
@@ -153,12 +173,19 @@ func setupAutocomplete(rl *readline.Instance, context string) {
 					readline.PcItem("dhcp"),
 				),
 				readline.PcItem("stop",
+					readline.PcItem("all"),
 					readline.PcItem("dns"),
 					readline.PcItem("mdns"),
 					readline.PcItem("api"),
 					readline.PcItem("dhcp"),
 				),
-				readline.PcItem("status"),
+				readline.PcItem("status",
+					readline.PcItem("all"),
+					readline.PcItem("dns"),
+					readline.PcItem("mdns"),
+					readline.PcItem("api"),
+					readline.PcItem("dhcp"),
+				),
 				readline.PcItem("configure"),
 				readline.PcItem("load"),
 				readline.PcItem("save"),
@@ -204,26 +231,25 @@ func setupAutocomplete(rl *readline.Instance, context string) {
 		)
 	case "server":
 		rl.Config.AutoComplete = readline.NewPrefixCompleter(
-			readline.PcItem("server",
-				readline.PcItem("start",
-					readline.PcItem("dns"),
-					readline.PcItem("mdns"),
-					readline.PcItem("api"),
-					readline.PcItem("dhcp"),
-				),
-				readline.PcItem("stop",
-					readline.PcItem("dns"),
-					readline.PcItem("mdns"),
-					readline.PcItem("api"),
-					readline.PcItem("dhcp"),
-				),
-				readline.PcItem("status"),
-				readline.PcItem("configure"),
-				readline.PcItem("load"),
-				readline.PcItem("save"),
-				readline.PcItem("?"),
+			readline.PcItem("start",
+				readline.PcItem("dns"),
+				readline.PcItem("mdns"),
+				readline.PcItem("api"),
+				readline.PcItem("dhcp"),
 			),
-			readline.PcItem("status"),
+			readline.PcItem("stop",
+				readline.PcItem("dns"),
+				readline.PcItem("mdns"),
+				readline.PcItem("api"),
+				readline.PcItem("dhcp"),
+			),
+			readline.PcItem("status",
+				readline.PcItem("all"),
+				readline.PcItem("dns"),
+				readline.PcItem("mdns"),
+				readline.PcItem("api"),
+				readline.PcItem("dhcp"),
+			),
 			readline.PcItem("configure"),
 			readline.PcItem("load"),
 			readline.PcItem("save"),
