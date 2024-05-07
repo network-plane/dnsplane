@@ -13,14 +13,14 @@ import (
 // Add a new DNS record to the list of DNS records.
 func Add(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	if len(fullCommand) > 1 && fullCommand[1] == "?" {
-		fmt.Println("Enter the DNS record in the format: Name Type Value TTL")
+		fmt.Println("Enter the DNS record in the format: <Name> <Type> [Value] [TTL]")
 		fmt.Println("Example: example.com A 127.0.0.1 3600")
 		return nil
 	}
 
 	//Add A Record to dnsRecord
 	if len(fullCommand) < 5 {
-		println("Invalid DNS record format. Please enter the DNS record in the format: Name Type Value TTL")
+		println("Invalid DNS record format. Please enter the DNS record in the format: <Name> <Type> [Value] [TTL]")
 		return nil
 	}
 
@@ -97,7 +97,7 @@ func List(dnsRecords []DNSRecord) {
 // Remove a DNS record from the list of DNS records.
 func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	if len(fullCommand) > 1 && fullCommand[1] == "?" {
-		fmt.Println("Enter the DNS record in the format: Name Type Value TTL")
+		fmt.Println("Enter the DNS record in the format: <Name> <Type> [Value] [TTL]")
 		fmt.Println("Example: example.com A")
 		return nil
 	}
@@ -123,7 +123,6 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 
 	if len(fullCommand) == 2 {
 		if len(matchingRecords) == 1 {
-			// removeAndPrint(matchingRecords[0])
 			for i, r := range dnsRecords {
 				if r == matchingRecords[0] {
 					dnsRecords = append(dnsRecords[:i], dnsRecords[i+1:]...)
@@ -196,17 +195,10 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	return dnsRecords
 }
 
-// // Clear all the DNS records from the list of DNS records.
-// func Clear(dnsRecords []DNSRecord) []DNSRecord {
-// 	dnsRecords = []DNSRecord{}
-// 	fmt.Println("All records cleared.")
-// 	return dnsRecords
-// }
-
 // Update a DNS record in the list of DNS records.
 func Update(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	if len(fullCommand) > 1 && fullCommand[1] == "?" {
-		fmt.Println("Enter the DNS record in the format: Name Type [NewValue] [NewTTL]")
+		fmt.Println("Enter the DNS record in the format: <Name> <Type> [NewValue] [NewTTL]")
 		fmt.Println("Example: example.com A 192.168.0.1 7200")
 		return nil
 	}
