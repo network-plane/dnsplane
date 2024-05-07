@@ -5,7 +5,6 @@ import (
 	"dnsresolver/dnsrecords"
 	"fmt"
 
-	// "github.com/bettercap/readline"
 	"github.com/chzyer/readline"
 )
 
@@ -13,131 +12,81 @@ func handleStats() {
 	showStats()
 }
 
-func handleRecord(args []string, currentContext string) {
+func handleCommand(args []string, context string, commands map[string]func([]string)) {
 	var argPos int
-	if currentContext == "" {
+	if context == "" {
 		argPos = 1
 		if len(args) < 2 {
-			fmt.Println("record subcommand required. Use 'record ?' for help.")
+			fmt.Printf("%s subcommand required. Use '%s ?' for help.\n", context, context)
 			return
 		}
 	} else {
 		argPos = 0
 	}
 
-	if checkHelp(args[argPos], "record") {
-		switch args[argPos] {
-		case "add":
-			dnsrecords.AddRecord(args, gDNSRecords)
-		case "remove":
-			dnsrecords.RemoveRecord(args, gDNSRecords)
-		case "update":
-			dnsrecords.UpdateRecord(args, gDNSRecords)
-		case "list":
-			dnsrecords.ListRecords(gDNSRecords)
-		case "clear":
-			dnsrecords.ClearRecords(gDNSRecords)
-		case "load":
-			data.LoadDNSRecords()
-		case "save":
-			data.SaveDNSRecords(gDNSRecords)
-		default:
-			fmt.Println("Unknown record subcommand:", args[argPos])
+	if checkHelp(args[argPos], context) {
+		if cmd, found := commands[args[argPos]]; found {
+			cmd(args)
+		} else {
+			fmt.Printf("Unknown %s subcommand: %s\n", context, args[argPos])
 		}
 	}
+}
+
+func handleRecord(args []string, currentContext string) {
+	commands := map[string]func([]string){
+		"add":    func(args []string) { dnsrecords.AddRecord(args, gDNSRecords) },
+		"remove": func(args []string) { dnsrecords.RemoveRecord(args, gDNSRecords) },
+		"update": func(args []string) { dnsrecords.UpdateRecord(args, gDNSRecords) },
+		"list":   func(args []string) { dnsrecords.ListRecords(gDNSRecords) },
+		"clear":  func(args []string) { dnsrecords.ClearRecords(gDNSRecords) },
+		"load":   func(args []string) { data.LoadDNSRecords() },
+		"save":   func(args []string) { data.SaveDNSRecords(gDNSRecords) },
+	}
+	handleCommand(args, "record", commands)
 }
 
 func handleCache(args []string, currentContext string) {
-	var argPos int
-	if currentContext == "" {
-		argPos = 1
-		if len(args) < 2 {
-			fmt.Println("cache subcommand required. Use 'cache ?' for help.")
-			return
-		}
-	} else {
-		argPos = 0
-	}
-	if checkHelp(args[argPos], "cache") {
-		switch args[argPos] {
-		case "clear":
+	commands := map[string]func([]string){
+		"clear": func(args []string) {
 			// clearCache()
-		case "list":
+		},
+		"list": func(args []string) {
 			// listCache()
-		default:
-			fmt.Println("Unknown cache subcommand:", args[argPos])
-		}
+		},
 	}
+	handleCommand(args, "cache", commands)
 }
 
 func handleDNS(args []string, currentContext string) {
-	var argPos int
-	if currentContext == "" {
-		argPos = 1
-		if len(args) < 2 {
-			fmt.Println("dns subcommand required. Use 'dns ?' for help.")
-			return
-		}
-	} else {
-		argPos = 0
+	commands := map[string]func([]string){
+		"add":    func(args []string) { /* addDNSServer(args) */ },
+		"remove": func(args []string) { /* removeDNSServer(args) */ },
+		"update": func(args []string) { /* updateDNSServer(args) */ },
+		"list":   func(args []string) { /* listDNSServers() */ },
+		"clear":  func(args []string) { /* clearDNSServers() */ },
 	}
-
-	if checkHelp(args[argPos], "dns") {
-		switch args[argPos] {
-		case "add":
-			// addDNSServer(args)
-		case "remove":
-			// removeDNSServer(args)
-		case "update":
-			// updateDNSServer(args)
-		case "list":
-			// listDNSServers()
-		case "clear":
-			// clearDNSServers()
-		default:
-			fmt.Println("Unknown DNS subcommand:", args[argPos])
-		}
-	}
+	handleCommand(args, "dns", commands)
 }
 
 func handleServer(args []string, currentContext string) {
-	var argPos int
-	if currentContext == "" {
-		argPos = 1
-		if len(args) < 2 {
-			fmt.Println("server subcommand required. Use 'server ?' for help.")
-			return
-		}
-	} else {
-		argPos = 0
+	commands := map[string]func([]string){
+		"start":    func(args []string) { /* startServer() */ },
+		"stop":     func(args []string) { /* stopServer() */ },
+		"fallback": func(args []string) { /* setFallbackServer(args) */ },
+		"timeout":  func(args []string) { /* setTimeout(args) */ },
+		"port":     func(args []string) { /* setPort(args) */ },
 	}
-
-	if checkHelp(args[argPos], "server") {
-		switch args[argPos] {
-		case "start":
-			// startServer()
-		case "stop":
-			// stopServer()
-
-		case "fallback":
-			// setFallbackServer(args)
-		case "timeout":
-			// setTimeout(args)
-		case "port":
-			// setPort(args)
-		default:
-			fmt.Println("Unknown server subcommand:", args[argPos])
-		}
-	}
+	handleCommand(args, "server", commands)
 }
 
 func setupAutocomplete(rl *readline.Instance, context string) {
 	updatePrompt(rl, context)
+
 	switch context {
 	case "":
 		rl.Config.AutoComplete = readline.NewPrefixCompleter(
 			readline.PcItem("stats"),
-
 			readline.PcItem("record",
 				readline.PcItem("add"),
 				readline.PcItem("remove"),
@@ -148,13 +97,11 @@ func setupAutocomplete(rl *readline.Instance, context string) {
 				readline.PcItem("save"),
 				readline.PcItem("?"),
 			),
-
 			readline.PcItem("cache",
 				readline.PcItem("clear"),
 				readline.PcItem("list"),
 				readline.PcItem("?"),
 			),
-
 			readline.PcItem("dns",
 				readline.PcItem("add"),
 				readline.PcItem("remove"),
@@ -166,14 +113,12 @@ func setupAutocomplete(rl *readline.Instance, context string) {
 				readline.PcItem("save"),
 				readline.PcItem("?"),
 			),
-
 			readline.PcItem("server",
 				readline.PcItem("fallback"),
 				readline.PcItem("timeout"),
 				readline.PcItem("port"),
 				readline.PcItem("?"),
 			),
-
 			readline.PcItem("exit"),
 			readline.PcItem("quit"),
 			readline.PcItem("q"),
