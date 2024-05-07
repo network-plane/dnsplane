@@ -3,6 +3,7 @@ package main
 import (
 	"dnsresolver/data"
 	"dnsresolver/dnsrecords"
+	"dnsresolver/dnsserver"
 	"fmt"
 
 	"github.com/chzyer/readline"
@@ -80,6 +81,8 @@ func handleServer(args []string, currentContext string) {
 		"fallback": func(args []string) { /* setFallbackServer(args) */ },
 		"timeout":  func(args []string) { /* setTimeout(args) */ },
 		"port":     func(args []string) { /* setPort(args) */ },
+		"load":     func(args []string) { dnsServerSettings = loadSettings() },
+		"save":     func(args []string) { saveSettings(dnsServerSettings) },
 	}
 	handleCommand(args, "server", commands)
 }
