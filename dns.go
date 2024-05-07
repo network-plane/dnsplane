@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dnsresolver/data"
 	"dnsresolver/dnsrecords"
 	"fmt"
 	"log"
@@ -59,7 +60,7 @@ func handleAQuestion() {
 
 func handlePTRQuestion(question dns.Question, response *dns.Msg) {
 	ipAddr := convertReverseDNSToIP(question.Name)
-	dnsRecords := loadDNSRecords()
+	dnsRecords := data.LoadDNSRecords()
 	recordType := dns.TypeToString[question.Qtype]
 
 	rrPointer := findRecord(dnsRecords, ipAddr, recordType)
@@ -88,7 +89,7 @@ func handlePTRQuestion(question dns.Question, response *dns.Msg) {
 
 	} else {
 		fmt.Println("PTR record not found in records.json")
-		handleDNSServers(question, loadDNSServers(), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+		handleDNSServers(question, data.LoadDNSServers(), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 	}
 }
 
@@ -107,7 +108,7 @@ func processAuthoritativeAnswer(question dns.Question, answer *dns.Msg, response
 	response.Authoritative = true
 	fmt.Printf("Query: %s, Reply: %s, Method: DNS server: %s\n", question.Name, answer.Answer[0].String(), answer.Answer[0].Header().Name[:len(answer.Answer[0].Header().Name)-1])
 
-	saveCacheRecords(cacheRecords)
+	data.SaveCacheRecords(cacheRecords)
 }
 
 func handleFallbackServer(question dns.Question, fallbackServer string, response *dns.Msg) {
@@ -116,7 +117,7 @@ func handleFallbackServer(question dns.Question, fallbackServer string, response
 		response.Answer = append(response.Answer, fallbackResponse.Answer...)
 		fmt.Printf("Query: %s, Reply: %s, Method: Fallback DNS server: %s\n", question.Name, fallbackResponse.Answer[0].String(), fallbackServer)
 
-		saveCacheRecords(cacheRecords)
+		data.SaveCacheRecords(cacheRecords)
 	} else {
 		fmt.Printf("Query: %s, No response\n", question.Name)
 	}
