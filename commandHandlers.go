@@ -28,7 +28,11 @@ func handleCommand(args []string, context string, commands map[string]func([]str
 		if cmd, found := commands[args[argPos]]; found {
 			cmd(args)
 		} else {
-			fmt.Printf("Unknown %s subcommand: %s\n", context, args[argPos])
+			if cmd, found := commands[args[argPos+1]]; found {
+				cmd(args[argPos+1:])
+			} else {
+				fmt.Printf("Unknown %s subcommand: %s\n", context, args[argPos+1])
+			}
 		}
 	}
 }
