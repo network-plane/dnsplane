@@ -67,6 +67,32 @@ func Add(fullCommand []string, dnsServers []DNSServer) []DNSServer {
 	return append(dnsServers, server)
 }
 
+// Remove removes a DNS server from the list of DNS servers.
+func Remove(fullCommand []string, dnsServers []DNSServer) []DNSServer {
+	if len(fullCommand) > 1 && fullCommand[1] == "?" {
+		fmt.Println("Enter the DNS server address to remove.")
+		fmt.Println("Example: 127.0.0.1")
+		return nil
+	}
+
+	if len(fullCommand) < 2 {
+		fmt.Println("Invalid DNS server address.")
+		return nil
+	}
+
+	address := fullCommand[1]
+
+	for i, dnsServer := range dnsServers {
+		if dnsServer.Address == address {
+			fmt.Println("Removed: ", address)
+			return append(dnsServers[:i], dnsServers[i+1:]...)
+		}
+	}
+
+	fmt.Println("No DNS server found with the address:", address)
+	return dnsServers
+}
+
 // List lists all the DNS servers in the list of DNS servers.
 func List(dnsServers []DNSServer) {
 	if len(dnsServers) == 0 {
