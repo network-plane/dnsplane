@@ -55,7 +55,8 @@ func LoadDNSRecords() []dnsrecords.DNSRecord {
 	return records.Records
 }
 
-func saveDNSRecords(gDNSRecords []dnsrecords.DNSRecord) error {
+// SaveDNSRecords saves the DNS records to the records.json file
+func SaveDNSRecords(gDNSRecords []dnsrecords.DNSRecord) error {
 	type recordsType struct {
 		Records []dnsrecords.DNSRecord `json:"records"`
 	}
