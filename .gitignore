@@ -1,6 +1,2 @@
-# /cache.json
-# /dnsresolver
-# /records.json
-# /servers.json
 dnsresolver
 *.json
