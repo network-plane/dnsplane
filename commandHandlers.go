@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dnsresolver/cache"
 	"dnsresolver/data"
 	"dnsresolver/dnsrecords"
 	"dnsresolver/dnsserver"
@@ -53,12 +54,11 @@ func handleRecord(args []string, currentContext string) {
 
 func handleCache(args []string, currentContext string) {
 	commands := map[string]func([]string){
-		"clear": func(args []string) {
-			// clearCache()
-		},
-		"list": func(args []string) {
-			// listCache()
-		},
+		"list":   func(args []string) { cache.List(cacheRecords) },
+		"remove": func(args []string) { cacheRecords = cache.Remove(args, cacheRecords) },
+		"clear":  func(args []string) { cacheRecords = []cache.Record{} },
+		"load":   func(args []string) { data.LoadCacheRecords() },
+		"save":   func(args []string) { data.SaveCacheRecords(cacheRecords) },
 	}
 	handleCommand(args, "cache", commands)
 }
