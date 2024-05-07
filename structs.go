@@ -4,6 +4,7 @@ import (
 	"dnsresolver/cache"
 	"dnsresolver/dnsrecords"
 	"dnsresolver/dnsserver"
+	"sync"
 	"time"
 )
 
@@ -13,6 +14,11 @@ var (
 	dnsStats          DNSStats
 	gDNSRecords       []dnsrecords.DNSRecord
 	cacheRecords      []cache.Record
+
+	stopDNSCh    = make(chan struct{})
+	stoppedDNS   = make(chan struct{})
+	isServerUp   bool
+	serverStatus sync.RWMutex
 
 	appversion = "0.1.9"
 )
@@ -33,6 +39,8 @@ type DNSResolverSettings struct {
 	FallbackServerPort string        `json:"fallback_server_port"`
 	Timeout            int           `json:"timeout"`
 	DNSPort            string        `json:"dns_port"`
+	MDNSPort           string        `json:"mdns_port"`
+	RESTPort           string        `json:"rest_port"`
 	CacheRecords       bool          `json:"cache_records"`
 	AutoBuildPTRFromA  bool          `json:"auto_build_ptr_from_a"`
 	ForwardPTRQueries  bool          `json:"forward_ptr_queries"`
