@@ -52,22 +52,24 @@ func main() {
 
 		// Set up the DNS server handler
 		dns.HandleFunc(".", handleRequest)
+		// Start DNS Server
+		startDNSServer(*port)
 
-		// Configure the DNS server settings
-		server := &dns.Server{
-			Addr: fmt.Sprintf(":%s", *port),
-			Net:  "udp",
-		}
+		// // Configure the DNS server settings
+		// server := &dns.Server{
+		// 	Addr: fmt.Sprintf(":%s", *port),
+		// 	Net:  "udp",
+		// }
 
-		// Start the DNS server
-		go func() {
-			log.Printf("Starting DNS server on %s\n", server.Addr)
-			dnsStats.ServerStartTime = time.Now()
-			if err := server.ListenAndServe(); err != nil {
-				fmt.Println("Error starting server:", err)
-				os.Exit(1)
-			}
-		}()
+		// // Start the DNS server
+		// go func() {
+		// 	log.Printf("Starting DNS server on %s\n", server.Addr)
+		// 	dnsStats.ServerStartTime = time.Now()
+		// 	if err := server.ListenAndServe(); err != nil {
+		// 		fmt.Println("Error starting server:", err)
+		// 		os.Exit(1)
+		// 	}
+		// }()
 
 		// mDNS server setup
 		if *mdnsMode {
@@ -109,21 +111,56 @@ func main() {
 	}
 }
 
-func initializeJSONFiles() {
-	createFileIfNotExists("dnsservers.json", `{"dnsservers":[{"address": "1.1.1.1","port": "53","active": false,"local_resolver": false,"adblocker": false }]}`)
-	createFileIfNotExists("dnsrecords.json", `{"records": [{"name": "example.com.", "type": "A", "value": "93.184.216.34", "ttl": 3600, "last_query": "0001-01-01T00:00:00Z"}]}`)
-	createFileIfNotExists("dnscache.json", `{"cache": [{"dns_record": {"name": "example.com","type": "A","value": "192.168.1.1","ttl": 3600,"added_on": "2024-05-01T12:00:00Z","updated_on": "2024-05-05T18:30:00Z","mac": "00:1A:2B:3C:4D:5E","last_query": "2024-05-07T15:45:00Z"},"expiry": "2024-05-10T12:00:00Z","timestamp": "2024-05-07T12:30:00Z","last_query": "2024-05-07T14:00:00Z"}]}`)
-	createFileIfNotExists("dnsresolver.json", `{"fallback_server_ip": "192.168.178.21","fallback_server_port": "53","timeout": 2,"dns_port": "53","cache_records": true,"auto_build_ptr_from_a": true,"forward_ptr_queries": false,"file_locations": {"dnsserver_file": "dnsservers.json","dnsrecords_file": "dnsrecords.json","cache_file": "dnscache.json"}}`)
-}
-
-// loadSettings reads the dnsresolver.json file and returns the DNS server settings
-func loadSettings() DNSResolverSettings {
-	return data.LoadFromJSON[DNSResolverSettings]("dnsresolver.json")
-}
-
-// saveSettings saves the DNS server settings to the dnsresolver.json file
-func saveSettings(settings DNSResolverSettings) {
-	if err := data.SaveToJSON("dnsresolver.json", settings); err != nil {
-		log.Fatalf("Failed to save settings: %v", err)
+func startDNSServer(port string) {
+	server := &dns.Server{
+		Addr: fmt.Sprintf(":%s", port),
+		Net:  "udp",
 	}
+
+	log.Printf("Starting DNS server on %s\n", server.Addr)
+	updateServerStatus(true)
+	dnsStats.ServerStartTime = time.Now()
+
+	go func() {
+		defer close(stoppedDNS)
+		if err := server.ListenAndServe(); err != nil {
+			log.Fatalf("Error starting server: %v", err)
+		}
+		updateServerStatus(false)
+	}()
+
+	go func() {
+		<-stopDNSCh
+		if err := server.Shutdown(); err != nil {
+			log.Fatalf("Error stopping server: %v", err)
+		}
+	}()
+}
+
+func restartDNSServer(port string) {
+	if getServerStatus() {
+		stopDNSServer()
+	}
+	stopDNSCh = make(chan struct{})
+	stoppedDNS = make(chan struct{})
+
+	startDNSServer(port)
+}
+
+func stopDNSServer() {
+	close(stopDNSCh)
+	<-stoppedDNS
+	updateServerStatus(false)
+}
+
+func updateServerStatus(status bool) {
+	serverStatus.Lock()
+	defer serverStatus.Unlock()
+	isServerUp = status
+}
+
+func getServerStatus() bool {
+	serverStatus.RLock()
+	defer serverStatus.RUnlock()
+	return isServerUp
 }

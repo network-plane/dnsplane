@@ -78,9 +78,9 @@ func handleDNS(args []string, currentContext string) {
 
 func handleServer(args []string, currentContext string) {
 	commands := map[string]func([]string){
-		"start":     func(args []string) { /* startServer() */ },
-		"stop":      func(args []string) { /* stopServer() */ },
-		"status":    func(args []string) { /* showServerStatus() */ },
+		"start":     func(args []string) { /* restartDNSServer(dnsServerSettings.DNSPort) */ },
+		"stop":      func(args []string) { /* stopDNSServer() */ },
+		"status":    func(args []string) { fmt.Println("Server Status: ", getServerStatus()) },
 		"configure": func(args []string) { /* config(args) */ },
 		"load":      func(args []string) { dnsServerSettings = loadSettings() },
 		"save":      func(args []string) { saveSettings(dnsServerSettings) },
@@ -88,62 +88,147 @@ func handleServer(args []string, currentContext string) {
 	handleCommand(args, "server", commands)
 }
 
+func handleServerStart(args []string, currentContext string) {
+	args = args[1:]
+	commands := map[string]func([]string){
+		"dns":  func(args []string) { restartDNSServer(dnsServerSettings.DNSPort) },
+		"mdns": func(args []string) { startMDNSServer(dnsServerSettings.MDNSPort) },
+		"api":  func(args []string) { startGinAPI(dnsServerSettings.RESTPort) },
+		"dhcp": func(args []string) { /* startDHCP() */ },
+	}
+	handleCommand(args, "start", commands)
+}
+
+func handleServerStop(args []string, currentContext string) {
+	args = args[1:]
+	commands := map[string]func([]string){
+		"dns":  func(args []string) { stopDNSServer() },
+		"mdns": func(args []string) { /* stopMDNSServer() */ },
+		"api":  func(args []string) { /* stopGinAPI() */ },
+		"dhcp": func(args []string) { /* startDHCP() */ },
+	}
+	handleCommand(args, "start", commands)
+}
+
 func setupAutocomplete(rl *readline.Instance, context string) {
 	updatePrompt(rl, context)
 
-	autocompleteRecord := readline.NewPrefixCompleter(
-		readline.PcItem("add"),
-		readline.PcItem("remove"),
-		readline.PcItem("update"),
-		readline.PcItem("list"),
-		readline.PcItem("clear"),
-		readline.PcItem("load"),
-		readline.PcItem("save"),
-		readline.PcItem("?"),
-	)
-
-	autocompleteCache := readline.NewPrefixCompleter(
-		readline.PcItem("list"),
-		readline.PcItem("remove"),
-		readline.PcItem("clear"),
-		readline.PcItem("load"),
-		readline.PcItem("save"),
-		readline.PcItem("?"),
-	)
-
-	autocompleteServer := readline.NewPrefixCompleter(
-		readline.PcItem("start"),
-		readline.PcItem("stop"),
-		readline.PcItem("status"),
-		readline.PcItem("configure"),
-		readline.PcItem("load"),
-		readline.PcItem("save"),
-		readline.PcItem("?"),
-	)
-
-	autocompleteRoot := readline.NewPrefixCompleter(
-		readline.PcItem("stats"),
-		readline.PcItem("record", autocompleteRecord),
-		readline.PcItem("cache", autocompleteCache),
-		readline.PcItem("dns", autocompleteRecord),
-		readline.PcItem("server", autocompleteServer),
-		readline.PcItem("exit"),
-		readline.PcItem("quit"),
-		readline.PcItem("q"),
-		readline.PcItem("help"),
-		readline.PcItem("h"),
-		readline.PcItem("?"),
-	)
-
 	switch context {
 	case "":
-		rl.Config.AutoComplete = autocompleteRoot
-	case "record", "dns":
-		rl.Config.AutoComplete = autocompleteRecord
+		rl.Config.AutoComplete = readline.NewPrefixCompleter(
+			readline.PcItem("stats"),
+			readline.PcItem("record",
+				readline.PcItem("add"),
+				readline.PcItem("remove"),
+				readline.PcItem("update"),
+				readline.PcItem("list"),
+				readline.PcItem("clear"),
+				readline.PcItem("load"),
+				readline.PcItem("save"),
+				readline.PcItem("?"),
+			),
+			readline.PcItem("cache",
+				readline.PcItem("list"),
+				readline.PcItem("remove"),
+				readline.PcItem("clear"),
+				readline.PcItem("load"),
+				readline.PcItem("save"),
+				readline.PcItem("?"),
+			),
+			readline.PcItem("dns",
+				readline.PcItem("add"),
+				readline.PcItem("remove"),
+				readline.PcItem("update"),
+				readline.PcItem("list"),
+				readline.PcItem("clear"),
+				readline.PcItem("load"),
+				readline.PcItem("save"),
+				readline.PcItem("?"),
+			),
+			readline.PcItem("server",
+				readline.PcItem("start",
+					readline.PcItem("dns"),
+					readline.PcItem("mdns"),
+					readline.PcItem("api"),
+					readline.PcItem("dhcp"),
+				),
+				readline.PcItem("stop",
+					readline.PcItem("dns"),
+					readline.PcItem("mdns"),
+					readline.PcItem("api"),
+					readline.PcItem("dhcp"),
+				),
+				readline.PcItem("status"),
+				readline.PcItem("configure"),
+				readline.PcItem("load"),
+				readline.PcItem("save"),
+				readline.PcItem("?"),
+			),
+			readline.PcItem("exit"),
+			readline.PcItem("quit"),
+			readline.PcItem("q"),
+			readline.PcItem("help"),
+			readline.PcItem("h"),
+			readline.PcItem("?"),
+		)
+	case "record":
+		rl.Config.AutoComplete = readline.NewPrefixCompleter(
+			readline.PcItem("add"),
+			readline.PcItem("remove"),
+			readline.PcItem("update"),
+			readline.PcItem("list"),
+			readline.PcItem("clear"),
+			readline.PcItem("load"),
+			readline.PcItem("save"),
+			readline.PcItem("?"),
+		)
 	case "cache":
-		rl.Config.AutoComplete = autocompleteCache
+		rl.Config.AutoComplete = readline.NewPrefixCompleter(
+			readline.PcItem("list"),
+			readline.PcItem("remove"),
+			readline.PcItem("clear"),
+			readline.PcItem("load"),
+			readline.PcItem("save"),
+			readline.PcItem("?"),
+		)
+	case "dns":
+		rl.Config.AutoComplete = readline.NewPrefixCompleter(
+			readline.PcItem("add"),
+			readline.PcItem("remove"),
+			readline.PcItem("update"),
+			readline.PcItem("list"),
+			readline.PcItem("clear"),
+			readline.PcItem("load"),
+			readline.PcItem("save"),
+			readline.PcItem("?"),
+		)
 	case "server":
-		rl.Config.AutoComplete = autocompleteServer
+		rl.Config.AutoComplete = readline.NewPrefixCompleter(
+			readline.PcItem("server",
+				readline.PcItem("start",
+					readline.PcItem("dns"),
+					readline.PcItem("mdns"),
+					readline.PcItem("api"),
+					readline.PcItem("dhcp"),
+				),
+				readline.PcItem("stop",
+					readline.PcItem("dns"),
+					readline.PcItem("mdns"),
+					readline.PcItem("api"),
+					readline.PcItem("dhcp"),
+				),
+				readline.PcItem("status"),
+				readline.PcItem("configure"),
+				readline.PcItem("load"),
+				readline.PcItem("save"),
+				readline.PcItem("?"),
+			),
+			readline.PcItem("status"),
+			readline.PcItem("configure"),
+			readline.PcItem("load"),
+			readline.PcItem("save"),
+			readline.PcItem("?"),
+		)
 	}
 }
 
