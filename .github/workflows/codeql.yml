@@ -43,9 +43,9 @@ jobs:
       actions: read
       contents: read
 
-        strategy:
-      fail-fast: false
-      matrix:
+strategy:
+  fail-fast: false
+  matrix:
         include:
         - language: go
           build-mode: manual
