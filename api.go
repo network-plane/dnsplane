@@ -17,14 +17,14 @@ func addRecordGin(c *gin.Context) {
 		return
 	}
 
-	dnsrecords.AddRecord(request, gDNSRecords) // Call the existing addRecord function with parsed input
+	dnsrecords.Add(request, gDNSRecords) // Call the existing addRecord function with parsed input
 	c.JSON(201, gin.H{"status": "Record added"})
 }
 
 // Wrapper for existing listRecords function
 func listRecordsGin(c *gin.Context) {
 	// Call the existing listRecords function
-	dnsrecords.ListRecords(gDNSRecords)
+	dnsrecords.List(gDNSRecords)
 	c.JSON(200, gin.H{"status": "Listed"})
 }
 

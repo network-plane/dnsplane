@@ -4,12 +4,13 @@ package main
 import (
 	"fmt"
 	"log"
-	"net"
 	"os"
-	"strconv"
 	"time"
 
-	"github.com/bettercap/readline"
+	"dnsresolver/data"
+
+	// "github.com/bettercap/readline"
+	"github.com/chzyer/readline"
 	cli "github.com/jawher/mow.cli"
 	"github.com/miekg/dns"
 )
@@ -44,29 +45,31 @@ func main() {
 		initializeJSONFiles()
 
 		//Load Data
-		gDNSRecords = loadDNSRecords()
+		gDNSRecords = data.LoadDNSRecords()
 		dnsServerSettings = loadSettings()
-		cacheRecords = loadCacheRecords()
-		dnsServers = loadDNSServers()
+		cacheRecords = data.LoadCacheRecords()
+		dnsServers = data.LoadDNSServers()
 
 		// Set up the DNS server handler
 		dns.HandleFunc(".", handleRequest)
+		// Start DNS Server
+		startDNSServer(*port)
 
-		// Configure the DNS server settings
-		server := &dns.Server{
-			Addr: fmt.Sprintf(":%s", *port),
-			Net:  "udp",
-		}
+		// // Configure the DNS server settings
+		// server := &dns.Server{
+		// 	Addr: fmt.Sprintf(":%s", *port),
+		// 	Net:  "udp",
+		// }
 
-		// Start the DNS server
-		go func() {
-			log.Printf("Starting DNS server on %s\n", server.Addr)
-			dnsStats.ServerStartTime = time.Now()
-			if err := server.ListenAndServe(); err != nil {
-				fmt.Println("Error starting server:", err)
-				os.Exit(1)
-			}
-		}()
+		// // Start the DNS server
+		// go func() {
+		// 	log.Printf("Starting DNS server on %s\n", server.Addr)
+		// 	dnsStats.ServerStartTime = time.Now()
+		// 	if err := server.ListenAndServe(); err != nil {
+		// 		fmt.Println("Error starting server:", err)
+		// 		os.Exit(1)
+		// 	}
+		// }()
 
 		// mDNS server setup
 		if *mdnsMode {
@@ -83,10 +86,12 @@ func main() {
 		} else {
 			// Interactive Mode
 			config := readline.Config{
-				Prompt:          "> ",
-				HistoryFile:     "/tmp/dnsresolver.history",
-				InterruptPrompt: "^C",
-				EOFPrompt:       "exit",
+				Prompt:                 "> ",
+				HistoryFile:            "/tmp/dnsresolver.history",
+				DisableAutoSaveHistory: true,
+				InterruptPrompt:        "^C",
+				EOFPrompt:              "exit",
+				HistorySearchFold:      true,
 			}
 
 			rl, err := readline.NewEx(&config)
@@ -106,47 +111,56 @@ func main() {
 	}
 }
 
-func startMDNSServer(port string) {
-	portInt, _ := strconv.Atoi(port)
-
-	// Set up the multicast address for mDNS
-	addr := &net.UDPAddr{IP: net.ParseIP("224.0.0.251"), Port: portInt}
-
-	// Create a UDP connection to listen on multicast address
-	conn, err := net.ListenMulticastUDP("udp4", nil, addr)
-	if err != nil {
-		log.Fatalf("Error setting up mDNS server: %v", err)
-	}
-
-	// Set reuse address option to allow multiple listeners on the same address
-	if err := conn.SetReadBuffer(65535); err != nil {
-		log.Fatalf("Failed to set read buffer size: %v", err)
-	}
-
+func startDNSServer(port string) {
 	server := &dns.Server{
-		PacketConn: conn,
+		Addr: fmt.Sprintf(":%s", port),
+		Net:  "udp",
 	}
 
-	dns.HandleFunc("local.", handleMDNSRequest)
+	log.Printf("Starting DNS server on %s\n", server.Addr)
+	updateServerStatus(true)
+	dnsStats.ServerStartTime = time.Now()
 
-	log.Printf("Starting mDNS server on %s\n", addr)
-	if err := server.ActivateAndServe(); err != nil {
-		log.Fatalf("Error starting mDNS server: %v", err)
-	}
-}
-
-func initializeJSONFiles() {
-	createFileIfNotExists("servers.json", `{"servers": ["1.1.1.1:53", "1.0.0.1:53"]}`)
-	createFileIfNotExists("records.json", `{"records": [{"name": "example.com.", "type": "A", "value": "93.184.216.34", "ttl": 3600, "last_query": "0001-01-01T00:00:00Z"}]}`)
-	createFileIfNotExists("cache.json", `{"cache": [{"name": "example.com.","type": "A","value": "127.0.0.1","ttl": 300,"last_query": "0001-01-01T00:00:00Z"}]}`)
-	createFileIfNotExists("dnsresolver.json", `{"fallback_server_ip": "192.168.178.21", "fallback_server_port": "53", "timeout": 2, "dns_port": "53", "cache_records": true, "auto_build_ptr_from_a": true}`)
-}
-
-func createFileIfNotExists(filename, content string) {
-	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		err = os.WriteFile(filename, []byte(content), 0644)
-		if err != nil {
-			log.Fatalf("Error creating %s: %s", filename, err)
+	go func() {
+		defer close(stoppedDNS)
+		if err := server.ListenAndServe(); err != nil {
+			log.Fatalf("Error starting server: %v", err)
 		}
+		updateServerStatus(false)
+	}()
+
+	go func() {
+		<-stopDNSCh
+		if err := server.Shutdown(); err != nil {
+			log.Fatalf("Error stopping server: %v", err)
+		}
+	}()
+}
+
+func restartDNSServer(port string) {
+	if getServerStatus() {
+		stopDNSServer()
 	}
+	stopDNSCh = make(chan struct{})
+	stoppedDNS = make(chan struct{})
+
+	startDNSServer(port)
+}
+
+func stopDNSServer() {
+	close(stopDNSCh)
+	<-stoppedDNS
+	updateServerStatus(false)
+}
+
+func updateServerStatus(status bool) {
+	serverStatus.Lock()
+	defer serverStatus.Unlock()
+	isServerUp = status
+}
+
+func getServerStatus() bool {
+	serverStatus.RLock()
+	defer serverStatus.RUnlock()
+	return isServerUp
 }

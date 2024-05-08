@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dnsresolver/data"
 	"fmt"
 	"time"
 )
@@ -35,7 +36,7 @@ func showStats() {
 	fmt.Println("Server Up Time:", serverUpTimeFormat(dnsStats.ServerStartTime))
 	fmt.Println()
 	fmt.Println("Total Records:", len(gDNSRecords))
-	fmt.Println("Total DNS Servers:", len(loadDNSServers()))
+	fmt.Println("Total DNS Servers:", len(data.LoadDNSServers()))
 	fmt.Println("Total Cache Records:", len(cacheRecords))
 	fmt.Println()
 	fmt.Println("Total queries received:", dnsStats.TotalQueries)
