@@ -1,6 +1,6 @@
 module dnsresolver
 
-go 1.22
+go 1.22.0
 
 require (
 	github.com/chzyer/readline v1.5.1
