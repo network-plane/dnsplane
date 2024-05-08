@@ -1,10 +1,14 @@
 package main
 
 import (
+	"dnsresolver/cache"
+	"dnsresolver/data"
 	"dnsresolver/dnsrecords"
+	"dnsresolver/dnsserver"
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/miekg/dns"
 )
@@ -43,23 +47,23 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 				dnsStats.TotalCacheHits++
 				processCacheRecord(question, cachedRecord, response)
 			} else {
-				handleDNSServers(question, dnsServers, fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+				handleDNSServers(question, dnsserver.GetDNSArray(dnsServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 			}
 		}
 
 	default:
-		handleDNSServers(question, dnsServers, fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+		handleDNSServers(question, dnsserver.GetDNSArray(dnsServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 	}
 	dnsStats.TotalQueriesAnswered++
 }
 
-func handleAQuestion() {
+// func handleAQuestion() {
 
-}
+// }
 
 func handlePTRQuestion(question dns.Question, response *dns.Msg) {
 	ipAddr := convertReverseDNSToIP(question.Name)
-	dnsRecords := loadDNSRecords()
+	dnsRecords := data.LoadDNSRecords()
 	recordType := dns.TypeToString[question.Qtype]
 
 	rrPointer := findRecord(dnsRecords, ipAddr, recordType)
@@ -87,8 +91,8 @@ func handlePTRQuestion(question dns.Question, response *dns.Msg) {
 		}
 
 	} else {
-		fmt.Println("PTR record not found in records.json")
-		handleDNSServers(question, loadDNSServers(), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+		fmt.Println("PTR record not found in dnsrecords.json")
+		handleDNSServers(question, dnsserver.GetDNSArray(dnsServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 	}
 }
 
@@ -107,7 +111,7 @@ func processAuthoritativeAnswer(question dns.Question, answer *dns.Msg, response
 	response.Authoritative = true
 	fmt.Printf("Query: %s, Reply: %s, Method: DNS server: %s\n", question.Name, answer.Answer[0].String(), answer.Answer[0].Header().Name[:len(answer.Answer[0].Header().Name)-1])
 
-	saveCacheRecords(cacheRecords)
+	data.SaveCacheRecords(cacheRecords)
 }
 
 func handleFallbackServer(question dns.Question, fallbackServer string, response *dns.Msg) {
@@ -116,7 +120,7 @@ func handleFallbackServer(question dns.Question, fallbackServer string, response
 		response.Answer = append(response.Answer, fallbackResponse.Answer...)
 		fmt.Printf("Query: %s, Reply: %s, Method: Fallback DNS server: %s\n", question.Name, fallbackResponse.Answer[0].String(), fallbackServer)
 
-		saveCacheRecords(cacheRecords)
+		data.SaveCacheRecords(cacheRecords)
 	} else {
 		fmt.Printf("Query: %s, No response\n", question.Name)
 	}
@@ -125,10 +129,54 @@ func handleFallbackServer(question dns.Question, fallbackServer string, response
 func processCachedRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
 	response.Answer = append(response.Answer, *cachedRecord)
 	response.Authoritative = true
-	fmt.Printf("Query: %s, Reply: %s, Method: records.json\n", question.Name, (*cachedRecord).String())
+	fmt.Printf("Query: %s, Reply: %s, Method: dnsrecords.json\n", question.Name, (*cachedRecord).String())
 }
 
 func processCacheRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
 	response.Answer = append(response.Answer, *cachedRecord)
-	fmt.Printf("Query: %s, Reply: %s, Method: cache.json\n", question.Name, (*cachedRecord).String())
+	fmt.Printf("Query: %s, Reply: %s, Method: dnscache.json\n", question.Name, (*cachedRecord).String())
+}
+
+func findCacheRecord(cacheRecords []cache.Record, name string, recordType string) *dns.RR {
+	now := time.Now()
+	for _, record := range cacheRecords {
+		if record.DNSRecord.Name == name && record.DNSRecord.Type == recordType {
+			if now.Before(record.Expiry) {
+				remainingTTL := uint32(record.Expiry.Sub(now).Seconds())
+				return dnsRecordToRR(&record.DNSRecord, remainingTTL)
+			}
+		}
+	}
+	return nil
+}
+
+func findRecord(records []dnsrecords.DNSRecord, lookupRecord, recordType string) *dns.RR {
+	for _, record := range records {
+
+		if record.Type == "PTR" || (recordType == "PTR" && dnsServerSettings.AutoBuildPTRFromA) {
+			if record.Value == lookupRecord {
+				recordString := fmt.Sprintf("%s %d IN PTR %s.", convertIPToReverseDNS(lookupRecord), record.TTL, strings.TrimRight(record.Name, "."))
+				fmt.Println("recordstring", recordString)
+
+				rr := recordString
+				dnsRecord, err := dns.NewRR(rr)
+				if err != nil {
+					fmt.Println("Error creating PTR record", err)
+					return nil // Error handling if the PTR record can't be created
+				}
+				// fmt.Println(dnsRecord.String())
+				return &dnsRecord
+			}
+		}
+
+		if record.Name == lookupRecord && record.Type == recordType {
+			rr := fmt.Sprintf("%s %d IN %s %s", record.Name, record.TTL, record.Type, record.Value)
+			dnsRecord, err := dns.NewRR(rr)
+			if err != nil {
+				return nil
+			}
+			return &dnsRecord
+		}
+	}
+	return nil
 }
