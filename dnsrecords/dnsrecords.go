@@ -25,12 +25,12 @@ func Add(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	}
 
 	//check if type (fullCommand[2]) is valid for DNS type
-	if _, ok := dns.StringToType[fullCommand[3]]; !ok {
+	if _, ok := dns.StringToType[fullCommand[2]]; !ok {
 		fmt.Println("Invalid DNS record type. Please enter a valid DNS record type.")
 		return nil
 	}
 
-	ttl64, err := strconv.ParseUint(fullCommand[5], 10, 32)
+	ttl64, err := strconv.ParseUint(fullCommand[4], 10, 32)
 	if err != nil {
 		fmt.Println("Invalid TTL value. Please enter a valid TTL value.")
 		return nil
