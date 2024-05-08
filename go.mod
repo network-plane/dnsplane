@@ -1,6 +1,6 @@
 module dnsresolver
 
-go 1.19
+go 1.22
 
 require (
 	github.com/bettercap/readline v0.0.0-20210228151553-655e48bcb7bf
