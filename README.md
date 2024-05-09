@@ -77,12 +77,6 @@ help, h, ?      - Show help
 Contributions are always welcome!
 All contributions are required to follow the https://google.github.io/styleguide/go/
 
-## Vulnerability Reporting
-
-Please report any security vulnerabilities to the project using issues or directly to the owner.
-
-## Code of Conduct
- This project follows the go project code of conduct, please refer to https://go.dev/conduct for more details
 
 ## Authors
 
