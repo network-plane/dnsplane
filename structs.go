@@ -6,6 +6,8 @@ import (
 	"dnsresolver/dnsserver"
 	"sync"
 	"time"
+
+	"github.com/chzyer/readline"
 )
 
 var (
@@ -14,6 +16,8 @@ var (
 	dnsStats          DNSStats
 	gDNSRecords       []dnsrecords.DNSRecord
 	cacheRecords      []cache.Record
+
+	rlconfig readline.Config
 
 	stopDNSCh    = make(chan struct{})
 	stoppedDNS   = make(chan struct{})

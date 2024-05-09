@@ -55,25 +55,19 @@ func main() {
 		// Start DNS Server
 		startDNSServer(*port)
 
-		// // Configure the DNS server settings
-		// server := &dns.Server{
-		// 	Addr: fmt.Sprintf(":%s", *port),
-		// 	Net:  "udp",
-		// }
-
-		// // Start the DNS server
-		// go func() {
-		// 	log.Printf("Starting DNS server on %s\n", server.Addr)
-		// 	dnsStats.ServerStartTime = time.Now()
-		// 	if err := server.ListenAndServe(); err != nil {
-		// 		fmt.Println("Error starting server:", err)
-		// 		os.Exit(1)
-		// 	}
-		// }()
-
 		// mDNS server setup
 		if *mdnsMode {
 			go startMDNSServer(*mdnsPort)
+		}
+
+		// Configure readline
+		rlconfig = readline.Config{
+			Prompt:                 "> ",
+			HistoryFile:            "/tmp/dnsresolver.history",
+			DisableAutoSaveHistory: true,
+			InterruptPrompt:        "^C",
+			EOFPrompt:              "exit",
+			HistorySearchFold:      true,
 		}
 
 		// If running in daemon mode, exit after starting the server
@@ -85,16 +79,7 @@ func main() {
 			}
 		} else {
 			// Interactive Mode
-			config := readline.Config{
-				Prompt:                 "> ",
-				HistoryFile:            "/tmp/dnsresolver.history",
-				DisableAutoSaveHistory: true,
-				InterruptPrompt:        "^C",
-				EOFPrompt:              "exit",
-				HistorySearchFold:      true,
-			}
-
-			rl, err := readline.NewEx(&config)
+			rl, err := readline.NewEx(&rlconfig)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "readline: %v\n", err)
 				return

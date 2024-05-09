@@ -62,21 +62,13 @@ func connectToUnixSocket(socketPath string) {
 
 	fmt.Println("Connected to UNIX socket:", socketPath)
 
-	// Interactive mode setup from the given snippet
-	config := readline.Config{
-		Prompt:          "> ",
-		HistoryFile:     "/tmp/readline_history.tmp",
-		InterruptPrompt: "^C",
-		EOFPrompt:       "exit",
-	}
-
-	rl, err := readline.NewEx(&config) // Initialize readline
+	// Interactive mode setup
+	rl, err := readline.NewEx(&rlconfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "readline: %v\n", err)
 		return
 	}
 	defer rl.Close() // Close readline when done
 
-	// Call the provided command handling loop
-	handleCommandLoop(rl) // This handles user input in the interactive mode
+	handleCommandLoop(rl) // Call the function for command handling
 }
