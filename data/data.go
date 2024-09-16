@@ -2,7 +2,7 @@
 package data
 
 import (
-	"dnsresolver/cache"
+	"dnsresolver/dnsrecordcache"
 	"dnsresolver/dnsrecords"
 	"dnsresolver/dnsserver"
 	"encoding/json"
@@ -79,18 +79,18 @@ func SaveDNSRecords(gDNSRecords []dnsrecords.DNSRecord) error {
 }
 
 // LoadCacheRecords reads the dnscache.json file and returns the list of cache records
-func LoadCacheRecords() []cache.Record {
+func LoadCacheRecords() []dnsrecordcache.CacheRecord {
 	type cacheType struct {
-		Cache []cache.Record `json:"cache"`
+		Cache []dnsrecordcache.CacheRecord `json:"cache"`
 	}
 	cache := LoadFromJSON[cacheType]("dnscache.json")
 	return cache.Cache
 }
 
 // SaveCacheRecords saves the cache records to the dnscache.json file
-func SaveCacheRecords(cacheRecords []cache.Record) error {
+func SaveCacheRecords(cacheRecords []dnsrecordcache.CacheRecord) error {
 	type cacheType struct {
-		Cache []cache.Record `json:"cache"`
+		Cache []dnsrecordcache.CacheRecord `json:"cache"`
 	}
 
 	data := cacheType{Cache: cacheRecords}
