@@ -99,7 +99,7 @@ func main() {
 		}
 
 		//Create JSON files if they don't exist
-		initializeJSONFiles()
+		data.InitializeJSONFiles()
 
 		//Load Data
 		gDNSRecords = data.LoadDNSRecords()
