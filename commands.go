@@ -7,9 +7,12 @@ import (
 	"dnsresolver/dnsserver"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/chzyer/readline"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // Map to exclude commands from saving to history
@@ -37,7 +40,7 @@ func handleCommandLoop(rl *readline.Instance) {
 
 		if isExitCommand(args[0]) {
 			fmt.Println("Shutting down.")
-			os.Exit(1)
+			os.Exit(0)
 		}
 
 		if !excludedCommands[args[0]] {
@@ -64,21 +67,28 @@ func handleGlobalCommands(args []string, rl *readline.Instance, currentContext *
 	switch args[0] {
 	case "stats":
 		handleStats()
-	case "record", "cache", "dns":
-		handleContextCommand(args[0], args, rl, currentContext)
-	case "server":
-		if len(args) > 1 {
-			switch args[1] {
-			case "start", "stop", "status", "configure":
-				handleContextCommand(args[1], args, rl, currentContext)
-			}
-		}
+	case "record", "cache", "dns", "server":
 		handleContextCommand(args[0], args, rl, currentContext)
 	case "help", "h", "?", "ls", "l":
-		mainHelp()
+		showHelp("")
+	case "exit", "quit", "q":
+		fmt.Println("Shutting down.")
+		os.Exit(0)
 	default:
-		fmt.Println("Unknown command:", args[0])
+		fmt.Printf("Unknown command: %s. Type 'help' for available commands.\n", args[0])
 	}
+}
+
+// Handle server-specific commands
+func handleServerCommand(args []string, rl *readline.Instance, currentContext *string) {
+	if len(args) > 1 {
+		switch args[1] {
+		case "start", "stop", "status", "configure":
+			handleContextCommand(args[1], args[1:], rl, currentContext)
+			return
+		}
+	}
+	handleContextCommand(args[0], args, rl, currentContext)
 }
 
 // Handle context-based commands
@@ -99,35 +109,27 @@ func handleSubcommands(args []string, rl *readline.Instance, currentContext *str
 		return
 	}
 
-	switch *currentContext {
-	case "record", "cache", "dns", "server":
-		handleSubcommand(*currentContext, args, *currentContext)
-	default:
-		fmt.Println("Unknown subcommand:", args[0])
+	if args[0] == "help" || args[0] == "?" {
+		showHelp(*currentContext)
+		return
 	}
+
+	handleSubcommand(*currentContext, args, *currentContext)
 }
 
 // Dispatch subcommands to the appropriate handlers
 func handleSubcommand(command string, args []string, context string) {
-	switch command {
-	case "record":
-		handleRecord(args)
-	case "cache":
-		handleCache(args)
-	case "dns":
-		handleDNS(args)
-	case "server":
-		handleServer(args)
-	case "start":
-		handleServerStart(args)
-	case "stop":
-		handleServerStop(args)
-	case "status":
-		handleServerStatus(args)
-	case "configure":
-		handleServerConfigure(args)
-	default:
-		fmt.Println("Unknown subcommand:", args[0])
+	handlers := map[string]func([]string){
+		"record": handleRecord,
+		"cache":  handleCache,
+		"dns":    handleDNS,
+		"server": handleServer,
+	}
+
+	if handler, ok := handlers[command]; ok {
+		handler(args[1:]) // Pass all arguments except the first (command name)
+	} else {
+		fmt.Printf("Unknown command: %s. Type 'help' for available commands.\n", command)
 	}
 }
 
@@ -137,30 +139,23 @@ func handleStats() {
 }
 
 func handleCommand(args []string, context string, commands map[string]func([]string)) {
-	var argPos int
-	if context == "" {
-		argPos = 1
-		if len(args) < 2 {
-			fmt.Printf("%s subcommand required. Use '%s ?' for help.\n", context, context)
-			return
-		}
-	} else {
-		argPos = 0
+	if len(args) == 0 {
+		fmt.Printf("%s subcommand required. Use '%s ?' for help.\n", context, context)
+		return
 	}
 
-	if checkHelp(args[argPos], context) {
-		if cmd, found := commands[args[argPos]]; found {
-			cmd(args)
-		} else {
-			// fmt.Println(commands)
-			if len(args) > argPos+1 {
-				if cmd, found := commands[args[argPos+1]]; found {
-					cmd(args[argPos+1:])
-				} else {
-					fmt.Printf("Unknown %s subcommand: %s\n", context, args[argPos+1])
-				}
-			}
-		}
+	subCmd := args[0]
+	if !checkHelp(subCmd, context) {
+		// checkHelp returns false if it's a help command and has already displayed help
+		return
+	}
+
+	if handler, ok := commands[subCmd]; ok {
+		// Pass the entire args slice to the handler
+		// The handler should handle cases where no additional arguments are provided
+		handler(args)
+	} else {
+		fmt.Printf("Unknown %s subcommand: %s. Use '%s ?' for help.\n", context, subCmd, context)
 	}
 }
 
@@ -202,207 +197,178 @@ func handleDNS(args []string) {
 }
 
 func handleServer(args []string) {
-	commands := map[string]func([]string){
-		"start":     func(args []string) {},
-		"stop":      func(args []string) {},
-		"status":    func(args []string) {},
-		"configure": func(args []string) { /* config(args) */ },
+	if len(args) == 0 {
+		fmt.Println("Server subcommand required. Use 'server ?' for help.")
+		return
+	}
+
+	serverCommands := map[string]func([]string){
+		"start":     handleServerStart,
+		"stop":      handleServerStop,
+		"status":    handleServerStatus,
+		"configure": handleServerConfigure,
 		"load":      func(args []string) { dnsServerSettings = loadSettings() },
 		"save":      func(args []string) { saveSettings(dnsServerSettings) },
 	}
-	handleCommand(args, "server", commands)
+
+	if cmd, ok := serverCommands[args[0]]; ok {
+		cmd(args[1:])
+	} else {
+		fmt.Printf("Unknown server subcommand: %s. Use 'server ?' for help.\n", args[0])
+	}
 }
 
 func handleServerStart(args []string) {
-	args = args[1:]
-	commands := map[string]func([]string){
-		"dns":  func(args []string) { restartDNSServer(dnsServerSettings.DNSPort) },
-		"mdns": func(args []string) { startMDNSServer(dnsServerSettings.MDNSPort) },
-		"api":  func(args []string) { startGinAPI(dnsServerSettings.RESTPort) },
-		"dhcp": func(args []string) { /* startDHCP() */ },
+	if len(args) == 0 {
+		fmt.Println("Server component to start required. Use 'server start ?' for help.")
+		return
 	}
-	handleCommand(args, "start", commands)
+
+	startCommands := map[string]func(){
+		"dns":  func() { restartDNSServer(dnsServerSettings.DNSPort) },
+		"mdns": func() { startMDNSServer(dnsServerSettings.MDNSPort) },
+		"api":  func() { startGinAPI(dnsServerSettings.RESTPort) },
+		"dhcp": func() { /* startDHCP() */ },
+	}
+
+	if cmd, ok := startCommands[args[0]]; ok {
+		cmd()
+	} else {
+		fmt.Printf("Unknown component to start: %s. Use 'server start ?' for help.\n", args[0])
+	}
 }
 
 func handleServerStop(args []string) {
-	args = args[1:]
-	commands := map[string]func([]string){
-		"dns":  func(args []string) { stopDNSServer() },
-		"mdns": func(args []string) { /* stopMDNSServer() */ },
-		"api":  func(args []string) { /* stopGinAPI() */ },
-		"dhcp": func(args []string) { /* startDHCP() */ },
+	if len(args) == 0 {
+		fmt.Println("Server component to stop required. Use 'server stop ?' for help.")
+		return
 	}
-	handleCommand(args, "stop", commands)
+
+	stopCommands := map[string]func(){
+		"dns":  func() { stopDNSServer() },
+		"mdns": func() { /* stopMDNSServer() */ },
+		"api":  func() { /* stopGinAPI() */ },
+		"dhcp": func() { /* stopDHCP() */ },
+	}
+
+	if cmd, ok := stopCommands[args[0]]; ok {
+		cmd()
+	} else {
+		fmt.Printf("Unknown component to stop: %s. Use 'server stop ?' for help.\n", args[0])
+	}
 }
 
 func handleServerStatus(args []string) {
-	args = args[1:]
-	commands := map[string]func([]string){
-		"dns":  func(args []string) { fmt.Println("DNS Server Status: ", getServerStatus()) },
-		"mdns": func(args []string) { /* stopMDNSServer() */ },
-		"api":  func(args []string) { /* stopGinAPI() */ },
-		"dhcp": func(args []string) { /* startDHCP() */ },
+	if len(args) == 0 {
+		fmt.Println("Server component required. Use 'server status ?' for help.")
+		return
 	}
-	handleCommand(args, "status", commands)
+
+	statusCommands := map[string]func(){
+		"dns":  func() { fmt.Println("DNS Server Status: ", getServerStatus()) },
+		"mdns": func() { /* getMDNSStatus() */ },
+		"api":  func() { /* getAPIStatus() */ },
+		"dhcp": func() { /* getDHCPStatus() */ },
+	}
+
+	if cmd, ok := statusCommands[args[0]]; ok {
+		cmd()
+	} else {
+		fmt.Printf("Unknown status component: %s. Use 'server status ?' for help.\n", args[0])
+	}
 }
 
 func handleServerConfigure(args []string) {
-	args = args[1:]
-	commands := map[string]func([]string){}
-	handleCommand(args, "configure", commands)
+	// Placeholder for server configuration
+	fmt.Println("Server configuration not implemented yet")
 }
 
 func setupAutocomplete(rl *readline.Instance, context string) {
 	updatePrompt(rl, context)
 
-	switch context {
-	case "":
-		rl.Config.AutoComplete = readline.NewPrefixCompleter(
-			readline.PcItem("stats"),
-			readline.PcItem("record",
-				readline.PcItem("add"),
-				readline.PcItem("remove"),
-				readline.PcItem("update"),
-				readline.PcItem("list"),
-				readline.PcItem("clear"),
-				readline.PcItem("load"),
-				readline.PcItem("save"),
-				readline.PcItem("?"),
-			),
-			readline.PcItem("cache",
-				readline.PcItem("list"),
-				readline.PcItem("remove"),
-				readline.PcItem("clear"),
-				readline.PcItem("load"),
-				readline.PcItem("save"),
-				readline.PcItem("?"),
-			),
-			readline.PcItem("dns",
-				readline.PcItem("add"),
-				readline.PcItem("remove"),
-				readline.PcItem("update"),
-				readline.PcItem("list"),
-				readline.PcItem("clear"),
-				readline.PcItem("load"),
-				readline.PcItem("save"),
-				readline.PcItem("?"),
-			),
-			readline.PcItem("server",
-				readline.PcItem("start",
-					readline.PcItem("dns"),
-					readline.PcItem("mdns"),
-					readline.PcItem("api"),
-					readline.PcItem("dhcp"),
-				),
-				readline.PcItem("stop",
-					readline.PcItem("all"),
-					readline.PcItem("dns"),
-					readline.PcItem("mdns"),
-					readline.PcItem("api"),
-					readline.PcItem("dhcp"),
-				),
-				readline.PcItem("status",
-					readline.PcItem("all"),
-					readline.PcItem("dns"),
-					readline.PcItem("mdns"),
-					readline.PcItem("api"),
-					readline.PcItem("dhcp"),
-				),
-				readline.PcItem("configure"),
-				readline.PcItem("load"),
-				readline.PcItem("save"),
-				readline.PcItem("?"),
-			),
-			readline.PcItem("exit"),
-			readline.PcItem("quit"),
-			readline.PcItem("q"),
-			readline.PcItem("help"),
-			readline.PcItem("h"),
-			readline.PcItem("?"),
-		)
-	case "record":
-		rl.Config.AutoComplete = readline.NewPrefixCompleter(
-			readline.PcItem("add"),
-			readline.PcItem("remove"),
-			readline.PcItem("update"),
-			readline.PcItem("list"),
-			readline.PcItem("clear"),
-			readline.PcItem("load"),
-			readline.PcItem("save"),
-			readline.PcItem("?"),
-		)
-	case "cache":
-		rl.Config.AutoComplete = readline.NewPrefixCompleter(
-			readline.PcItem("list"),
-			readline.PcItem("remove"),
-			readline.PcItem("clear"),
-			readline.PcItem("load"),
-			readline.PcItem("save"),
-			readline.PcItem("?"),
-		)
-	case "dns":
-		rl.Config.AutoComplete = readline.NewPrefixCompleter(
-			readline.PcItem("add"),
-			readline.PcItem("remove"),
-			readline.PcItem("update"),
-			readline.PcItem("list"),
-			readline.PcItem("clear"),
-			readline.PcItem("load"),
-			readline.PcItem("save"),
-			readline.PcItem("?"),
-		)
-	case "server":
-		rl.Config.AutoComplete = readline.NewPrefixCompleter(
-			readline.PcItem("start",
-				readline.PcItem("dns"),
-				readline.PcItem("mdns"),
-				readline.PcItem("api"),
-				readline.PcItem("dhcp"),
-			),
-			readline.PcItem("stop",
-				readline.PcItem("dns"),
-				readline.PcItem("mdns"),
-				readline.PcItem("api"),
-				readline.PcItem("dhcp"),
-			),
-			readline.PcItem("status",
-				readline.PcItem("all"),
-				readline.PcItem("dns"),
-				readline.PcItem("mdns"),
-				readline.PcItem("api"),
-				readline.PcItem("dhcp"),
-			),
-			readline.PcItem("configure"),
-			readline.PcItem("load"),
-			readline.PcItem("save"),
-			readline.PcItem("?"),
-		)
-	}
+	completer := readline.NewPrefixCompleter(
+		readline.PcItem("record", readline.PcItemDynamic(func(_ string) []string { return getRecordItems() })),
+		readline.PcItem("cache", readline.PcItemDynamic(func(_ string) []string { return getCacheItems() })),
+		readline.PcItem("dns", readline.PcItemDynamic(func(_ string) []string { return getDNSItems() })),
+		readline.PcItem("server", readline.PcItemDynamic(func(_ string) []string { return getServerItems() })),
+		readline.PcItem("stats"),
+		readline.PcItem("help"),
+		readline.PcItem("h"),
+		readline.PcItem("?"),
+		readline.PcItem("exit"),
+		readline.PcItem("quit"),
+		readline.PcItem("q"),
+	)
+
+	rl.Config.AutoComplete = completer
+}
+
+func getRecordItems() []string {
+	return []string{"add", "remove", "update", "list", "clear", "load", "save", "?"}
+}
+
+func getCacheItems() []string {
+	return []string{"list", "remove", "clear", "load", "save", "?"}
+}
+
+func getDNSItems() []string {
+	return []string{"add", "remove", "update", "list", "clear", "load", "save", "?"}
+}
+
+func getServerItems() []string {
+	return []string{"start", "stop", "status", "configure", "load", "save", "?"}
 }
 
 func updatePrompt(rl *readline.Instance, currentContext string) {
-	if currentContext == "" {
-		rl.SetPrompt("> ")
-	} else {
-		rl.SetPrompt(fmt.Sprintf("(%s) > ", currentContext))
+	prompt := "> "
+	if currentContext != "" {
+		prompt = fmt.Sprintf("(%s) > ", currentContext)
 	}
+	rl.SetPrompt(prompt)
 	rl.Refresh()
 }
 
 //help
 
+func showHelp(context string) {
+	commands := loadCommands()
+	caser := cases.Title(language.English)
+
+	if context == "" {
+		fmt.Println("Available commands:")
+		helpPrinter(commands, false, false)
+		commonHelp(false)
+	} else if cmd, exists := commands[context]; exists {
+		fmt.Printf("%s commands:\n", caser.String(context))
+		helpPrinter(map[string]cmdHelp{context: cmd}, true, true)
+		commonHelp(true)
+	} else {
+		fmt.Printf("Unknown context: %s. Available commands:\n", context)
+		helpPrinter(commands, false, false)
+		commonHelp(false)
+	}
+}
+
 // helpPrinter prints help for commands, optionally including subcommands.
 func helpPrinter(commands map[string]cmdHelp, includeSubCommands bool, isSubCmd bool) {
+	var lines []string
+
 	for _, cmd := range commands {
 		if !isSubCmd {
-			fmt.Printf("%-15s %s\n", cmd.Name, cmd.Description)
+			lines = append(lines, fmt.Sprintf("%-15s %s", cmd.Name, cmd.Description))
 		}
 
 		if includeSubCommands && len(cmd.SubCommands) > 0 {
 			for _, subCmd := range cmd.SubCommands {
-				fmt.Printf("  %-15s %s\n", subCmd.Name, subCmd.Description)
+				lines = append(lines, fmt.Sprintf("  %-15s %s", subCmd.Name, subCmd.Description))
 			}
 		}
+	}
+
+	sort.Strings(lines)
+
+	for _, line := range lines {
+		fmt.Println(line)
 	}
 }
 
@@ -476,8 +442,8 @@ func loadCommands() map[string]cmdHelp {
 			Name:        "cache",
 			Description: "- Cache Management",
 			SubCommands: map[string]cmdHelp{
-				"list":   {"list", "- List all cache entries", nil},
 				"remove": {"remove", "- Remove an entry", nil},
+				"list":   {"list", "- List all cache entries", nil},
 				"clear":  {"clear", "- Clear the cache", nil},
 				"load":   {"load", "- Load Cache records from a file", nil},
 				"save":   {"save", "- Save Cache records to a file", nil},
