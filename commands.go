@@ -4,7 +4,7 @@ import (
 	"dnsresolver/data"
 	"dnsresolver/dnsrecordcache"
 	"dnsresolver/dnsrecords"
-	"dnsresolver/dnsserver"
+	"dnsresolver/dnsservers"
 	"fmt"
 	"os"
 	"sort"
@@ -14,6 +14,12 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
+
+type cmdHelp struct {
+	Name        string
+	Description string
+	SubCommands map[string]cmdHelp
+}
 
 // Map to exclude commands from saving to history
 var excludedCommands = map[string]bool{
@@ -160,6 +166,8 @@ func handleCommand(args []string, context string, commands map[string]func([]str
 }
 
 func handleRecord(args []string) {
+	dnsData := data.GetInstance()
+	gDNSRecords := dnsData.DNSRecords
 	commands := map[string]func([]string){
 		"add":    func(args []string) { gDNSRecords = dnsrecords.Add(args, gDNSRecords) },
 		"remove": func(args []string) { gDNSRecords = dnsrecords.Remove(args, gDNSRecords) },
@@ -169,6 +177,7 @@ func handleRecord(args []string) {
 		"load":   func(args []string) { data.LoadDNSRecords() },
 		"save":   func(args []string) { data.SaveDNSRecords(gDNSRecords) },
 	}
+	dnsData.UpdateRecords(gDNSRecords)
 	handleCommand(args, "record", commands)
 }
 
@@ -187,14 +196,15 @@ func handleDNS(args []string) {
 	dnsData := data.GetInstance()
 	dnsServers := dnsData.DNSServers
 	commands := map[string]func([]string){
-		"add":    func(args []string) { dnsServers = dnsserver.Add(args, dnsServers) },
-		"remove": func(args []string) { dnsServers = dnsserver.Remove(args, dnsServers) },
-		"update": func(args []string) { dnsServers = dnsserver.Update(args, dnsServers) },
-		"list":   func(args []string) { dnsserver.List(dnsServers) },
-		"clear":  func(args []string) { dnsServers = []dnsserver.DNSServer{} },
+		"add":    func(args []string) { dnsServers = dnsservers.Add(args, dnsServers) },
+		"remove": func(args []string) { dnsServers = dnsservers.Remove(args, dnsServers) },
+		"update": func(args []string) { dnsServers = dnsservers.Update(args, dnsServers) },
+		"list":   func(args []string) { dnsservers.List(dnsServers) },
+		"clear":  func(args []string) { dnsServers = []dnsservers.DNSServer{} },
 		"load":   func(args []string) { data.LoadDNSServers() },
 		"save":   func(args []string) { data.SaveDNSServers(dnsServers) },
 	}
+	dnsData.UpdateServers(dnsServers)
 	handleCommand(args, "dns", commands)
 }
 
