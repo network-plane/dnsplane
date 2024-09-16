@@ -4,7 +4,7 @@ package data
 import (
 	"dnsresolver/dnsrecordcache"
 	"dnsresolver/dnsrecords"
-	"dnsresolver/dnsserver"
+	"dnsresolver/dnsservers"
 	"encoding/json"
 	"log"
 	"os"
@@ -32,8 +32,8 @@ import (
 type DNSResolverData struct {
 	Settings     DNSResolverSettings
 	Stats        DNSStats
-	DNSServers   []dnsserver.DNSServer
-	Records      []dnsrecords.DNSRecord
+	DNSServers   []dnsservers.DNSServer
+	DNSRecords   []dnsrecords.DNSRecord
 	CacheRecords []dnsrecordcache.CacheRecord
 	mu           sync.RWMutex
 }
@@ -87,7 +87,7 @@ func (d *DNSResolverData) Initialize() {
 
 	d.Settings = LoadSettings()
 	d.DNSServers = LoadDNSServers()
-	d.Records = LoadDNSRecords()
+	d.DNSRecords = LoadDNSRecords()
 	d.CacheRecords = LoadCacheRecords()
 	d.Stats = DNSStats{ServerStartTime: time.Now()}
 }
@@ -122,14 +122,14 @@ func (d *DNSResolverData) UpdateStats(stats DNSStats) {
 }
 
 // GetServers returns the current DNS servers
-func (d *DNSResolverData) GetServers() []dnsserver.DNSServer {
+func (d *DNSResolverData) GetServers() []dnsservers.DNSServer {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.DNSServers
 }
 
 // UpdateServers updates the DNS servers
-func (d *DNSResolverData) UpdateServers(servers []dnsserver.DNSServer) {
+func (d *DNSResolverData) UpdateServers(servers []dnsservers.DNSServer) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.DNSServers = servers
@@ -140,14 +140,14 @@ func (d *DNSResolverData) UpdateServers(servers []dnsserver.DNSServer) {
 func (d *DNSResolverData) GetRecords() []dnsrecords.DNSRecord {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	return d.Records
+	return d.DNSRecords
 }
 
 // UpdateRecords updates the DNS records
 func (d *DNSResolverData) UpdateRecords(records []dnsrecords.DNSRecord) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.Records = records
+	d.DNSRecords = records
 	SaveDNSRecords(records)
 }
 
@@ -231,9 +231,9 @@ func SaveToJSON[T any](filePath string, data T) error {
 }
 
 // LoadDNSServers reads the dnsservers.json file and returns the list of DNS servers
-func LoadDNSServers() []dnsserver.DNSServer {
+func LoadDNSServers() []dnsservers.DNSServer {
 	type serversType struct {
-		Servers []dnsserver.DNSServer `json:"dnsservers"`
+		Servers []dnsservers.DNSServer `json:"dnsservers"`
 	}
 
 	servers := LoadFromJSON[serversType]("dnsservers.json")
@@ -241,9 +241,9 @@ func LoadDNSServers() []dnsserver.DNSServer {
 }
 
 // SaveDNSServers saves the DNS servers to the dnsservers.json file
-func SaveDNSServers(dnsServers []dnsserver.DNSServer) error {
+func SaveDNSServers(dnsServers []dnsservers.DNSServer) error {
 	type serversType struct {
-		Servers []dnsserver.DNSServer `json:"dnsservers"`
+		Servers []dnsservers.DNSServer `json:"dnsservers"`
 	}
 
 	data := serversType{Servers: dnsServers}

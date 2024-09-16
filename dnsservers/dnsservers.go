@@ -1,5 +1,5 @@
 // Package dnsserver provides the data structure and functions for managing DNS servers.
-package dnsserver
+package dnsservers
 
 import (
 	"fmt"

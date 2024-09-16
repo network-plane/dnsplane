@@ -17,7 +17,7 @@ import (
 	"dnsresolver/data"
 	"dnsresolver/dnsrecordcache"
 	"dnsresolver/dnsrecords"
-	"dnsresolver/dnsserver"
+	"dnsresolver/dnsservers"
 
 	// "github.com/bettercap/readline"
 	"github.com/chzyer/readline"
@@ -27,10 +27,7 @@ import (
 )
 
 var (
-	// dnsServerSettings DNSResolverSettings
-	// dnsServers       []dnsserver.DNSServer
-	// dnsStats         DNSStats
-	gDNSRecords      []dnsrecords.DNSRecord
+	// gDNSRecords      []dnsrecords.DNSRecord
 	cacheRecordsData []dnsrecordcache.CacheRecord
 
 	rlconfig readline.Config
@@ -43,14 +40,7 @@ var (
 	appversion = "0.1.11"
 )
 
-type cmdHelp struct {
-	Name        string
-	Description string
-	SubCommands map[string]cmdHelp
-}
-
 func main() {
-
 	//Create JSON files if they don't exist
 	data.InitializeJSONFiles()
 
@@ -58,7 +48,7 @@ func main() {
 	dnsData := data.GetInstance()
 	dnsServerSettings := dnsData.GetResolverSettings()
 	//Load Data
-	gDNSRecords = data.LoadDNSRecords()
+	// gDNSRecords = data.LoadDNSRecords()
 
 	cacheRecordsData = data.LoadCacheRecords()
 
@@ -240,7 +230,7 @@ func showStats() {
 	fmt.Println("Server start time:", dnsData.Stats.ServerStartTime)
 	fmt.Println("Server Up Time:", serverUpTimeFormat(dnsData.Stats.ServerStartTime))
 	fmt.Println()
-	fmt.Println("Total Records:", len(gDNSRecords))
+	fmt.Println("Total Records:", len(dnsData.DNSRecords))
 	fmt.Println("Total DNS Servers:", len(data.LoadDNSServers()))
 	fmt.Println("Total Cache Records:", len(cacheRecordsData))
 	fmt.Println()
@@ -382,7 +372,7 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 
 	case dns.TypeA:
 		recordType := dns.TypeToString[question.Qtype]
-		cachedRecord := findRecord(gDNSRecords, question.Name, recordType)
+		cachedRecord := findRecord(dnsdata.DNSRecords, question.Name, recordType)
 
 		if cachedRecord != nil {
 			processCachedRecord(question, cachedRecord, response)
@@ -393,12 +383,12 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 				processCacheRecord(question, cachedRecord, response)
 			} else {
 
-				handleDNSServers(question, dnsserver.GetDNSArray(dnsdata.DNSServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+				handleDNSServers(question, dnsservers.GetDNSArray(dnsdata.DNSServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 			}
 		}
 
 	default:
-		handleDNSServers(question, dnsserver.GetDNSArray(dnsdata.DNSServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+		handleDNSServers(question, dnsservers.GetDNSArray(dnsdata.DNSServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 	}
 	dnsData.IncrementQueriesAnswered()
 }
@@ -437,7 +427,7 @@ func handlePTRQuestion(question dns.Question, response *dns.Msg) {
 
 	} else {
 		fmt.Println("PTR record not found in dnsrecords.json")
-		handleDNSServers(question, dnsserver.GetDNSArray(dnsdata.DNSServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+		handleDNSServers(question, dnsservers.GetDNSArray(dnsdata.DNSServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 	}
 }
 
@@ -652,21 +642,10 @@ func connectToUnixSocket(socketPath string) {
 	handleCommandLoop(rl) // Call the function for command handling
 }
 
-// // loadSettings reads the dnsresolver.json file and returns the DNS server settings
-// func loadSettings() DNSResolverSettings {
-// 	return data.LoadFromJSON[DNSResolverSettings]("dnsresolver.json")
-// }
-
-// // saveSettings saves the DNS server settings to the dnsresolver.json file
-// func saveSettings(settings DNSResolverSettings) {
-// 	if err := data.SaveToJSON("dnsresolver.json", settings); err != nil {
-// 		log.Fatalf("Failed to save settings: %v", err)
-// 	}
-// }
-
 // api
 // Wrapper for existing addRecord function
 func addRecordGin(c *gin.Context) {
+	dnsData := data.GetInstance()
 	// Read command from JSON request body
 	var request []string
 	if err := c.ShouldBindJSON(&request); err != nil {
@@ -674,14 +653,15 @@ func addRecordGin(c *gin.Context) {
 		return
 	}
 
-	dnsrecords.Add(request, gDNSRecords) // Call the existing addRecord function with parsed input
+	dnsrecords.Add(request, dnsData.DNSRecords) // Call the existing addRecord function with parsed input
 	c.JSON(201, gin.H{"status": "Record added"})
 }
 
 // Wrapper for existing listRecords function
 func listRecordsGin(c *gin.Context) {
+	dnsData := data.GetInstance()
 	// Call the existing listRecords function
-	dnsrecords.List(gDNSRecords)
+	dnsrecords.List(dnsData.DNSRecords)
 	c.JSON(200, gin.H{"status": "Listed"})
 }
 
