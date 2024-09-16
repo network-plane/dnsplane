@@ -182,6 +182,9 @@ func handleRecord(args []string) {
 }
 
 func handleCache(args []string) {
+	dnsdata := data.GetInstance()
+	cacheRecordsData := dnsdata.CacheRecords
+
 	commands := map[string]func([]string){
 		"list":   func(args []string) { dnsrecordcache.List(cacheRecordsData) },
 		"remove": func(args []string) { cacheRecordsData = dnsrecordcache.Remove(args, cacheRecordsData) },
@@ -189,6 +192,7 @@ func handleCache(args []string) {
 		"load":   func(args []string) { data.LoadCacheRecords() },
 		"save":   func(args []string) { data.SaveCacheRecords(cacheRecordsData) },
 	}
+	dnsdata.UpdateCacheRecords(cacheRecordsData)
 	handleCommand(args, "cache", commands)
 }
 
