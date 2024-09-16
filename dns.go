@@ -1,6 +1,7 @@
 package main
 
 import (
+	"dnsresolver/converters"
 	"dnsresolver/data"
 	"dnsresolver/dnsrecordcache"
 	"dnsresolver/dnsrecords"
@@ -62,7 +63,7 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 // }
 
 func handlePTRQuestion(question dns.Question, response *dns.Msg) {
-	ipAddr := convertReverseDNSToIP(question.Name)
+	ipAddr := converters.ConvertReverseDNSToIP(question.Name)
 	dnsRecords := data.LoadDNSRecords()
 	recordType := dns.TypeToString[question.Qtype]
 
@@ -155,7 +156,7 @@ func findRecord(records []dnsrecords.DNSRecord, lookupRecord, recordType string)
 
 		if record.Type == "PTR" || (recordType == "PTR" && dnsServerSettings.AutoBuildPTRFromA) {
 			if record.Value == lookupRecord {
-				recordString := fmt.Sprintf("%s %d IN PTR %s.", convertIPToReverseDNS(lookupRecord), record.TTL, strings.TrimRight(record.Name, "."))
+				recordString := fmt.Sprintf("%s %d IN PTR %s.", converters.ConvertIPToReverseDNS(lookupRecord), record.TTL, strings.TrimRight(record.Name, "."))
 				fmt.Println("recordstring", recordString)
 
 				rr := recordString
