@@ -1,8 +1,8 @@
 package main
 
 import (
-	"dnsresolver/cache"
 	"dnsresolver/data"
+	"dnsresolver/dnsrecordcache"
 	"dnsresolver/dnsrecords"
 	"dnsresolver/dnsserver"
 	"fmt"
@@ -42,7 +42,7 @@ func handleCommand(args []string, context string, commands map[string]func([]str
 	}
 }
 
-func handleRecord(args []string, currentContext string) {
+func handleRecord(args []string) {
 	commands := map[string]func([]string){
 		"add":    func(args []string) { gDNSRecords = dnsrecords.Add(args, gDNSRecords) },
 		"remove": func(args []string) { gDNSRecords = dnsrecords.Remove(args, gDNSRecords) },
@@ -55,18 +55,18 @@ func handleRecord(args []string, currentContext string) {
 	handleCommand(args, "record", commands)
 }
 
-func handleCache(args []string, currentContext string) {
+func handleCache(args []string) {
 	commands := map[string]func([]string){
-		"list":   func(args []string) { cache.List(cacheRecords) },
-		"remove": func(args []string) { cacheRecords = cache.Remove(args, cacheRecords) },
-		"clear":  func(args []string) { cacheRecords = []cache.Record{} },
+		"list":   func(args []string) { dnsrecordcache.List(cacheRecordsData) },
+		"remove": func(args []string) { cacheRecordsData = dnsrecordcache.Remove(args, cacheRecordsData) },
+		"clear":  func(args []string) { cacheRecordsData = []dnsrecordcache.CacheRecord{} },
 		"load":   func(args []string) { data.LoadCacheRecords() },
-		"save":   func(args []string) { data.SaveCacheRecords(cacheRecords) },
+		"save":   func(args []string) { data.SaveCacheRecords(cacheRecordsData) },
 	}
 	handleCommand(args, "cache", commands)
 }
 
-func handleDNS(args []string, currentContext string) {
+func handleDNS(args []string) {
 	commands := map[string]func([]string){
 		"add":    func(args []string) { dnsServers = dnsserver.Add(args, dnsServers) },
 		"remove": func(args []string) { dnsServers = dnsserver.Remove(args, dnsServers) },
@@ -79,7 +79,7 @@ func handleDNS(args []string, currentContext string) {
 	handleCommand(args, "dns", commands)
 }
 
-func handleServer(args []string, currentContext string) {
+func handleServer(args []string) {
 	commands := map[string]func([]string){
 		"start":     func(args []string) {},
 		"stop":      func(args []string) {},
@@ -91,7 +91,7 @@ func handleServer(args []string, currentContext string) {
 	handleCommand(args, "server", commands)
 }
 
-func handleServerStart(args []string, currentContext string) {
+func handleServerStart(args []string) {
 	args = args[1:]
 	commands := map[string]func([]string){
 		"dns":  func(args []string) { restartDNSServer(dnsServerSettings.DNSPort) },
@@ -102,7 +102,7 @@ func handleServerStart(args []string, currentContext string) {
 	handleCommand(args, "start", commands)
 }
 
-func handleServerStop(args []string, currentContext string) {
+func handleServerStop(args []string) {
 	args = args[1:]
 	commands := map[string]func([]string){
 		"dns":  func(args []string) { stopDNSServer() },
@@ -113,7 +113,7 @@ func handleServerStop(args []string, currentContext string) {
 	handleCommand(args, "stop", commands)
 }
 
-func handleServerStatus(args []string, currentContext string) {
+func handleServerStatus(args []string) {
 	args = args[1:]
 	commands := map[string]func([]string){
 		"dns":  func(args []string) { fmt.Println("DNS Server Status: ", getServerStatus()) },
@@ -124,7 +124,7 @@ func handleServerStatus(args []string, currentContext string) {
 	handleCommand(args, "status", commands)
 }
 
-func handleServerConfigure(args []string, currentContext string) {
+func handleServerConfigure(args []string) {
 	args = args[1:]
 	commands := map[string]func([]string){}
 	handleCommand(args, "configure", commands)

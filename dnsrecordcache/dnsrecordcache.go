@@ -1,5 +1,5 @@
-// Package cache provides a simple in-memory cache
-package cache
+// Package dnsrecordcache provides a simple in-memory cache
+package dnsrecordcache
 
 import (
 	"dnsresolver/dnsrecords"
@@ -10,8 +10,16 @@ import (
 	"github.com/miekg/dns"
 )
 
+// CacheRecord holds the data for the cache records
+type CacheRecord struct {
+	DNSRecord dnsrecords.DNSRecord `json:"dns_record"`
+	Expiry    time.Time            `json:"expiry,omitempty"`
+	Timestamp time.Time            `json:"timestamp,omitempty"`
+	LastQuery time.Time            `json:"last_query,omitempty"`
+}
+
 // Add a new record to the cache
-func Add(cacheRecords []Record, record *dns.RR) []Record {
+func Add(cacheRecordsData []CacheRecord, record *dns.RR) []CacheRecord {
 	var value string
 
 	switch r := (*record).(type) {
@@ -33,7 +41,7 @@ func Add(cacheRecords []Record, record *dns.RR) []Record {
 		value = (*record).String()
 	}
 
-	cacheRecord := Record{
+	cacheRecord := CacheRecord{
 		DNSRecord: dnsrecords.DNSRecord{
 			Name:  (*record).Header().Name,
 			Type:  dns.TypeToString[(*record).Header().Rrtype],
@@ -46,7 +54,7 @@ func Add(cacheRecords []Record, record *dns.RR) []Record {
 
 	// Check if the record already exists in the cache
 	recordIndex := -1
-	for i, existingRecord := range cacheRecords {
+	for i, existingRecord := range cacheRecordsData {
 		if existingRecord.DNSRecord.Name == cacheRecord.DNSRecord.Name &&
 			existingRecord.DNSRecord.Type == cacheRecord.DNSRecord.Type &&
 			existingRecord.DNSRecord.Value == cacheRecord.DNSRecord.Value {
@@ -57,27 +65,27 @@ func Add(cacheRecords []Record, record *dns.RR) []Record {
 
 	// If the record exists in the cache, update its TTL, expiry, and last query, otherwise add it
 	if recordIndex != -1 {
-		cacheRecords[recordIndex].DNSRecord.TTL = cacheRecord.DNSRecord.TTL
-		cacheRecords[recordIndex].Expiry = cacheRecord.Expiry
-		cacheRecords[recordIndex].LastQuery = time.Now()
+		cacheRecordsData[recordIndex].DNSRecord.TTL = cacheRecord.DNSRecord.TTL
+		cacheRecordsData[recordIndex].Expiry = cacheRecord.Expiry
+		cacheRecordsData[recordIndex].LastQuery = time.Now()
 	} else {
 		cacheRecord.LastQuery = time.Now()
-		cacheRecords = append(cacheRecords, cacheRecord)
+		cacheRecordsData = append(cacheRecordsData, cacheRecord)
 	}
 
-	return cacheRecords
+	return cacheRecordsData
 }
 
 // List all records in the cache
-func List(cacheRecords []Record) {
+func List(cacheRecordsData []CacheRecord) {
 	fmt.Println("Cache Records:")
-	for i, record := range cacheRecords {
+	for i, record := range cacheRecordsData {
 		fmt.Printf("%d. %s %s %s %d\n", i+1, record.DNSRecord.Name, record.DNSRecord.Type, record.DNSRecord.Value, record.DNSRecord.TTL)
 	}
 }
 
 // Remove a record from the cache
-func Remove(fullCommand []string, cacheRecords []Record) []Record {
+func Remove(fullCommand []string, cacheRecordsData []CacheRecord) []CacheRecord {
 	if len(fullCommand) > 1 && fullCommand[1] == "?" {
 		fmt.Println("Enter the cache record in the format: <Name>")
 		fmt.Println("Example: example.com")
@@ -91,8 +99,8 @@ func Remove(fullCommand []string, cacheRecords []Record) []Record {
 
 	name := fullCommand[1]
 
-	matchingRecords := []Record{}
-	for _, record := range cacheRecords {
+	matchingRecords := []CacheRecord{}
+	for _, record := range cacheRecordsData {
 		if record.DNSRecord.Name == name {
 			matchingRecords = append(matchingRecords, record)
 		}
@@ -105,12 +113,12 @@ func Remove(fullCommand []string, cacheRecords []Record) []Record {
 
 	if len(fullCommand) == 2 {
 		if len(matchingRecords) == 1 {
-			for i, r := range cacheRecords {
+			for i, r := range cacheRecordsData {
 				if r == matchingRecords[0] {
-					cacheRecords = append(cacheRecords[:i], cacheRecords[i+1:]...)
+					cacheRecordsData = append(cacheRecordsData[:i], cacheRecordsData[i+1:]...)
 					removedRecToPrint := fmt.Sprintf("%s %s %s %d", matchingRecords[0].DNSRecord.Name, matchingRecords[0].DNSRecord.Type, matchingRecords[0].DNSRecord.Value, matchingRecords[0].DNSRecord.TTL)
 					fmt.Println("Removed:", removedRecToPrint)
-					return cacheRecords
+					return cacheRecordsData
 				}
 			}
 			return nil
@@ -122,5 +130,5 @@ func Remove(fullCommand []string, cacheRecords []Record) []Record {
 		return nil
 	}
 
-	return cacheRecords
+	return cacheRecordsData
 }

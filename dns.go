@@ -1,8 +1,8 @@
 package main
 
 import (
-	"dnsresolver/cache"
 	"dnsresolver/data"
+	"dnsresolver/dnsrecordcache"
 	"dnsresolver/dnsrecords"
 	"dnsresolver/dnsserver"
 	"fmt"
@@ -42,7 +42,7 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 		if cachedRecord != nil {
 			processCachedRecord(question, cachedRecord, response)
 		} else {
-			cachedRecord = findCacheRecord(cacheRecords, question.Name, recordType)
+			cachedRecord = findCacheRecord(cacheRecordsData, question.Name, recordType)
 			if cachedRecord != nil {
 				dnsStats.TotalCacheHits++
 				processCacheRecord(question, cachedRecord, response)
@@ -111,7 +111,7 @@ func processAuthoritativeAnswer(question dns.Question, answer *dns.Msg, response
 	response.Authoritative = true
 	fmt.Printf("Query: %s, Reply: %s, Method: DNS server: %s\n", question.Name, answer.Answer[0].String(), answer.Answer[0].Header().Name[:len(answer.Answer[0].Header().Name)-1])
 
-	data.SaveCacheRecords(cacheRecords)
+	data.SaveCacheRecords(cacheRecordsData)
 }
 
 func handleFallbackServer(question dns.Question, fallbackServer string, response *dns.Msg) {
@@ -120,7 +120,7 @@ func handleFallbackServer(question dns.Question, fallbackServer string, response
 		response.Answer = append(response.Answer, fallbackResponse.Answer...)
 		fmt.Printf("Query: %s, Reply: %s, Method: Fallback DNS server: %s\n", question.Name, fallbackResponse.Answer[0].String(), fallbackServer)
 
-		data.SaveCacheRecords(cacheRecords)
+		data.SaveCacheRecords(cacheRecordsData)
 	} else {
 		fmt.Printf("Query: %s, No response\n", question.Name)
 	}
@@ -137,7 +137,7 @@ func processCacheRecord(question dns.Question, cachedRecord *dns.RR, response *d
 	fmt.Printf("Query: %s, Reply: %s, Method: dnscache.json\n", question.Name, (*cachedRecord).String())
 }
 
-func findCacheRecord(cacheRecords []cache.Record, name string, recordType string) *dns.RR {
+func findCacheRecord(cacheRecords []dnsrecordcache.CacheRecord, name string, recordType string) *dns.RR {
 	now := time.Now()
 	for _, record := range cacheRecords {
 		if record.DNSRecord.Name == name && record.DNSRecord.Type == recordType {

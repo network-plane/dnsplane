@@ -107,21 +107,21 @@ func handleSubcommands(args []string, rl *readline.Instance, currentContext *str
 func handleSubcommand(command string, args []string, context string) {
 	switch command {
 	case "record":
-		handleRecord(args, context)
+		handleRecord(args)
 	case "cache":
-		handleCache(args, context)
+		handleCache(args)
 	case "dns":
-		handleDNS(args, context)
+		handleDNS(args)
 	case "server":
-		handleServer(args, context)
+		handleServer(args)
 	case "start":
-		handleServerStart(args, context)
+		handleServerStart(args)
 	case "stop":
-		handleServerStop(args, context)
+		handleServerStop(args)
 	case "status":
-		handleServerStatus(args, context)
+		handleServerStatus(args)
 	case "configure":
-		handleServerConfigure(args, context)
+		handleServerConfigure(args)
 	default:
 		fmt.Println("Unknown subcommand:", args[0])
 	}

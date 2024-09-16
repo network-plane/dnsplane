@@ -37,7 +37,7 @@ func showStats() {
 	fmt.Println()
 	fmt.Println("Total Records:", len(gDNSRecords))
 	fmt.Println("Total DNS Servers:", len(data.LoadDNSServers()))
-	fmt.Println("Total Cache Records:", len(cacheRecords))
+	fmt.Println("Total Cache Records:", len(cacheRecordsData))
 	fmt.Println()
 	fmt.Println("Total queries received:", dnsStats.TotalQueries)
 	fmt.Println("Total queries answered:", dnsStats.TotalQueriesAnswered)
