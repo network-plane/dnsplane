@@ -27,9 +27,6 @@ import (
 )
 
 var (
-	// gDNSRecords      []dnsrecords.DNSRecord
-	cacheRecordsData []dnsrecordcache.CacheRecord
-
 	rlconfig readline.Config
 
 	stopDNSCh    = make(chan struct{})
@@ -37,7 +34,7 @@ var (
 	isServerUp   bool
 	serverStatus sync.RWMutex
 
-	appversion = "0.1.11"
+	appversion = "0.1.13"
 )
 
 func main() {
@@ -47,10 +44,6 @@ func main() {
 	// Initialize data
 	dnsData := data.GetInstance()
 	dnsServerSettings := dnsData.GetResolverSettings()
-	//Load Data
-	// gDNSRecords = data.LoadDNSRecords()
-
-	cacheRecordsData = data.LoadCacheRecords()
 
 	app := cli.App("dnsapp", "DNS Server with optional CLI mode")
 	app.Version("v version", fmt.Sprintf("DNS Resolver %s", appversion))
@@ -232,7 +225,7 @@ func showStats() {
 	fmt.Println()
 	fmt.Println("Total Records:", len(dnsData.DNSRecords))
 	fmt.Println("Total DNS Servers:", len(data.LoadDNSServers()))
-	fmt.Println("Total Cache Records:", len(cacheRecordsData))
+	fmt.Println("Total Cache Records:", len(dnsData.CacheRecords))
 	fmt.Println()
 	fmt.Println("Total queries received:", dnsData.Stats.TotalQueries)
 	fmt.Println("Total queries answered:", dnsData.Stats.TotalQueriesAnswered)
@@ -377,7 +370,7 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 		if cachedRecord != nil {
 			processCachedRecord(question, cachedRecord, response)
 		} else {
-			cachedRecord = findCacheRecord(cacheRecordsData, question.Name, recordType)
+			cachedRecord = findCacheRecord(dnsData.CacheRecords, question.Name, recordType)
 			if cachedRecord != nil {
 				dnsData.IncrementCacheHits()
 				processCacheRecord(question, cachedRecord, response)
@@ -442,20 +435,24 @@ func dnsRecordToRR(dnsRecord *dnsrecords.DNSRecord, ttl uint32) *dns.RR {
 }
 
 func processAuthoritativeAnswer(question dns.Question, answer *dns.Msg, response *dns.Msg) {
+	dnsdata := data.GetInstance()
+
 	response.Answer = append(response.Answer, answer.Answer...)
 	response.Authoritative = true
 	fmt.Printf("Query: %s, Reply: %s, Method: DNS server: %s\n", question.Name, answer.Answer[0].String(), answer.Answer[0].Header().Name[:len(answer.Answer[0].Header().Name)-1])
 
-	data.SaveCacheRecords(cacheRecordsData)
+	data.SaveCacheRecords(dnsdata.CacheRecords)
 }
 
 func handleFallbackServer(question dns.Question, fallbackServer string, response *dns.Msg) {
+	dnsdata := data.GetInstance()
+
 	fallbackResponse, _ := queryAuthoritative(question.Name, fallbackServer)
 	if fallbackResponse != nil {
 		response.Answer = append(response.Answer, fallbackResponse.Answer...)
 		fmt.Printf("Query: %s, Reply: %s, Method: Fallback DNS server: %s\n", question.Name, fallbackResponse.Answer[0].String(), fallbackServer)
 
-		data.SaveCacheRecords(cacheRecordsData)
+		data.SaveCacheRecords(dnsdata.CacheRecords)
 	} else {
 		fmt.Printf("Query: %s, No response\n", question.Name)
 	}
