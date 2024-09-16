@@ -27,11 +27,11 @@ import (
 )
 
 var (
-	dnsServerSettings DNSResolverSettings
-	dnsServers        []dnsserver.DNSServer
-	dnsStats          DNSStats
-	gDNSRecords       []dnsrecords.DNSRecord
-	cacheRecordsData  []dnsrecordcache.CacheRecord
+	// dnsServerSettings DNSResolverSettings
+	// dnsServers       []dnsserver.DNSServer
+	// dnsStats         DNSStats
+	gDNSRecords      []dnsrecords.DNSRecord
+	cacheRecordsData []dnsrecordcache.CacheRecord
 
 	rlconfig readline.Config
 
@@ -42,36 +42,6 @@ var (
 
 	appversion = "0.1.11"
 )
-
-// DNSStats holds the data for the DNS statistics
-type DNSStats struct {
-	TotalQueries          int `json:"total_queries"`
-	TotalCacheHits        int `json:"total_cache_hits"`
-	TotalBlocks           int `json:"total_blocks"`
-	TotalQueriesForwarded int `json:"total_queries_forwarded"`
-	TotalQueriesAnswered  int `json:"total_queries_answered"`
-	ServerStartTime       time.Time
-}
-
-// DNSResolverSettings holds DNS server settings
-type DNSResolverSettings struct {
-	FallbackServerIP   string        `json:"fallback_server_ip"`
-	FallbackServerPort string        `json:"fallback_server_port"`
-	Timeout            int           `json:"timeout"`
-	DNSPort            string        `json:"dns_port"`
-	MDNSPort           string        `json:"mdns_port"`
-	RESTPort           string        `json:"rest_port"`
-	CacheRecords       bool          `json:"cache_records"`
-	AutoBuildPTRFromA  bool          `json:"auto_build_ptr_from_a"`
-	ForwardPTRQueries  bool          `json:"forward_ptr_queries"`
-	FileLocations      fileLocations `json:"file_locations"`
-}
-
-type fileLocations struct {
-	DNSServerFile  string `json:"dnsserver_file"`
-	DNSRecordsFile string `json:"dnsrecords_file"`
-	CacheFile      string `json:"cache_file"`
-}
 
 type cmdHelp struct {
 	Name        string
@@ -84,11 +54,13 @@ func main() {
 	//Create JSON files if they don't exist
 	data.InitializeJSONFiles()
 
+	// Initialize data
+	dnsData := data.GetInstance()
+	dnsServerSettings := dnsData.GetResolverSettings()
 	//Load Data
 	gDNSRecords = data.LoadDNSRecords()
-	dnsServerSettings = loadSettings()
+
 	cacheRecordsData = data.LoadCacheRecords()
-	dnsServers = data.LoadDNSServers()
 
 	app := cli.App("dnsapp", "DNS Server with optional CLI mode")
 	app.Version("v version", fmt.Sprintf("DNS Resolver %s", appversion))
@@ -176,6 +148,8 @@ func main() {
 }
 
 func startDNSServer(port string) {
+	dnsData := data.GetInstance()
+
 	server := &dns.Server{
 		Addr: fmt.Sprintf(":%s", port),
 		Net:  "udp",
@@ -183,7 +157,11 @@ func startDNSServer(port string) {
 
 	log.Printf("Starting DNS server on %s\n", server.Addr)
 	updateServerStatus(true)
-	dnsStats.ServerStartTime = time.Now()
+
+	// Update the server start time
+	stats := dnsData.GetStats()
+	stats.ServerStartTime = time.Now()
+	dnsData.UpdateStats(stats)
 
 	go func() {
 		defer close(stoppedDNS)
@@ -256,18 +234,20 @@ func serverUpTimeFormat(startTime time.Time) string {
 }
 
 func showStats() {
+	dnsData := data.GetInstance()
+
 	fmt.Println("Stats:")
-	fmt.Println("Server start time:", dnsStats.ServerStartTime)
-	fmt.Println("Server Up Time:", serverUpTimeFormat(dnsStats.ServerStartTime))
+	fmt.Println("Server start time:", dnsData.Stats.ServerStartTime)
+	fmt.Println("Server Up Time:", serverUpTimeFormat(dnsData.Stats.ServerStartTime))
 	fmt.Println()
 	fmt.Println("Total Records:", len(gDNSRecords))
 	fmt.Println("Total DNS Servers:", len(data.LoadDNSServers()))
 	fmt.Println("Total Cache Records:", len(cacheRecordsData))
 	fmt.Println()
-	fmt.Println("Total queries received:", dnsStats.TotalQueries)
-	fmt.Println("Total queries answered:", dnsStats.TotalQueriesAnswered)
-	fmt.Println("Total cache hits:", dnsStats.TotalCacheHits)
-	fmt.Println("Total queries forwarded:", dnsStats.TotalQueriesForwarded)
+	fmt.Println("Total queries received:", dnsData.Stats.TotalQueries)
+	fmt.Println("Total queries answered:", dnsData.Stats.TotalQueriesAnswered)
+	fmt.Println("Total cache hits:", dnsData.Stats.TotalCacheHits)
+	fmt.Println("Total queries forwarded:", dnsData.Stats.TotalQueriesForwarded)
 }
 
 // mdns server
@@ -375,7 +355,9 @@ func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
 	response := new(dns.Msg)
 	response.SetReply(request)
 	response.Authoritative = false
-	dnsStats.TotalQueries++
+
+	dnsData := data.GetInstance()
+	dnsData.IncrementTotalQueries()
 
 	for _, question := range request.Question {
 		handleQuestion(question, response)
@@ -388,6 +370,11 @@ func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
 }
 
 func handleQuestion(question dns.Question, response *dns.Msg) {
+	dnsdata := data.GetInstance()
+	dnsServerSettings := dnsdata.GetResolverSettings()
+
+	dnsData := data.GetInstance()
+
 	switch question.Qtype {
 	case dns.TypePTR:
 		handlePTRQuestion(question, response)
@@ -402,24 +389,24 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 		} else {
 			cachedRecord = findCacheRecord(cacheRecordsData, question.Name, recordType)
 			if cachedRecord != nil {
-				dnsStats.TotalCacheHits++
+				dnsData.IncrementCacheHits()
 				processCacheRecord(question, cachedRecord, response)
 			} else {
-				handleDNSServers(question, dnsserver.GetDNSArray(dnsServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+
+				handleDNSServers(question, dnsserver.GetDNSArray(dnsdata.DNSServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 			}
 		}
 
 	default:
-		handleDNSServers(question, dnsserver.GetDNSArray(dnsServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+		handleDNSServers(question, dnsserver.GetDNSArray(dnsdata.DNSServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 	}
-	dnsStats.TotalQueriesAnswered++
+	dnsData.IncrementQueriesAnswered()
 }
 
-// func handleAQuestion() {
-
-// }
-
 func handlePTRQuestion(question dns.Question, response *dns.Msg) {
+	dnsdata := data.GetInstance()
+	dnsServerSettings := dnsdata.GetResolverSettings()
+
 	ipAddr := converters.ConvertReverseDNSToIP(question.Name)
 	dnsRecords := data.LoadDNSRecords()
 	recordType := dns.TypeToString[question.Qtype]
@@ -450,7 +437,7 @@ func handlePTRQuestion(question dns.Question, response *dns.Msg) {
 
 	} else {
 		fmt.Println("PTR record not found in dnsrecords.json")
-		handleDNSServers(question, dnsserver.GetDNSArray(dnsServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
+		handleDNSServers(question, dnsserver.GetDNSArray(dnsdata.DNSServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 	}
 }
 
@@ -509,6 +496,9 @@ func findCacheRecord(cacheRecords []dnsrecordcache.CacheRecord, name string, rec
 }
 
 func findRecord(records []dnsrecords.DNSRecord, lookupRecord, recordType string) *dns.RR {
+	dnsdata := data.GetInstance()
+	dnsServerSettings := dnsdata.GetResolverSettings()
+
 	for _, record := range records {
 
 		if record.Type == "PTR" || (recordType == "PTR" && dnsServerSettings.AutoBuildPTRFromA) {
@@ -662,17 +652,17 @@ func connectToUnixSocket(socketPath string) {
 	handleCommandLoop(rl) // Call the function for command handling
 }
 
-// loadSettings reads the dnsresolver.json file and returns the DNS server settings
-func loadSettings() DNSResolverSettings {
-	return data.LoadFromJSON[DNSResolverSettings]("dnsresolver.json")
-}
+// // loadSettings reads the dnsresolver.json file and returns the DNS server settings
+// func loadSettings() DNSResolverSettings {
+// 	return data.LoadFromJSON[DNSResolverSettings]("dnsresolver.json")
+// }
 
-// saveSettings saves the DNS server settings to the dnsresolver.json file
-func saveSettings(settings DNSResolverSettings) {
-	if err := data.SaveToJSON("dnsresolver.json", settings); err != nil {
-		log.Fatalf("Failed to save settings: %v", err)
-	}
-}
+// // saveSettings saves the DNS server settings to the dnsresolver.json file
+// func saveSettings(settings DNSResolverSettings) {
+// 	if err := data.SaveToJSON("dnsresolver.json", settings); err != nil {
+// 		log.Fatalf("Failed to save settings: %v", err)
+// 	}
+// }
 
 // api
 // Wrapper for existing addRecord function

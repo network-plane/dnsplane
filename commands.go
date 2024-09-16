@@ -184,6 +184,8 @@ func handleCache(args []string) {
 }
 
 func handleDNS(args []string) {
+	dnsData := data.GetInstance()
+	dnsServers := dnsData.DNSServers
 	commands := map[string]func([]string){
 		"add":    func(args []string) { dnsServers = dnsserver.Add(args, dnsServers) },
 		"remove": func(args []string) { dnsServers = dnsserver.Remove(args, dnsServers) },
@@ -202,13 +204,19 @@ func handleServer(args []string) {
 		return
 	}
 
+	dnsData := data.GetInstance()
+	dnsServerSettings := dnsData.Settings
+
 	serverCommands := map[string]func([]string){
 		"start":     handleServerStart,
 		"stop":      handleServerStop,
 		"status":    handleServerStatus,
 		"configure": handleServerConfigure,
-		"load":      func(args []string) { dnsServerSettings = loadSettings() },
-		"save":      func(args []string) { saveSettings(dnsServerSettings) },
+		"load": func(args []string) {
+			dnsServerSettings = data.LoadSettings()
+			dnsData.UpdateSettings(dnsServerSettings)
+		},
+		"save": func(args []string) { data.SaveSettings(dnsServerSettings) },
 	}
 
 	if cmd, ok := serverCommands[args[0]]; ok {
@@ -223,6 +231,9 @@ func handleServerStart(args []string) {
 		fmt.Println("Server component to start required. Use 'server start ?' for help.")
 		return
 	}
+
+	dnsData := data.GetInstance()
+	dnsServerSettings := dnsData.Settings
 
 	startCommands := map[string]func(){
 		"dns":  func() { restartDNSServer(dnsServerSettings.DNSPort) },
