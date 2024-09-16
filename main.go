@@ -80,6 +80,16 @@ type cmdHelp struct {
 }
 
 func main() {
+
+	//Create JSON files if they don't exist
+	data.InitializeJSONFiles()
+
+	//Load Data
+	gDNSRecords = data.LoadDNSRecords()
+	dnsServerSettings = loadSettings()
+	cacheRecordsData = data.LoadCacheRecords()
+	dnsServers = data.LoadDNSServers()
+
 	app := cli.App("dnsapp", "DNS Server with optional CLI mode")
 	app.Version("v version", fmt.Sprintf("DNS Resolver %s", appversion))
 
@@ -105,17 +115,22 @@ func main() {
 			go startGinAPI(*apiport)
 		}
 
-		//Create JSON files if they don't exist
-		data.InitializeJSONFiles()
-
-		//Load Data
-		gDNSRecords = data.LoadDNSRecords()
-		dnsServerSettings = loadSettings()
-		cacheRecordsData = data.LoadCacheRecords()
-		dnsServers = data.LoadDNSServers()
-
 		// Set up the DNS server handler
 		dns.HandleFunc(".", handleRequest)
+
+		//handle settings overriden by command line
+		if *port != dnsServerSettings.DNSPort {
+			dnsServerSettings.DNSPort = *port
+		}
+
+		if *mdnsPort != dnsServerSettings.MDNSPort {
+			dnsServerSettings.MDNSPort = *mdnsPort
+		}
+
+		if *apiport != dnsServerSettings.RESTPort {
+			dnsServerSettings.RESTPort = *apiport
+		}
+
 		// Start DNS Server
 		startDNSServer(*port)
 
