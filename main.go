@@ -199,49 +199,6 @@ func getServerStatus() bool {
 	return isServerUp
 }
 
-//stats
-
-// serverUpTimeFormat formats the time duration since the server start time into a human-readable string.
-func serverUpTimeFormat(startTime time.Time) string {
-	duration := time.Since(startTime)
-
-	days := duration / (24 * time.Hour)
-	duration -= days * 24 * time.Hour
-	hours := duration / time.Hour
-	duration -= hours * time.Hour
-	minutes := duration / time.Minute
-	duration -= minutes * time.Minute
-	seconds := duration / time.Second
-
-	if days > 0 {
-		return fmt.Sprintf("%d days, %d hours, %d minutes, %d seconds", days, hours, minutes, seconds)
-	}
-	if hours > 0 {
-		return fmt.Sprintf("%d hours, %d minutes, %d seconds", hours, minutes, seconds)
-	}
-	if minutes > 0 {
-		return fmt.Sprintf("%d minutes, %d seconds", minutes, seconds)
-	}
-	return fmt.Sprintf("%d seconds", seconds)
-}
-
-func showStats() {
-	dnsData := data.GetInstance()
-
-	fmt.Println("Stats:")
-	fmt.Println("Server start time:", dnsData.Stats.ServerStartTime)
-	fmt.Println("Server Up Time:", serverUpTimeFormat(dnsData.Stats.ServerStartTime))
-	fmt.Println()
-	fmt.Println("Total Records:", len(dnsData.DNSRecords))
-	fmt.Println("Total DNS Servers:", len(data.LoadDNSServers()))
-	fmt.Println("Total Cache Records:", len(dnsData.CacheRecords))
-	fmt.Println()
-	fmt.Println("Total queries received:", dnsData.Stats.TotalQueries)
-	fmt.Println("Total queries answered:", dnsData.Stats.TotalQueriesAnswered)
-	fmt.Println("Total cache hits:", dnsData.Stats.TotalCacheHits)
-	fmt.Println("Total queries forwarded:", dnsData.Stats.TotalQueriesForwarded)
-}
-
 // mdns server
 func startMDNSServer(port string) {
 	portInt, _ := strconv.Atoi(port)
@@ -674,66 +631,4 @@ func startGinAPI(apiport string) {
 	if err := r.Run(fmt.Sprintf(":%s", apiport)); err != nil {
 		log.Fatal("Error starting API:", err)
 	}
-}
-
-// Command handling
-type cmdHelp struct {
-	Name        string
-	Description string
-	SubCommands map[string]cmdHelp
-}
-
-// Map to exclude commands from saving to history
-var excludedCommands = map[string]bool{
-	"q": true, "quit": true, "exit": true, "h": true, "help": true, "ls": true, "l": true, "/": true,
-}
-
-// Check if the command is an exit command
-func isExitCommand(cmd string) bool {
-	return cmd == "q" || cmd == "quit" || cmd == "exit"
-}
-
-func setupAutocomplete(rl *readline.Instance, context string) {
-	updatePrompt(rl, context)
-
-	completer := readline.NewPrefixCompleter(
-		readline.PcItem("record", readline.PcItemDynamic(func(_ string) []string { return getRecordItems() })),
-		readline.PcItem("cache", readline.PcItemDynamic(func(_ string) []string { return getCacheItems() })),
-		readline.PcItem("dns", readline.PcItemDynamic(func(_ string) []string { return getDNSItems() })),
-		readline.PcItem("server", readline.PcItemDynamic(func(_ string) []string { return getServerItems() })),
-		readline.PcItem("stats"),
-		readline.PcItem("help"),
-		readline.PcItem("h"),
-		readline.PcItem("?"),
-		readline.PcItem("exit"),
-		readline.PcItem("quit"),
-		readline.PcItem("q"),
-	)
-
-	rl.Config.AutoComplete = completer
-}
-
-func getRecordItems() []string {
-	return []string{"add", "remove", "update", "list", "clear", "load", "save", "?"}
-}
-
-func getCacheItems() []string {
-	return []string{"list", "remove", "clear", "load", "save", "?"}
-}
-
-func getDNSItems() []string {
-	return []string{"add", "remove", "update", "list", "clear", "load", "save", "?"}
-}
-
-func getServerItems() []string {
-	return []string{"start", "stop", "status", "configure", "load", "save", "?"}
-}
-
-func updatePrompt(rl *readline.Instance, currentContext string) {
-	prompt := "> "
-	if currentContext != "" {
-		prompt = fmt.Sprintf("(%s) > ", currentContext)
-	}
-	rl.SetPrompt(prompt)
-	rl.Refresh()
 }

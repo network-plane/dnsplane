@@ -31,7 +31,6 @@ var excludedCommands = map[string]bool{
 
 // Function variables for server control
 var (
-	startDNSServerFunc   func(string)
 	stopDNSServerFunc    func()
 	restartDNSServerFunc func(string)
 	getServerStatusFunc  func() bool
@@ -43,7 +42,6 @@ var (
 // HandleCommandLoop manages the interactive command loop
 func HandleCommandLoop(rl *readline.Instance, startDNS func(string), stopDNS func(), restartDNS func(string), getStatus func() bool, startMDNS func(string), startAPI func(string)) {
 	// Assign function variables
-	startDNSServerFunc = startDNS
 	stopDNSServerFunc = stopDNS
 	restartDNSServerFunc = restartDNS
 	getServerStatusFunc = getStatus
@@ -139,22 +137,6 @@ func handleContextCommands(args []string, rl *readline.Instance, currentContext 
 	handleSubcommand(*currentContext, args, *currentContext)
 }
 
-// handleSubcommands processes subcommands within a context
-func handleSubcommands(args []string, rl *readline.Instance, currentContext *string) {
-	if args[0] == "/" {
-		*currentContext = "" // Exit context
-		setupAutocomplete(rl, *currentContext)
-		return
-	}
-
-	if args[0] == "help" || args[0] == "?" {
-		showHelp(*currentContext)
-		return
-	}
-
-	handleSubcommand(*currentContext, args, *currentContext)
-}
-
 // handleSubcommand dispatches subcommands to their handlers
 func handleSubcommand(command string, args []string, context string) {
 	handlers := map[string]func([]string){
@@ -171,21 +153,45 @@ func handleSubcommand(command string, args []string, context string) {
 	}
 }
 
-// handleRecord manages 'record' subcommands
 func handleRecord(args []string) {
 	dnsData := data.GetInstance()
+	dnsData.Initialize()
+
 	gDNSRecords := dnsData.DNSRecords
 
 	commands := map[string]func([]string){
-		"add":    func(args []string) { gDNSRecords = dnsrecords.Add(args, gDNSRecords) },
-		"remove": func(args []string) { gDNSRecords = dnsrecords.Remove(args, gDNSRecords) },
-		"update": func(args []string) { dnsrecords.Update(args, gDNSRecords) },
-		"list":   func(args []string) { dnsrecords.List(gDNSRecords) },
-		"clear":  func(args []string) { gDNSRecords = []dnsrecords.DNSRecord{} },
-		"load":   func(args []string) { data.LoadDNSRecords() },
-		"save":   func(args []string) { data.SaveDNSRecords(gDNSRecords) },
+		"add": func(args []string) {
+			gDNSRecords = dnsrecords.Add(args[1:], gDNSRecords)
+			dnsData.UpdateRecords(gDNSRecords)
+		},
+		"remove": func(args []string) {
+			gDNSRecords = dnsrecords.Remove(args[1:], gDNSRecords)
+			if len(gDNSRecords) > 0 && gDNSRecords != nil {
+				dnsData.UpdateRecords(gDNSRecords)
+			}
+		},
+		"update": func(args []string) {
+			dnsrecords.Update(args[1:], gDNSRecords)
+			dnsData.UpdateRecords(gDNSRecords)
+		},
+		"list": func(args []string) {
+			dnsrecords.List(gDNSRecords)
+		},
+		"clear": func(args []string) {
+			gDNSRecords = []dnsrecords.DNSRecord{}
+			dnsData.UpdateRecords(gDNSRecords)
+		},
+		"load": func(args []string) {
+			gDNSRecords = data.LoadDNSRecords()
+			dnsData.UpdateRecords(gDNSRecords)
+		},
+		"save": func(args []string) {
+			err := data.SaveDNSRecords(gDNSRecords)
+			if err != nil {
+				fmt.Println("Error saving DNS records:", err)
+			}
+		},
 	}
-	dnsData.UpdateRecords(gDNSRecords)
 
 	if len(args) == 0 {
 		fmt.Println("Subcommand required. Use 'record ?' for help.")
@@ -199,7 +205,7 @@ func handleRecord(args []string) {
 	}
 
 	if handler, ok := commands[subCmd]; ok {
-		handler(args[1:])
+		handler(args)
 	} else {
 		fmt.Printf("Unknown 'record' subcommand: %s. Use 'record ?' for help.\n", subCmd)
 	}
@@ -448,25 +454,6 @@ func handleServerConfigure(args []string) {
 	}
 }
 
-// handleCommand processes subcommands within a context
-func handleCommand(args []string, context string, commands map[string]func([]string)) {
-	if len(args) == 0 {
-		fmt.Printf("%s subcommand required. Use '%s ?' for help.\n", context, context)
-		return
-	}
-
-	subCmd := args[0]
-	if !checkHelp(subCmd, context) {
-		return
-	}
-
-	if handler, ok := commands[subCmd]; ok {
-		handler(args[1:])
-	} else {
-		fmt.Printf("Unknown %s subcommand: %s. Use '%s ?' for help.\n", context, subCmd, context)
-	}
-}
-
 // setupAutocomplete sets up command autocompletion
 func setupAutocomplete(rl *readline.Instance, context string) {
 	updatePrompt(rl, context)
@@ -580,24 +567,6 @@ func checkHelp(arg, context string) bool {
 	}
 
 	return true
-}
-
-// subCommandHelp prints help for a specific context or for all contexts if none is provided.
-func subCommandHelp(context string) {
-	commands := loadCommands()
-
-	if context == "" {
-		// Print only top-level commands if context is empty
-		helpPrinter(commands, false, false)
-		commonHelp(false)
-	} else if cmd, exists := commands[context]; exists {
-		// Print only subcommands if the context is found
-		helpPrinter(map[string]cmdHelp{context: cmd}, true, true)
-		commonHelp(true)
-	} else {
-		fmt.Println("Unknown context:", context)
-		commonHelp(false)
-	}
 }
 
 // loadCommands returns a map with command information.
