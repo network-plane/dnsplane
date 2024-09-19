@@ -32,18 +32,18 @@ func Add(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	}
 
 	//Add A Record to dnsRecord
-	if len(fullCommand) < 5 {
+	if len(fullCommand) < 4 {
 		println("Invalid DNS record format. Please enter the DNS record in the format: <Name> <Type> [Value] [TTL]")
 		return nil
 	}
 
 	//check if type (fullCommand[2]) is valid for DNS type
-	if _, ok := dns.StringToType[fullCommand[2]]; !ok {
+	if _, ok := dns.StringToType[fullCommand[1]]; !ok {
 		fmt.Println("Invalid DNS record type. Please enter a valid DNS record type.")
 		return nil
 	}
 
-	ttl64, err := strconv.ParseUint(fullCommand[4], 10, 32)
+	ttl64, err := strconv.ParseUint(fullCommand[3], 10, 32)
 	if err != nil {
 		fmt.Println("Invalid TTL value. Please enter a valid TTL value.")
 		return nil
@@ -51,9 +51,9 @@ func Add(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	ttl := uint32(ttl64)
 
 	dnsRecord := DNSRecord{
-		Name:  fullCommand[1],
-		Type:  fullCommand[2],
-		Value: fullCommand[3],
+		Name:  fullCommand[0],
+		Type:  fullCommand[1],
+		Value: fullCommand[2],
 		TTL:   ttl,
 	}
 
@@ -115,12 +115,17 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 		return nil
 	}
 
-	if len(fullCommand) < 2 {
+	if len(fullCommand) < 1 {
 		fmt.Println("Please specify at least the record name.")
 		return nil
 	}
 
-	name := fullCommand[1]
+	name := fullCommand[0]
+
+	//check if last character of name is '.' if not add a . to the end
+	if name[len(name)-1] != '.' {
+		name = name + "."
+	}
 
 	matchingRecords := []DNSRecord{}
 	for _, record := range dnsRecords {
@@ -130,27 +135,24 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	}
 
 	if len(matchingRecords) == 0 {
-		fmt.Println("No records found with the name:", name)
+		fmt.Println("No records found with the name: ", name)
 		return nil
 	}
 
-	if len(fullCommand) == 2 {
-		if len(matchingRecords) == 1 {
-			for i, r := range dnsRecords {
-				if r == matchingRecords[0] {
-					dnsRecords = append(dnsRecords[:i], dnsRecords[i+1:]...)
-					removedRecToPrint := converters.ConvertValuesToStrings(converters.GetFieldValuesByNamesArray(matchingRecords[0], []string{"Name", "Type", "Value", "TTL"}))
-					fmt.Println("Removed:", removedRecToPrint)
-					return dnsRecords
-				}
+	if len(matchingRecords) == 1 {
+		for i, r := range dnsRecords {
+			if r.Name == matchingRecords[0].Name {
+				dnsRecords = append(dnsRecords[:i], dnsRecords[i+1:]...)
+				removedRecToPrint := converters.ConvertValuesToStrings(converters.GetFieldValuesByNamesArray(matchingRecords[0], []string{"Name", "Type", "Value", "TTL"}))
+				fmt.Println("Removed:", removedRecToPrint)
+				return dnsRecords
 			}
-			return nil
 		}
-		fmt.Println("Multiple records found with the name:", name)
-		for i, record := range matchingRecords {
-			fmt.Printf("%d. %v\n", i+1, record)
-		}
-		return nil
+	}
+
+	fmt.Println("Multiple records found with the name:", name)
+	for i, record := range matchingRecords {
+		fmt.Printf("%d. %v\n", i+1, record)
 	}
 
 	if len(fullCommand) < 4 {
