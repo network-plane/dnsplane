@@ -319,23 +319,6 @@ func handleMDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	}
 }
 
-func isMDNSQuery(name string) bool {
-	// Check if the query is for the .local domain
-	if strings.HasSuffix(name, ".local.") {
-		return true
-	}
-
-	// Split the query name by dots
-	parts := strings.Split(name, ".")
-
-	// Check if the query has at least four parts (minimum for an mDNS query)
-	if len(parts) < 3 {
-		return false
-	}
-
-	return false
-}
-
 // DNS
 func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
 	response := new(dns.Msg)
@@ -737,7 +720,7 @@ func isExitCommand(cmd string) bool {
 func handleGlobalCommands(args []string, rl *readline.Instance, currentContext *string) {
 	switch args[0] {
 	case "stats":
-		handleStats()
+		showStats()
 	case "record", "cache", "dns", "server":
 		handleContextCommand(args[0], args, rl, currentContext)
 	case "help", "h", "?", "ls", "l":
@@ -748,18 +731,6 @@ func handleGlobalCommands(args []string, rl *readline.Instance, currentContext *
 	default:
 		fmt.Printf("Unknown command: %s. Type 'help' for available commands.\n", args[0])
 	}
-}
-
-// Handle server-specific commands
-func handleServerCommand(args []string, rl *readline.Instance, currentContext *string) {
-	if len(args) > 1 {
-		switch args[1] {
-		case "start", "stop", "status", "configure":
-			handleContextCommand(args[1], args[1:], rl, currentContext)
-			return
-		}
-	}
-	handleContextCommand(args[0], args, rl, currentContext)
 }
 
 // Handle context-based commands
@@ -798,15 +769,22 @@ func handleSubcommand(command string, args []string, context string) {
 	}
 
 	if handler, ok := handlers[command]; ok {
-		handler(args[1:]) // Pass all arguments except the first (command name)
+		var subArgs []string
+		if context == "" {
+			// Outside context, remove the command from args
+			if len(args) > 1 {
+				subArgs = args[1:]
+			} else {
+				subArgs = []string{}
+			}
+		} else {
+			// Inside context, use args as is
+			subArgs = args
+		}
+		handler(subArgs)
 	} else {
 		fmt.Printf("Unknown command: %s. Type 'help' for available commands.\n", command)
 	}
-}
-
-// Handlers for the commands
-func handleStats() {
-	showStats()
 }
 
 func handleCommand(args []string, context string, commands map[string]func([]string)) {
@@ -968,7 +946,7 @@ func handleServerStatus(args []string) {
 	}
 }
 
-func handleServerConfigure(args []string) {
+func handleServerConfigure() {
 	// Placeholder for server configuration
 	fmt.Println("Server configuration not implemented yet")
 }
@@ -1071,13 +1049,6 @@ func commonHelp(indent bool) {
 	fmt.Printf("%s%-15s %s\n", indentation, "/", "- Go up one level")
 	fmt.Printf("%s%-15s %s\n", indentation, "exit, quit, q", "- Shutdown the server")
 	fmt.Printf("%s%-15s %s\n", indentation, "help, h, ?", "- Show help")
-}
-
-// mainHelp displays the available commands without subcommands.
-func mainHelp() {
-	fmt.Println("Available commands:")
-	helpPrinter(loadCommands(), false, false)
-	commonHelp(false) // Add common help commands
 }
 
 // checkHelp determines if the argument is for help.
