@@ -39,6 +39,9 @@ help, h, ?      - Show help
 ./dnsresolver --client-mode
 ```
 
+### Recording of clearing and adding dns records
+https://github.com/user-attachments/assets/f5ca52cb-3874-499c-a594-ba3bf64b3ba9
+
 
 ## Config Files
 
