@@ -6,6 +6,7 @@ import (
 	"dnsresolver/dnsrecords"
 	"dnsresolver/dnsservers"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -133,7 +134,10 @@ func (d *DNSResolverData) UpdateServers(servers []dnsservers.DNSServer) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.DNSServers = servers
-	SaveDNSServers(servers)
+	err := SaveDNSServers(servers)
+	if err != nil {
+		fmt.Println("Failed to save cache records:", err)
+	}
 }
 
 // GetRecords returns the current DNS records
@@ -148,7 +152,10 @@ func (d *DNSResolverData) UpdateRecords(records []dnsrecords.DNSRecord) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.DNSRecords = records
-	SaveDNSRecords(records)
+	err := SaveDNSRecords(records)
+	if err != nil {
+		fmt.Println("Failed to save cache records:", err)
+	}
 }
 
 // GetCacheRecords returns the current cache records
@@ -163,7 +170,10 @@ func (d *DNSResolverData) UpdateCacheRecords(records []dnsrecordcache.CacheRecor
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.CacheRecords = records
-	SaveCacheRecords(records)
+	err := SaveCacheRecords(records)
+	if err != nil {
+		fmt.Println("Failed to save cache records:", err)
+	}
 }
 
 // IncrementTotalQueries increments the total queries count

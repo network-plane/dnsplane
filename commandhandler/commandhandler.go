@@ -39,7 +39,6 @@ var (
 )
 
 // HandleCommandLoop manages the interactive command loop
-// HandleCommandLoop manages the interactive command loop
 func HandleCommandLoop(rl *readline.Instance, startDNS func(string), stopDNS func(), restartDNS func(string), getStatus func() bool, startMDNS func(string), startAPI func(string)) {
 	// Assign function variables
 	stopDNSServerFunc = stopDNS
@@ -98,7 +97,7 @@ func handleGlobalCommands(args []string, rl *readline.Instance, currentContext *
 	case "stats":
 		handleStats()
 	case "record", "cache", "dns", "server":
-		handleContextCommand(args[0], args, rl, currentContext)
+		handleContextCommand(args[0], args[1:], rl, currentContext)
 	case "help", "h", "?", "ls", "l":
 		showHelp("")
 	case "exit", "quit", "q":
@@ -109,18 +108,7 @@ func handleGlobalCommands(args []string, rl *readline.Instance, currentContext *
 	}
 }
 
-// handleContextCommand enters a subcommand context or executes a command directly
-func handleContextCommand(command string, args []string, rl *readline.Instance, currentContext *string) {
-	if len(args) > 1 {
-		// Execute subcommand directly
-		handleSubcommand(command, args[1:], *currentContext)
-	} else {
-		// Enter context
-		*currentContext = command
-		setupAutocomplete(rl, *currentContext)
-	}
-}
-
+// handleContextCommands processes commands within a specific context
 func handleContextCommands(args []string, rl *readline.Instance, currentContext *string) {
 	if args[0] == "/" {
 		*currentContext = "" // Exit context
@@ -134,11 +122,18 @@ func handleContextCommands(args []string, rl *readline.Instance, currentContext 
 	}
 
 	// Handle subcommand within context
-	handleSubcommand(*currentContext, args, *currentContext)
+	handleContextCommand(*currentContext, args, rl, currentContext)
 }
 
-// handleSubcommand dispatches subcommands to their handlers
-func handleSubcommand(command string, args []string, context string) {
+// handleContextCommand handles commands within a context or executes a subcommand directly
+func handleContextCommand(context string, args []string, rl *readline.Instance, currentContext *string) {
+	if len(args) == 0 {
+		// Enter context
+		*currentContext = context
+		setupAutocomplete(rl, *currentContext)
+		return
+	}
+
 	handlers := map[string]func([]string){
 		"record": handleRecord,
 		"cache":  handleCache,
@@ -146,13 +141,14 @@ func handleSubcommand(command string, args []string, context string) {
 		"server": handleServer,
 	}
 
-	if handler, ok := handlers[command]; ok {
+	if handler, ok := handlers[context]; ok {
 		handler(args)
 	} else {
-		fmt.Printf("Unknown command: %s. Type 'help' for available commands.\n", command)
+		fmt.Printf("Unknown context: %s. Type 'help' for available commands.\n", context)
 	}
 }
 
+// handleRecord processes 'record' subcommands
 func handleRecord(args []string) {
 	dnsData := data.GetInstance()
 	dnsData.Initialize()
@@ -161,17 +157,15 @@ func handleRecord(args []string) {
 
 	commands := map[string]func([]string){
 		"add": func(args []string) {
-			gDNSRecords = dnsrecords.Add(args[1:], gDNSRecords)
+			gDNSRecords = dnsrecords.Add(args, gDNSRecords)
 			dnsData.UpdateRecords(gDNSRecords)
 		},
 		"remove": func(args []string) {
-			gDNSRecords = dnsrecords.Remove(args[1:], gDNSRecords)
-			if len(gDNSRecords) > 0 && gDNSRecords != nil {
-				dnsData.UpdateRecords(gDNSRecords)
-			}
+			gDNSRecords = dnsrecords.Remove(args, gDNSRecords)
+			dnsData.UpdateRecords(gDNSRecords)
 		},
 		"update": func(args []string) {
-			dnsrecords.Update(args[1:], gDNSRecords)
+			gDNSRecords = dnsrecords.Update(args, gDNSRecords)
 			dnsData.UpdateRecords(gDNSRecords)
 		},
 		"list": func(args []string) {
@@ -180,110 +174,96 @@ func handleRecord(args []string) {
 		"clear": func(args []string) {
 			gDNSRecords = []dnsrecords.DNSRecord{}
 			dnsData.UpdateRecords(gDNSRecords)
+			fmt.Println("All DNS records have been cleared.")
 		},
 		"load": func(args []string) {
 			gDNSRecords = data.LoadDNSRecords()
 			dnsData.UpdateRecords(gDNSRecords)
+			fmt.Println("DNS records loaded.")
 		},
 		"save": func(args []string) {
-			err := data.SaveDNSRecords(gDNSRecords)
-			if err != nil {
-				fmt.Println("Error saving DNS records:", err)
-			}
+			data.SaveDNSRecords(gDNSRecords)
+			fmt.Println("DNS records saved.")
 		},
 	}
 
-	if len(args) == 0 {
-		fmt.Println("Subcommand required. Use 'record ?' for help.")
-		return
-	}
-
-	subCmd := args[0]
-
-	if !checkHelp(subCmd, "record") {
-		return
-	}
-
-	if handler, ok := commands[subCmd]; ok {
-		handler(args)
-	} else {
-		fmt.Printf("Unknown 'record' subcommand: %s. Use 'record ?' for help.\n", subCmd)
-	}
+	executeSubCommand("record", args, commands)
 }
 
+// handleCache processes 'cache' subcommands
 func handleCache(args []string) {
 	dnsData := data.GetInstance()
 	cacheRecordsData := dnsData.CacheRecords
 
 	commands := map[string]func([]string){
-		"list":   func(args []string) { dnsrecordcache.List(cacheRecordsData) },
-		"remove": func(args []string) { cacheRecordsData = dnsrecordcache.Remove(args, cacheRecordsData) },
-		"clear":  func(args []string) { cacheRecordsData = []dnsrecordcache.CacheRecord{} },
-		"load":   func(args []string) { data.LoadCacheRecords() },
-		"save":   func(args []string) { data.SaveCacheRecords(cacheRecordsData) },
+		"list": func(args []string) {
+			dnsrecordcache.List(cacheRecordsData)
+		},
+		"remove": func(args []string) {
+			cacheRecordsData = dnsrecordcache.Remove(args, cacheRecordsData)
+			dnsData.UpdateCacheRecords(cacheRecordsData)
+		},
+		"clear": func(args []string) {
+			cacheRecordsData = []dnsrecordcache.CacheRecord{}
+			dnsData.UpdateCacheRecords(cacheRecordsData)
+			fmt.Println("Cache cleared.")
+		},
+		"load": func(args []string) {
+			cacheRecordsData = data.LoadCacheRecords()
+			dnsData.UpdateCacheRecords(cacheRecordsData)
+			fmt.Println("Cache records loaded.")
+		},
+		"save": func(args []string) {
+			data.SaveCacheRecords(cacheRecordsData)
+			fmt.Println("Cache records saved.")
+		},
 	}
 
-	dnsData.UpdateCacheRecords(cacheRecordsData)
-
-	if len(args) == 0 {
-		fmt.Println("Subcommand required. Use 'cache ?' for help.")
-		return
-	}
-
-	subCmd := args[0]
-
-	if !checkHelp(subCmd, "cache") {
-		return
-	}
-
-	if handler, ok := commands[subCmd]; ok {
-		handler(args[1:])
-	} else {
-		fmt.Printf("Unknown 'cache' subcommand: %s. Use 'cache ?' for help.\n", subCmd)
-	}
+	executeSubCommand("cache", args, commands)
 }
 
+// handleDNS processes 'dns' subcommands
 func handleDNS(args []string) {
 	dnsData := data.GetInstance()
 	dnsServers := dnsData.DNSServers
 
 	commands := map[string]func([]string){
-		"add":    func(args []string) { dnsServers = dnsservers.Add(args, dnsServers) },
-		"remove": func(args []string) { dnsServers = dnsservers.Remove(args, dnsServers) },
-		"update": func(args []string) { dnsServers = dnsservers.Update(args, dnsServers) },
-		"list":   func(args []string) { dnsservers.List(dnsServers) },
-		"clear":  func(args []string) { dnsServers = []dnsservers.DNSServer{} },
-		"load":   func(args []string) { data.LoadDNSServers() },
-		"save":   func(args []string) { data.SaveDNSServers(dnsServers) },
+		"add": func(args []string) {
+			dnsServers = dnsservers.Add(args, dnsServers)
+			dnsData.UpdateServers(dnsServers)
+		},
+		"remove": func(args []string) {
+			dnsServers = dnsservers.Remove(args, dnsServers)
+			dnsData.UpdateServers(dnsServers)
+		},
+		"update": func(args []string) {
+			dnsServers = dnsservers.Update(args, dnsServers)
+			dnsData.UpdateServers(dnsServers)
+		},
+		"list": func(args []string) {
+			dnsservers.List(dnsServers)
+		},
+		"clear": func(args []string) {
+			dnsServers = []dnsservers.DNSServer{}
+			dnsData.UpdateServers(dnsServers)
+			fmt.Println("All DNS servers have been cleared.")
+		},
+		"load": func(args []string) {
+			dnsServers = data.LoadDNSServers()
+			dnsData.UpdateServers(dnsServers)
+			fmt.Println("DNS servers loaded.")
+		},
+		"save": func(args []string) {
+			data.SaveDNSServers(dnsServers)
+			fmt.Println("DNS servers saved.")
+		},
 	}
 
-	dnsData.UpdateServers(dnsServers)
-
-	if len(args) == 0 {
-		fmt.Println("Subcommand required. Use 'dns ?' for help.")
-		return
-	}
-
-	subCmd := args[0]
-
-	if !checkHelp(subCmd, "dns") {
-		return
-	}
-
-	if handler, ok := commands[subCmd]; ok {
-		handler(args[1:])
-	} else {
-		fmt.Printf("Unknown 'dns' subcommand: %s. Use 'dns ?' for help.\n", subCmd)
-	}
+	executeSubCommand("dns", args, commands)
 }
 
 // handleServer manages 'server' subcommands, utilizing the passed-in functions
 func handleServer(args []string) {
-	if len(args) == 0 {
-		fmt.Println("Subcommand required. Use 'server ?' for help.")
-		return
-	}
-
 	commands := map[string]func([]string){
 		"start":     handleServerStart,
 		"stop":      handleServerStop,
@@ -293,19 +273,30 @@ func handleServer(args []string) {
 		"save":      handleServerSave,
 	}
 
+	executeSubCommand("server", args, commands)
+}
+
+// executeSubCommand executes the appropriate subcommand handler
+func executeSubCommand(context string, args []string, commands map[string]func([]string)) {
+	if len(args) == 0 {
+		fmt.Printf("Subcommand required. Use '%s ?' for help.\n", context)
+		return
+	}
+
 	subCmd := args[0]
 
-	if !checkHelp(subCmd, "server") {
+	if !checkHelp(subCmd, context) {
 		return
 	}
 
 	if handler, ok := commands[subCmd]; ok {
 		handler(args[1:])
 	} else {
-		fmt.Printf("Unknown 'server' subcommand: %s. Use 'server ?' for help.\n", subCmd)
+		fmt.Printf("Unknown '%s' subcommand: %s. Use '%s ?' for help.\n", context, subCmd, context)
 	}
 }
 
+// handleServerLoad handles 'server load' command
 func handleServerLoad(args []string) {
 	dnsData := data.GetInstance()
 	dnsServerSettings := data.LoadSettings()
@@ -313,12 +304,14 @@ func handleServerLoad(args []string) {
 	fmt.Println("Server settings loaded.")
 }
 
+// handleServerSave handles 'server save' command
 func handleServerSave(args []string) {
 	dnsData := data.GetInstance()
 	data.SaveSettings(dnsData.Settings)
 	fmt.Println("Server settings saved.")
 }
 
+// handleServerStart handles 'server start' command
 func handleServerStart(args []string) {
 	if len(args) == 0 {
 		fmt.Println("Server component to start required. Use 'server start ?' for help.")
@@ -329,18 +322,30 @@ func handleServerStart(args []string) {
 	dnsServerSettings := dnsData.Settings
 
 	startCommands := map[string]func(){
-		"dns":  func() { restartDNSServerFunc(dnsServerSettings.DNSPort) },
-		"mdns": func() { startMDNSServerFunc(dnsServerSettings.MDNSPort) },
-		"api":  func() { startGinAPIFunc(dnsServerSettings.RESTPort) },
+		"dns": func() {
+			restartDNSServerFunc(dnsServerSettings.DNSPort)
+			fmt.Println("DNS server started.")
+		},
+		"mdns": func() {
+			startMDNSServerFunc(dnsServerSettings.MDNSPort)
+			fmt.Println("mDNS server started.")
+		},
+		"api": func() {
+			startGinAPIFunc(dnsServerSettings.RESTPort)
+			fmt.Println("API server started.")
+		},
 	}
 
-	if cmd, ok := startCommands[args[0]]; ok {
+	component := args[0]
+
+	if cmd, ok := startCommands[component]; ok {
 		cmd()
 	} else {
-		fmt.Printf("Unknown component to start: %s. Use 'server start ?' for help.\n", args[0])
+		fmt.Printf("Unknown component to start: %s. Use 'server start ?' for help.\n", component)
 	}
 }
 
+// handleServerStop handles 'server stop' command
 func handleServerStop(args []string) {
 	if len(args) == 0 {
 		fmt.Println("Server component to stop required. Use 'server stop ?' for help.")
@@ -360,7 +365,6 @@ func handleServerStop(args []string) {
 			// Implement API stop logic if needed
 			fmt.Println("API server stop not implemented yet.")
 		},
-		// Add other components as needed
 	}
 
 	component := args[0]
@@ -372,6 +376,7 @@ func handleServerStop(args []string) {
 	}
 }
 
+// handleServerStatus handles 'server status' command
 func handleServerStatus(args []string) {
 	if len(args) == 0 {
 		fmt.Println("Server component required. Use 'server status ?' for help.")
@@ -394,7 +399,6 @@ func handleServerStatus(args []string) {
 			// Implement API status logic if needed
 			fmt.Println("API server status not implemented yet.")
 		},
-		// Add other components as needed
 	}
 
 	component := args[0]
@@ -406,6 +410,7 @@ func handleServerStatus(args []string) {
 	}
 }
 
+// handleServerConfigure handles 'server configure' command
 func handleServerConfigure(args []string) {
 	dnsData := data.GetInstance()
 	dnsServerSettings := dnsData.Settings
@@ -418,7 +423,6 @@ func handleServerConfigure(args []string) {
 		fmt.Printf("API Port: %s\n", dnsServerSettings.RESTPort)
 		fmt.Printf("Fallback Server IP: %s\n", dnsServerSettings.FallbackServerIP)
 		fmt.Printf("Fallback Server Port: %s\n", dnsServerSettings.FallbackServerPort)
-		// Add other settings as needed
 	} else {
 		// Set configuration parameters
 		if len(args) < 2 {
@@ -444,9 +448,9 @@ func handleServerConfigure(args []string) {
 		case "fallback_port":
 			dnsServerSettings.FallbackServerPort = value
 			fmt.Printf("Fallback Server Port set to %s\n", value)
-		// Add other settings as needed
 		default:
 			fmt.Printf("Unknown setting: %s\n", setting)
+			return
 		}
 
 		dnsData.UpdateSettings(dnsServerSettings)
@@ -458,39 +462,49 @@ func handleServerConfigure(args []string) {
 func setupAutocomplete(rl *readline.Instance, context string) {
 	updatePrompt(rl, context)
 
-	completer := readline.NewPrefixCompleter(
-		readline.PcItem("record", readline.PcItemDynamic(func(_ string) []string { return getRecordItems() })),
-		readline.PcItem("cache", readline.PcItemDynamic(func(_ string) []string { return getCacheItems() })),
-		readline.PcItem("dns", readline.PcItemDynamic(func(_ string) []string { return getDNSItems() })),
-		readline.PcItem("server", readline.PcItemDynamic(func(_ string) []string { return getServerItems() })),
-		readline.PcItem("stats"),
-		readline.PcItem("help"),
-		readline.PcItem("h"),
-		readline.PcItem("?"),
-		readline.PcItem("exit"),
-		readline.PcItem("quit"),
-		readline.PcItem("q"),
-	)
+	var completer *readline.PrefixCompleter
+
+	if context == "" {
+		completer = readline.NewPrefixCompleter(
+			readline.PcItem("record"),
+			readline.PcItem("cache"),
+			readline.PcItem("dns"),
+			readline.PcItem("server"),
+			readline.PcItem("stats"),
+			readline.PcItem("help"),
+			readline.PcItem("h"),
+			readline.PcItem("?"),
+			readline.PcItem("exit"),
+			readline.PcItem("quit"),
+			readline.PcItem("q"),
+		)
+	} else {
+		subCommands := getSubCommands(context)
+		completer = readline.NewPrefixCompleter(
+			readline.PcItemDynamic(func(string) []string { return subCommands }),
+		)
+	}
 
 	rl.Config.AutoComplete = completer
 }
 
-func getRecordItems() []string {
-	return []string{"add", "remove", "update", "list", "clear", "load", "save", "?"}
+// getSubCommands returns the subcommands for the given context
+func getSubCommands(context string) []string {
+	commands := loadCommands()
+	if cmd, exists := commands[context]; exists {
+		subCmds := []string{}
+		for subCmd := range cmd.SubCommands {
+			subCmds = append(subCmds, subCmd)
+		}
+		// Add common commands
+		subCmds = append(subCmds, "/", "help", "h", "?")
+		sort.Strings(subCmds)
+		return subCmds
+	}
+	return []string{}
 }
 
-func getCacheItems() []string {
-	return []string{"list", "remove", "clear", "load", "save", "?"}
-}
-
-func getDNSItems() []string {
-	return []string{"add", "remove", "update", "list", "clear", "load", "save", "?"}
-}
-
-func getServerItems() []string {
-	return []string{"start", "stop", "status", "configure", "load", "save", "?"}
-}
-
+// updatePrompt updates the readline prompt based on the current context
 func updatePrompt(rl *readline.Instance, currentContext string) {
 	prompt := "> "
 	if currentContext != "" {
@@ -500,8 +514,7 @@ func updatePrompt(rl *readline.Instance, currentContext string) {
 	rl.Refresh()
 }
 
-// help functions (showHelp, helpPrinter, etc.) remain largely the same
-
+// showHelp displays help information based on the context
 func showHelp(context string) {
 	commands := loadCommands()
 	caser := cases.Title(language.English)
@@ -589,11 +602,11 @@ func loadCommands() map[string]cmdHelp {
 			Name:        "cache",
 			Description: "- Cache Management",
 			SubCommands: map[string]cmdHelp{
-				"remove": {"remove", "- Remove an entry", nil},
+				"remove": {"remove", "- Remove a cache entry", nil},
 				"list":   {"list", "- List all cache entries", nil},
 				"clear":  {"clear", "- Clear the cache", nil},
-				"load":   {"load", "- Load Cache records from a file", nil},
-				"save":   {"save", "- Save Cache records to a file", nil},
+				"load":   {"load", "- Load cache records from a file", nil},
+				"save":   {"save", "- Save cache records to a file", nil},
 			},
 		},
 		"dns": {
@@ -613,17 +626,18 @@ func loadCommands() map[string]cmdHelp {
 			Name:        "server",
 			Description: "- Server Management",
 			SubCommands: map[string]cmdHelp{
-				"start":     {"start", "- Start the server", nil},
-				"stop":      {"stop", "- Stop the server", nil},
-				"status":    {"status", "- Show server status", nil},
-				"configure": {"configure", "- Set/List configuration", nil},
-				"save":      {"save", "- Save the current settings", nil},
-				"load":      {"load", "- Load the settings from the files", nil},
+				"start":     {"start", "- Start server components", nil},
+				"stop":      {"stop", "- Stop server components", nil},
+				"status":    {"status", "- Show server component status", nil},
+				"configure": {"configure", "- Set or list server configuration", nil},
+				"load":      {"load", "- Load server settings from a file", nil},
+				"save":      {"save", "- Save server settings to a file", nil},
 			},
 		},
 	}
 }
 
+// handleStats displays server statistics
 func handleStats() {
 	dnsData := data.GetInstance()
 
@@ -632,7 +646,7 @@ func handleStats() {
 	fmt.Println("Server Up Time:", serverUpTimeFormat(dnsData.Stats.ServerStartTime))
 	fmt.Println()
 	fmt.Println("Total Records:", len(dnsData.DNSRecords))
-	fmt.Println("Total DNS Servers:", len(data.LoadDNSServers()))
+	fmt.Println("Total DNS Servers:", len(dnsData.DNSServers))
 	fmt.Println("Total Cache Records:", len(dnsData.CacheRecords))
 	fmt.Println()
 	fmt.Println("Total queries received:", dnsData.Stats.TotalQueries)

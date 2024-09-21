@@ -1,4 +1,4 @@
-// Package dnsserver provides the data structure and functions for managing DNS servers.
+// Package dnsservers provides the data structure and functions for managing DNS servers.
 package dnsservers
 
 import (
@@ -20,10 +20,10 @@ type DNSServer struct {
 }
 
 // GetDNSArray returns an array of DNS servers in the format "Address:Port".
-func GetDNSArray(dnsServerData []DNSServer, activeonly bool) []string {
+func GetDNSArray(dnsServerData []DNSServer, activeOnly bool) []string {
 	var dnsArray []string
 	for _, dnsServer := range dnsServerData {
-		if activeonly && !dnsServer.Active {
+		if activeOnly && !dnsServer.Active {
 			continue
 		}
 		dnsArray = append(dnsArray, dnsServer.Address+":"+dnsServer.Port)
@@ -33,48 +33,22 @@ func GetDNSArray(dnsServerData []DNSServer, activeonly bool) []string {
 
 // Add adds a DNS server to the list of DNS servers.
 func Add(fullCommand []string, dnsServers []DNSServer) []DNSServer {
-	const defaultPort = "53"
+	if checkHelpCommand(fullCommand) {
+		fmt.Println("Usage: add <Address> [Port] [Active] [LocalResolver] [AdBlocker]")
+		fmt.Println("Example: add 1.1.1.1 53 true false false")
+		return dnsServers
+	}
 
-	// Default DNS server settings
 	server := DNSServer{
-		Port:          defaultPort,
+		Port:          "53",
 		Active:        true,
 		LocalResolver: true,
 		AdBlocker:     false,
 	}
 
-	if len(fullCommand) > 1 && fullCommand[1] == "?" {
-		fmt.Println("Enter the DNS Server in the format: <Address> [Port] [Active] [Local] [AdBlocker]")
-		fmt.Println("Example: 1.1.1.1 53 true false false")
-		return nil
-	}
-
-	if len(fullCommand) >= 2 {
-		server.Address = fullCommand[1]
-		if net.ParseIP(server.Address) == nil {
-			fmt.Println("Invalid IP address:", server.Address)
-			return nil
-		}
-	}
-
-	if len(fullCommand) >= 3 {
-		if _, err := strconv.Atoi(fullCommand[2]); err != nil {
-			fmt.Println("Invalid port:", fullCommand[2])
-			return nil
-		}
-		server.Port = fullCommand[2]
-	}
-
-	if len(fullCommand) >= 5 {
-		if active, err := strconv.ParseBool(fullCommand[3]); err == nil {
-			server.Active = active
-		}
-		if localResolver, err := strconv.ParseBool(fullCommand[4]); err == nil {
-			server.LocalResolver = localResolver
-		}
-		if adBlocker, err := strconv.ParseBool(fullCommand[5]); err == nil {
-			server.AdBlocker = adBlocker
-		}
+	if err := applyArgsToDNSServer(&server, fullCommand); err != nil {
+		fmt.Println("Error:", err)
+		return dnsServers
 	}
 
 	return append(dnsServers, server)
@@ -82,91 +56,55 @@ func Add(fullCommand []string, dnsServers []DNSServer) []DNSServer {
 
 // Remove removes a DNS server from the list of DNS servers.
 func Remove(fullCommand []string, dnsServerData []DNSServer) []DNSServer {
-	if len(fullCommand) > 1 && fullCommand[1] == "?" {
-		fmt.Println("Enter the DNS server address to remove.")
-		fmt.Println("Example: 127.0.0.1")
-		return nil
+	if checkHelpCommand(fullCommand) {
+		fmt.Println("Usage: remove <Address>")
+		fmt.Println("Example: remove 127.0.0.1")
+		return dnsServerData
 	}
 
 	if len(fullCommand) < 2 {
-		fmt.Println("Invalid DNS server address.")
-		return nil
+		fmt.Println("Error: Address is required.")
+		return dnsServerData
 	}
 
 	address := fullCommand[1]
-
-	for i, dnsServer := range dnsServerData {
-		if dnsServer.Address == address {
-			fmt.Println("Removed: ", address)
-			return append(dnsServerData[:i], dnsServerData[i+1:]...)
-		}
+	index := findDNSServerIndex(dnsServerData, address)
+	if index == -1 {
+		fmt.Println("Error: No DNS server found with the address:", address)
+		return dnsServerData
 	}
 
-	fmt.Println("No DNS server found with the address:", address)
-	return dnsServerData
+	fmt.Println("Removed DNS server:", address)
+	return append(dnsServerData[:index], dnsServerData[index+1:]...)
 }
 
 // Update modifies a DNS server's record in the list of DNS servers.
 func Update(fullCommand []string, dnsServerData []DNSServer) []DNSServer {
+	if checkHelpCommand(fullCommand) {
+		fmt.Println("Usage: update <Address> [Port] [Active] [LocalResolver] [AdBlocker]")
+		fmt.Println("Example: update 1.1.1.1 53 false true true")
+		return dnsServerData
+	}
+
 	if len(fullCommand) < 2 {
-		fmt.Println("Usage: update <Address> [Port] [Active] [Local] [AdBlocker]")
+		fmt.Println("Error: Address is required.")
 		return dnsServerData
 	}
 
 	address := fullCommand[1]
-	serverIndex := -1
-
-	// Find the server in the existing list
-	for i, server := range dnsServerData {
-		if server.Address == address {
-			serverIndex = i
-			break
-		}
-	}
-
-	if serverIndex == -1 {
-		fmt.Println("DNS server not found:", address)
+	index := findDNSServerIndex(dnsServerData, address)
+	if index == -1 {
+		fmt.Println("Error: DNS server not found:", address)
 		return dnsServerData
 	}
 
-	server := dnsServerData[serverIndex]
-
-	if len(fullCommand) >= 3 {
-		if _, err := strconv.Atoi(fullCommand[2]); err != nil {
-			fmt.Println("Invalid port:", fullCommand[2])
-			return dnsServerData
-		}
-		server.Port = fullCommand[2]
+	server := dnsServerData[index]
+	if err := applyArgsToDNSServer(&server, fullCommand); err != nil {
+		fmt.Println("Error:", err)
+		return dnsServerData
 	}
 
-	if len(fullCommand) >= 4 {
-		if active, err := strconv.ParseBool(fullCommand[3]); err == nil {
-			server.Active = active
-		} else {
-			fmt.Println("Invalid value for Active:", fullCommand[3])
-			return dnsServerData
-		}
-	}
-
-	if len(fullCommand) >= 5 {
-		if localResolver, err := strconv.ParseBool(fullCommand[4]); err == nil {
-			server.LocalResolver = localResolver
-		} else {
-			fmt.Println("Invalid value for Local Resolver:", fullCommand[4])
-			return dnsServerData
-		}
-	}
-
-	if len(fullCommand) >= 6 {
-		if adBlocker, err := strconv.ParseBool(fullCommand[5]); err == nil {
-			server.AdBlocker = adBlocker
-		} else {
-			fmt.Println("Invalid value for AdBlocker:", fullCommand[5])
-			return dnsServerData
-		}
-	}
-
-	dnsServerData[serverIndex] = server
+	dnsServerData[index] = server
 	return dnsServerData
 }
 
@@ -181,4 +119,60 @@ func List(dnsServerData []DNSServer) {
 	for _, dnsServer := range dnsServerData {
 		fmt.Printf("%-20s %-5s %-6t %-6t %-9t\n", dnsServer.Address, dnsServer.Port, dnsServer.Active, dnsServer.LocalResolver, dnsServer.AdBlocker)
 	}
+}
+
+// Helper function to parse and apply command arguments to a DNSServer.
+func applyArgsToDNSServer(server *DNSServer, args []string) error {
+	if len(args) >= 2 {
+		server.Address = args[1]
+		if net.ParseIP(server.Address) == nil {
+			return fmt.Errorf("invalid IP address: %s", server.Address)
+		}
+	} else {
+		return fmt.Errorf("address is required")
+	}
+
+	if len(args) >= 3 {
+		if _, err := strconv.Atoi(args[2]); err != nil {
+			return fmt.Errorf("invalid port: %s", args[2])
+		}
+		server.Port = args[2]
+	}
+
+	boolFields := []struct {
+		name     string
+		index    int
+		assignTo *bool
+	}{
+		{"Active", 3, &server.Active},
+		{"LocalResolver", 4, &server.LocalResolver},
+		{"AdBlocker", 5, &server.AdBlocker},
+	}
+
+	for _, field := range boolFields {
+		if len(args) > field.index {
+			value, err := strconv.ParseBool(args[field.index])
+			if err != nil {
+				return fmt.Errorf("invalid value for %s: %s", field.name, args[field.index])
+			}
+			*field.assignTo = value
+		}
+	}
+
+	return nil
+}
+
+// Helper function to find the index of a DNSServer by address.
+func findDNSServerIndex(dnsServers []DNSServer, address string) int {
+	for i, server := range dnsServers {
+		if server.Address == address {
+			return i
+		}
+	}
+	return -1
+}
+
+// Helper function to handle the help command.
+func checkHelpCommand(fullCommand []string) bool {
+	return len(fullCommand) > 1 && fullCommand[1] == "?"
 }

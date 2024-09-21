@@ -34,7 +34,7 @@ var (
 	isServerUp   bool
 	serverStatus sync.RWMutex
 
-	appversion = "0.1.13"
+	appversion = "0.1.15"
 )
 
 func main() {
@@ -390,7 +390,10 @@ func processAuthoritativeAnswer(question dns.Question, answer *dns.Msg, response
 	response.Authoritative = true
 	fmt.Printf("Query: %s, Reply: %s, Method: DNS server: %s\n", question.Name, answer.Answer[0].String(), answer.Answer[0].Header().Name[:len(answer.Answer[0].Header().Name)-1])
 
-	data.SaveCacheRecords(dnsdata.CacheRecords)
+	err := data.SaveCacheRecords(dnsdata.CacheRecords)
+	if err != nil {
+		log.Println("Error saving cache records:", err)
+	}
 }
 
 func handleFallbackServer(question dns.Question, fallbackServer string, response *dns.Msg) {
@@ -401,7 +404,10 @@ func handleFallbackServer(question dns.Question, fallbackServer string, response
 		response.Answer = append(response.Answer, fallbackResponse.Answer...)
 		fmt.Printf("Query: %s, Reply: %s, Method: Fallback DNS server: %s\n", question.Name, fallbackResponse.Answer[0].String(), fallbackServer)
 
-		data.SaveCacheRecords(dnsdata.CacheRecords)
+		err := data.SaveCacheRecords(dnsdata.CacheRecords)
+		if err != nil {
+			log.Println("Error saving cache records:", err)
+		}
 	} else {
 		fmt.Printf("Query: %s, No response\n", question.Name)
 	}
