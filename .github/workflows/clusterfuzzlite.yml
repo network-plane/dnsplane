@@ -7,23 +7,14 @@ on:
       - master
   pull_request:
 
-permissions:
-  actions: read
-  checks: read
-  contents: write    # Set to 'write' as required
-  deployments: read
-  issues: read
-  packages: read
-  pages: read
-  pull-requests: read
-  repository-projects: read
-  security-events: read
-  statuses: read
+permissions: read-all
 
 
 jobs:
   fuzzing:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Override for this step to allow writing crash artifacts
     steps:
       - name: Check out the repo
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
