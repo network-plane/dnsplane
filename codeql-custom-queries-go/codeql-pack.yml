@@ -1,0 +1,7 @@
+---
+library: false
+warnOnImplicitThis: false
+name: getting-started/codeql-extra-queries-go
+version: 1.0.0
+dependencies:
+  codeql/go-all: ^2.0.0
