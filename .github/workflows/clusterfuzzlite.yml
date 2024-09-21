@@ -8,9 +8,18 @@ on:
   pull_request:
 
 permissions:
-  contents: read       # Read access to the repository contents
-  actions: write       # Needed to upload artifacts
-  security-events: write  # Required for code scanning alerts (if used)
+  actions: read
+  checks: read
+  contents: write    # Set to 'write' as required
+  deployments: read
+  issues: read
+  packages: read
+  pages: read
+  pull-requests: read
+  repository-projects: read
+  security-events: read
+  statuses: read
+
 
 jobs:
   fuzzing:
