@@ -15,7 +15,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
+        uses: actions/checkout@eef61447b9ff4aafe5dcd4e0bbf5d482be7e7871 # v4.2.1
       - name: Github Releases To Discord
         uses: SethCohen/github-releases-to-discord@37afa88c8c9302a9307244b5a0d4e782d528a4b5 #1.15.1
         with:
