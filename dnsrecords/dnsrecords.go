@@ -51,7 +51,7 @@ func Add(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 }
 
 // List all the DNS records in the list of DNS records.
-func List(dnsRecords []DNSRecord) {
+func List(dnsRecords []DNSRecord, args []string) {
 	if len(dnsRecords) == 0 {
 		fmt.Println("No records found.")
 		return
@@ -75,22 +75,25 @@ func List(dnsRecords []DNSRecord) {
 	fmt.Printf(formatString, "Name", "Type", "Value", "TTL")
 
 	for _, record := range dnsRecords {
+		fmt.Println()
 		valToPrint := converters.ConvertValuesToStrings(converters.GetFieldValuesByNamesArray(record, []string{"Name", "Type", "Value", "TTL"}))
 		fmt.Printf(formatString, valToPrint[0], valToPrint[1], valToPrint[2], valToPrint[3])
 
-		if !record.AddedOn.IsZero() {
+		if !record.AddedOn.IsZero() && len(args) > 0 && (args[0] == "details" || args[0] == "d") {
 			fmt.Println("Added On:", record.AddedOn)
 		}
-		if !record.UpdatedOn.IsZero() {
+		if !record.UpdatedOn.IsZero() && len(args) > 0 && (args[0] == "details" || args[0] == "d") {
 			fmt.Println("Updated On:", record.UpdatedOn)
 		}
-		if !record.LastQuery.IsZero() {
+		if !record.LastQuery.IsZero() && len(args) > 0 && (args[0] == "details" || args[0] == "d") {
 			fmt.Println("Last Query:", record.LastQuery)
 		}
-		if record.MACAddress != "" {
+		if record.MACAddress != "" && len(args) > 0 && (args[0] == "details" || args[0] == "d") {
 			fmt.Println("MAC Address:", record.MACAddress)
 		}
-		// fmt.Println()
+		if record.CacheRecord && len(args) > 0 && (args[0] == "details" || args[0] == "d") {
+			fmt.Println("Cache Record: true")
+		}
 	}
 }
 

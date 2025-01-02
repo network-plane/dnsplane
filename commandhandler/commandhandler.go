@@ -170,11 +170,18 @@ func handleRecord(args []string) {
 			dnsData.UpdateRecords(gDNSRecords)
 		},
 		"list": func(args []string) {
-			//if args not empty use it as filter
-			if len(args) > 0 {
+			//if args not empty and not d or details use it as filter
+			if len(args) > 0 && args[0] != "d" && args[0] != "details" {
+				if args[0] == "?" || args[0] == "h" || args[0] == "help" {
+					fmt.Println("Usage: record list [details] [filter]")
+					fmt.Println("  details: Show detailed information")
+					fmt.Println("  filter: Filter records by name or type")
+					return
+				}
 				fmt.Println("Filtering records by:", args[0])
 			}
-			dnsrecords.List(gDNSRecords)
+
+			dnsrecords.List(gDNSRecords, args)
 		},
 		"clear": func(args []string) {
 			gDNSRecords = []dnsrecords.DNSRecord{}
