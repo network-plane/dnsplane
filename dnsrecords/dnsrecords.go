@@ -26,8 +26,11 @@ type DNSRecord struct {
 // Add a new DNS record to the list of DNS records.
 func Add(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	if checkHelpCommand(fullCommand) {
-		fmt.Println("Usage: add <Name> <Type> <Value> <TTL>")
-		fmt.Println("Example: example.com A 127.0.0.1 3600")
+		fmt.Println("Usage  : add <Name> [Type] <Value> [TTL]")
+		fmt.Println("Example: example.com 127.0.0.1")
+		fmt.Println("         example.com A 127.0.0.1")
+		fmt.Println("         example.com A 127.0.0.1 3600")
+
 		return dnsRecords
 	}
 
