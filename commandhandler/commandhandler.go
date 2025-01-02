@@ -39,13 +39,14 @@ var (
 )
 
 // HandleCommandLoop manages the interactive command loop
-func HandleCommandLoop(rl *readline.Instance, startDNS func(string), stopDNS func(), restartDNS func(string), getStatus func() bool, startMDNS func(string), startAPI func(string)) {
+// func HandleCommandLoop(rl *readline.Instance, startDNS func(string), stopDNS func(), restartDNS func(string), getStatus func() bool, startMDNS func(string), startAPI func(string)) {
+func HandleCommandLoop(rl *readline.Instance) {
 	// Assign function variables
-	stopDNSServerFunc = stopDNS
-	restartDNSServerFunc = restartDNS
-	getServerStatusFunc = getStatus
-	startMDNSServerFunc = startMDNS
-	startGinAPIFunc = startAPI
+	// stopDNSServerFunc = stopDNS
+	// restartDNSServerFunc = restartDNS
+	// getServerStatusFunc = getStatus
+	// startMDNSServerFunc = startMDNS
+	// startGinAPIFunc = startAPI
 
 	var currentContext string
 	setupAutocomplete(rl, currentContext)
@@ -169,6 +170,10 @@ func handleRecord(args []string) {
 			dnsData.UpdateRecords(gDNSRecords)
 		},
 		"list": func(args []string) {
+			//if args not empty use it as filter
+			if len(args) > 0 {
+				fmt.Println("Filtering records by:", args[0])
+			}
 			dnsrecords.List(gDNSRecords)
 		},
 		"clear": func(args []string) {

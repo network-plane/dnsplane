@@ -27,14 +27,12 @@ import (
 )
 
 var (
-	rlconfig readline.Config
-
+	rlconfig     readline.Config
 	stopDNSCh    = make(chan struct{})
 	stoppedDNS   = make(chan struct{})
-	isServerUp   bool
 	serverStatus sync.RWMutex
-
-	appversion = "0.1.15"
+	isServerUp   bool
+	appversion   = "0.1.17"
 )
 
 func main() {
@@ -123,12 +121,6 @@ func main() {
 			// Use the command handler from the package
 			commandhandler.HandleCommandLoop(
 				rl,
-				startDNSServer,
-				stopDNSServer,
-				restartDNSServer,
-				getServerStatus,
-				startMDNSServer,
-				startGinAPI,
 			)
 		}
 	}
