@@ -610,8 +610,8 @@ func addRecordGin(c *gin.Context) {
 // Wrapper for existing listRecords function
 func listRecordsGin(c *gin.Context) {
 	dnsData := data.GetInstance()
-	// Call the existing listRecords function
-	dnsrecords.List(dnsData.DNSRecords)
+	// Call the existing listRecords function with no args
+	dnsrecords.List(dnsData.DNSRecords, []string{})
 	c.JSON(200, gin.H{"status": "Listed"})
 }
 
