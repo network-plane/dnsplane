@@ -7,20 +7,22 @@ import (
 	"time"
 
 	"dnsresolver/converters"
+	"dnsresolver/ipvalidator"
 
 	"github.com/miekg/dns"
 )
 
 // DNSRecord holds the data for a DNS record
 type DNSRecord struct {
-	Name       string    `json:"name"`
-	Type       string    `json:"type"`
-	Value      string    `json:"value"`
-	TTL        uint32    `json:"ttl"`
-	AddedOn    time.Time `json:"added_on,omitempty"`
-	UpdatedOn  time.Time `json:"updated_on,omitempty"`
-	MACAddress string    `json:"mac,omitempty"`
-	LastQuery  time.Time `json:"last_query,omitempty"`
+	Name        string    `json:"name"`
+	Type        string    `json:"type"`
+	Value       string    `json:"value"`
+	TTL         uint32    `json:"ttl"`
+	AddedOn     time.Time `json:"added_on,omitempty"`
+	UpdatedOn   time.Time `json:"updated_on,omitempty"`
+	MACAddress  string    `json:"mac,omitempty"`
+	CacheRecord bool      `json:"cache_record,omitempty"`
+	LastQuery   time.Time `json:"last_query,omitempty"`
 }
 
 // Add a new DNS record to the list of DNS records.
@@ -227,23 +229,85 @@ func Update(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 
 // Helper function to check if the help command is invoked.
 func checkHelpCommand(fullCommand []string) bool {
-	return len(fullCommand) > 0 && fullCommand[0] == "?"
+	return len(fullCommand) <= 0 || fullCommand[0] == "?"
+}
+
+func ipvToRecordType(ipversion int) string {
+	if ipversion == 4 {
+		return "A"
+	} else if ipversion == 6 {
+		return "AAAA"
+	}
+	return ""
+}
+
+func validateIPAndDomain(arg1, arg2 string) (string, string, string) {
+	// First attempt: arg1 as IP, arg2 as domain
+	if ipvalidator.IsValidIP(arg1) {
+		_, isDomain := dns.IsDomainName(arg2)
+		if isDomain {
+			return arg2, arg1, ipvToRecordType(ipvalidator.GetIPVersion(arg1)) // Return domain, IP, version
+		}
+	}
+
+	// Second attempt: arg1 as domain, arg2 as IP
+	if ipvalidator.IsValidIP(arg2) {
+		_, isDomain := dns.IsDomainName(arg1)
+		if isDomain {
+			return arg1, arg2, ipvToRecordType(ipvalidator.GetIPVersion(arg2)) // Return domain, IP, version
+		}
+	}
+
+	// If neither combination works, return empty strings
+	return "", "", ""
 }
 
 // Parses arguments and returns a DNSRecord.
 func parseDNSRecordArgs(args []string) (DNSRecord, error) {
-	if len(args) < 4 {
-		return DNSRecord{}, fmt.Errorf("invalid DNS record format. Please enter the DNS record in the format: <Name> <Type> <Value> <TTL>")
+	var name, recordType, value, ttlStr string
+
+	if len(args) >= 2 {
+		name, value, recordType = validateIPAndDomain(args[0], args[1])
+		if name == "" {
+			return DNSRecord{}, fmt.Errorf("invalid DNS record format. Please enter the DNS record in the format: <Name> [Type] <Value> [TTL]")
+		} else {
+			ttlStr = "3600"
+		}
 	}
 
-	name := args[0]
-	recordType := args[1]
-	value := args[2]
-	ttlStr := args[3]
+	if len(args) < 3 && name == "" {
+		return DNSRecord{}, fmt.Errorf("invalid DNS record format. Please enter the DNS record in the format: <Name> [Type] <Value> [TTL]")
+	}
+
+	// If name is still empty, parse the arguments normally
+	if name == "" {
+		name = args[0]
+		recordType = args[1]
+		value = args[2]
+		if len(args) < 4 {
+			ttlStr = args[3]
+		} else {
+			ttlStr = "3600"
+		}
+	}
 
 	// Validate DNS record type
 	if _, ok := dns.StringToType[recordType]; !ok {
 		return DNSRecord{}, fmt.Errorf("invalid DNS record type: %s", recordType)
+	}
+
+	//check if the value is a valid IP address in case of A or AAAA record
+	if recordType == "A" || recordType == "AAAA" {
+		if !ipvalidator.IsValidIP(value) {
+			return DNSRecord{}, fmt.Errorf("invalid IP address: %s", value)
+		}
+	}
+
+	//check if the value is a valid domain name in case of these records
+	if recordType == "CNAME" || recordType == "NS" || recordType == "PTR" || recordType == "TXT" || recordType == "SRV" || recordType == "SOA" || recordType == "MX" || recordType == "NAPTR" || recordType == "CAA" || recordType == "TLSA" || recordType == "DS" || recordType == "DNSKEY" || recordType == "RRSIG" || recordType == "NSEC" || recordType == "NSEC3" || recordType == "NSEC3PARAM" {
+		if _, ok := dns.IsDomainName(value); !ok {
+			return DNSRecord{}, fmt.Errorf("invalid domain name: %s", value)
+		}
 	}
 
 	// Parse TTL
