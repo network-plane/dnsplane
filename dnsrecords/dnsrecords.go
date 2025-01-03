@@ -122,6 +122,11 @@ func List(dnsRecords []DNSRecord, args []string) {
 		}
 	}
 
+	// Helper function to check if the user wants to see details
+	isDetails := func(args []string) bool {
+		return len(args) > 0 && (args[0] == "details" || args[0] == "d")
+	}
+
 	// Define format string with variable widths for Name and Value
 	formatString := fmt.Sprintf("%%-%ds %%-7s %%-%ds %%-5s\n", maxNameLength+2, maxValueLength+2)
 
@@ -131,23 +136,23 @@ func List(dnsRecords []DNSRecord, args []string) {
 		valToPrint := converters.ConvertValuesToStrings(converters.GetFieldValuesByNamesArray(record, []string{"Name", "Type", "Value", "TTL"}))
 		fmt.Printf(formatString, valToPrint[0], valToPrint[1], valToPrint[2], valToPrint[3])
 
-		if !record.AddedOn.IsZero() && len(args) > 0 && (args[0] == "details" || args[0] == "d") {
+		if !record.AddedOn.IsZero() && isDetails(args) {
 			fmt.Println("Added On:", record.AddedOn)
 		}
 
-		if !record.UpdatedOn.IsZero() && len(args) > 0 && (args[0] == "details" || args[0] == "d") {
+		if !record.UpdatedOn.IsZero() && isDetails(args) {
 			fmt.Println("Updated On:", record.UpdatedOn)
 		}
 
-		if !record.LastQuery.IsZero() && len(args) > 0 && (args[0] == "details" || args[0] == "d") {
+		if !record.LastQuery.IsZero() && isDetails(args) {
 			fmt.Println("Last Query:", record.LastQuery)
 		}
 
-		if record.MACAddress != "" && len(args) > 0 && (args[0] == "details" || args[0] == "d") {
+		if record.MACAddress != "" && isDetails(args) {
 			fmt.Println("MAC Address:", record.MACAddress)
 		}
 
-		if record.CacheRecord && len(args) > 0 && (args[0] == "details" || args[0] == "d") {
+		if record.CacheRecord && isDetails(args) {
 			fmt.Println("Cache Record: true")
 		}
 
