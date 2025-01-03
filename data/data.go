@@ -58,9 +58,15 @@ type DNSResolverSettings struct {
 	MDNSPort           string        `json:"mdns_port"`
 	RESTPort           string        `json:"rest_port"`
 	CacheRecords       bool          `json:"cache_records"`
-	AutoBuildPTRFromA  bool          `json:"auto_build_ptr_from_a"`
-	ForwardPTRQueries  bool          `json:"forward_ptr_queries"`
 	FileLocations      FileLocations `json:"file_locations"`
+	DNSRecordSettings  DNSRecordSettings
+}
+
+// DNSRecordSettings holds the settings for DNS records
+type DNSRecordSettings struct {
+	AutoBuildPTRFromA bool `json:"auto_build_ptr_from_a"`
+	ForwardPTRQueries bool `json:"forward_ptr_queries"`
+	AddUpdatesRecords bool `json:"add_updates_records,omitempty"`
 }
 
 // FileLocations holds the file locations for the DNS server
@@ -71,6 +77,16 @@ type FileLocations struct {
 }
 
 var instance *DNSResolverData
+
+// For Removal in the future
+
+// CacheRecord holds the data for the cache records
+type CacheRecord struct {
+	DNSRecord dnsrecords.DNSRecord `json:"dns_record"`
+	Expiry    time.Time            `json:"expiry,omitempty"`
+	Timestamp time.Time            `json:"timestamp,omitempty"`
+	LastQuery time.Time            `json:"last_query,omitempty"`
+}
 
 // GetInstance returns the singleton instance of DNSResolverData
 func GetInstance() *DNSResolverData {
