@@ -158,7 +158,7 @@ func handleRecord(args []string) {
 
 	commands := map[string]func([]string){
 		"add": func(args []string) {
-			gDNSRecords = dnsrecords.Add(args, gDNSRecords)
+			gDNSRecords = dnsrecords.Add(args, gDNSRecords, false)
 			dnsData.UpdateRecords(gDNSRecords)
 		},
 		"remove": func(args []string) {
@@ -166,7 +166,8 @@ func handleRecord(args []string) {
 			dnsData.UpdateRecords(gDNSRecords)
 		},
 		"update": func(args []string) {
-			gDNSRecords = dnsrecords.Update(args, gDNSRecords)
+			//update is add with overwrite arg set to true
+			gDNSRecords = dnsrecords.Add(args, gDNSRecords, true)
 			dnsData.UpdateRecords(gDNSRecords)
 		},
 		"list": func(args []string) {
