@@ -101,6 +101,10 @@ func handleGlobalCommands(args []string, rl *readline.Instance, currentContext *
 		handleContextCommand(args[0], args[1:], rl, currentContext)
 	case "help", "h", "?", "ls", "l":
 		showHelp("")
+	case "clear":
+		// Clear the screen
+		fmt.Print("\033[H\033[2J")
+		rl.Refresh()
 	case "exit", "quit", "q":
 		fmt.Println("Shutting down.")
 		os.Exit(0)
@@ -195,7 +199,12 @@ func handleRecord(args []string) {
 			fmt.Println("DNS records loaded.")
 		},
 		"save": func(args []string) {
-			data.SaveDNSRecords(gDNSRecords)
+			err := data.SaveDNSRecords(gDNSRecords)
+			if err != nil {
+				fmt.Println("Error saving DNS records:", err)
+				return
+			}
+
 			fmt.Println("DNS records saved.")
 		},
 	}
@@ -227,7 +236,11 @@ func handleCache(args []string) {
 			fmt.Println("Cache records loaded.")
 		},
 		"save": func(args []string) {
-			data.SaveCacheRecords(cacheRecordsData)
+			err := data.SaveCacheRecords(cacheRecordsData)
+			if err != nil {
+				fmt.Println("Error saving cache records:", err)
+				return
+			}
 			fmt.Println("Cache records saved.")
 		},
 	}
@@ -267,7 +280,11 @@ func handleDNS(args []string) {
 			fmt.Println("DNS servers loaded.")
 		},
 		"save": func(args []string) {
-			data.SaveDNSServers(dnsServers)
+			err := data.SaveDNSServers(dnsServers)
+			if err != nil {
+				fmt.Println("Error saving DNS servers:", err)
+				return
+			}
 			fmt.Println("DNS servers saved.")
 		},
 	}
@@ -654,7 +671,6 @@ func loadCommands() map[string]cmdHelp {
 func handleStats() {
 	dnsData := data.GetInstance()
 
-	fmt.Println("Stats:")
 	fmt.Println("Server start time:", dnsData.Stats.ServerStartTime)
 	fmt.Println("Server Up Time:", serverUpTimeFormat(dnsData.Stats.ServerStartTime))
 	fmt.Println()
