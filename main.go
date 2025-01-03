@@ -20,6 +20,7 @@ import (
 	"dnsresolver/dnsservers"
 
 	// "github.com/bettercap/readline"
+	// "github.com/reeflective/readline"
 	"github.com/chzyer/readline"
 	"github.com/gin-gonic/gin"
 	cli "github.com/jawher/mow.cli"
@@ -213,8 +214,7 @@ func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
 func handleQuestion(question dns.Question, response *dns.Msg) {
 	dnsdata := data.GetInstance()
 	dnsServerSettings := dnsdata.GetResolverSettings()
-
-	dnsData := data.GetInstance()
+	dnsRecords := data.LoadDNSRecords()
 
 	switch question.Qtype {
 	case dns.TypePTR:
@@ -223,14 +223,14 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 
 	case dns.TypeA:
 		recordType := dns.TypeToString[question.Qtype]
-		cachedRecord := findRecord(dnsdata.DNSRecords, question.Name, recordType)
+		cachedRecord := dnsrecords.FindRecord(dnsRecords, question.Name, recordType, dnsServerSettings.DNSRecordSettings.AutoBuildPTRFromA)
 
 		if cachedRecord != nil {
 			processCachedRecord(question, cachedRecord, response)
 		} else {
-			cachedRecord = findCacheRecord(dnsData.CacheRecords, question.Name, recordType)
+			cachedRecord = findCacheRecord(dnsdata.CacheRecords, question.Name, recordType)
 			if cachedRecord != nil {
-				dnsData.IncrementCacheHits()
+				dnsdata.IncrementCacheHits()
 				processCacheRecord(question, cachedRecord, response)
 			} else {
 
@@ -241,7 +241,7 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 	default:
 		handleDNSServers(question, dnsservers.GetDNSArray(dnsdata.DNSServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 	}
-	dnsData.IncrementQueriesAnswered()
+	dnsdata.IncrementQueriesAnswered()
 }
 
 func handlePTRQuestion(question dns.Question, response *dns.Msg) {
@@ -252,7 +252,7 @@ func handlePTRQuestion(question dns.Question, response *dns.Msg) {
 	dnsRecords := data.LoadDNSRecords()
 	recordType := dns.TypeToString[question.Qtype]
 
-	rrPointer := findRecord(dnsRecords, ipAddr, recordType)
+	rrPointer := dnsrecords.FindRecord(dnsRecords, ipAddr, recordType, dnsServerSettings.DNSRecordSettings.AutoBuildPTRFromA)
 	if rrPointer != nil {
 		ptrRecord, ok := (*rrPointer).(*dns.PTR)
 		if !ok {
@@ -341,40 +341,6 @@ func findCacheRecord(cacheRecords []dnsrecordcache.CacheRecord, name string, rec
 				remainingTTL := uint32(record.Expiry.Sub(now).Seconds())
 				return dnsRecordToRR(&record.DNSRecord, remainingTTL)
 			}
-		}
-	}
-	return nil
-}
-
-func findRecord(records []dnsrecords.DNSRecord, lookupRecord, recordType string) *dns.RR {
-	dnsdata := data.GetInstance()
-	dnsServerSettings := dnsdata.GetResolverSettings()
-
-	for _, record := range records {
-
-		if record.Type == "PTR" || (recordType == "PTR" && dnsServerSettings.AutoBuildPTRFromA) {
-			if record.Value == lookupRecord {
-				recordString := fmt.Sprintf("%s %d IN PTR %s.", converters.ConvertIPToReverseDNS(lookupRecord), record.TTL, strings.TrimRight(record.Name, "."))
-				fmt.Println("recordstring", recordString)
-
-				rr := recordString
-				dnsRecord, err := dns.NewRR(rr)
-				if err != nil {
-					fmt.Println("Error creating PTR record", err)
-					return nil // Error handling if the PTR record can't be created
-				}
-				// fmt.Println(dnsRecord.String())
-				return &dnsRecord
-			}
-		}
-
-		if record.Name == lookupRecord && record.Type == recordType {
-			rr := fmt.Sprintf("%s %d IN %s %s", record.Name, record.TTL, record.Type, record.Value)
-			dnsRecord, err := dns.NewRR(rr)
-			if err != nil {
-				return nil
-			}
-			return &dnsRecord
 		}
 	}
 	return nil
@@ -603,7 +569,7 @@ func addRecordGin(c *gin.Context) {
 		return
 	}
 
-	dnsrecords.Add(request, dnsData.DNSRecords) // Call the existing addRecord function with parsed input
+	dnsrecords.Add(request, dnsData.DNSRecords, false) // Call the existing addRecord function with parsed input
 	c.JSON(201, gin.H{"status": "Record added"})
 }
 

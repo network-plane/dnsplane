@@ -330,19 +330,32 @@ func parseDNSRecordArgs(args []string) (DNSRecord, error) {
 	return dnsRecord, nil
 }
 
-// Helper function to find indexes of matching DNSRecords.
-func findDNSRecordIndexes(dnsRecords []DNSRecord, name, recordType, value string, ttl uint32) []int {
-	var indexes []int
-	for i, record := range dnsRecords {
-		if record.Name == name {
-			if recordType == "" || record.Type == recordType {
-				if value == "" || record.Value == value {
-					if ttl == 0 || record.TTL == ttl {
-						indexes = append(indexes, i)
-					}
+func FindRecord(dnsRecords []DNSRecord, lookupRecord, recordType string, autoBuildPTRFromA bool) *dns.RR {
+	for _, record := range dnsRecords {
+		if record.Type == "PTR" || (recordType == "PTR" && autoBuildPTRFromA) {
+			if record.Value == lookupRecord {
+				recordString := fmt.Sprintf("%s %d IN PTR %s.", converters.ConvertIPToReverseDNS(lookupRecord), record.TTL, strings.TrimRight(record.Name, "."))
+				fmt.Println("recordstring", recordString)
+
+				rr := recordString
+				dnsRecord, err := dns.NewRR(rr)
+				if err != nil {
+					fmt.Println("Error creating PTR record", err)
+					return nil // Error handling if the PTR record can't be created
 				}
+				// fmt.Println(dnsRecord.String())
+				return &dnsRecord
 			}
 		}
+
+		if record.Name == lookupRecord && record.Type == recordType {
+			rr := fmt.Sprintf("%s %d IN %s %s", record.Name, record.TTL, record.Type, record.Value)
+			dnsRecord, err := dns.NewRR(rr)
+			if err != nil {
+				return nil
+			}
+			return &dnsRecord
+		}
 	}
-	return indexes
+	return nil
 }
