@@ -6,7 +6,7 @@ require (
 	github.com/chzyer/readline v1.5.1
 	github.com/gin-gonic/gin v1.10.0
 	github.com/jawher/mow.cli v1.2.0
-	github.com/miekg/dns v1.1.62
+	github.com/miekg/dns v1.1.63
 	golang.org/x/text v0.21.0
 )
 
