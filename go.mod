@@ -1,6 +1,7 @@
 module dnsresolver
 
-go 1.22.0
+go 1.23.0
+
 toolchain go1.24.1
 
 require (
@@ -8,7 +9,7 @@ require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/jawher/mow.cli v1.2.0
 	github.com/miekg/dns v1.1.65
-	golang.org/x/text v0.24.0
+	golang.org/x/text v0.25.0
 )
 
 require (
@@ -35,7 +36,7 @@ require (
 	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/mod v0.23.0 // indirect
 	golang.org/x/net v0.38.0 // indirect
-	golang.org/x/sync v0.13.0 // indirect
+	golang.org/x/sync v0.14.0 // indirect
 	golang.org/x/sys v0.31.0 // indirect
 	golang.org/x/tools v0.30.0 // indirect
 	google.golang.org/protobuf v1.36.1 // indirect
