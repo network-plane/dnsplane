@@ -6,7 +6,7 @@ toolchain go1.24.1
 
 require (
 	github.com/chzyer/readline v1.5.1
-	github.com/gin-gonic/gin v1.10.0
+	github.com/gin-gonic/gin v1.10.1
 	github.com/jawher/mow.cli v1.2.0
 	github.com/miekg/dns v1.1.66
 	golang.org/x/text v0.25.0
