@@ -8,8 +8,8 @@ require (
 	github.com/chzyer/readline v1.5.1
 	github.com/gin-gonic/gin v1.10.1
 	github.com/jawher/mow.cli v1.2.0
-	github.com/miekg/dns v1.1.67
-	golang.org/x/text v0.26.0
+	github.com/miekg/dns v1.1.66
+	golang.org/x/text v0.27.0
 )
 
 require (
@@ -33,12 +33,12 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.12 // indirect
 	golang.org/x/arch v0.12.0 // indirect
-	golang.org/x/crypto v0.38.0 // indirect
+	golang.org/x/crypto v0.39.0 // indirect
 	golang.org/x/mod v0.25.0 // indirect
-	golang.org/x/net v0.40.0 // indirect
-	golang.org/x/sync v0.15.0 // indirect
+	golang.org/x/net v0.41.0 // indirect
+	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
-	golang.org/x/tools v0.33.0 // indirect
+	golang.org/x/tools v0.34.0 // indirect
 	google.golang.org/protobuf v1.36.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
