@@ -8,7 +8,7 @@ require (
 	github.com/chzyer/readline v1.5.1
 	github.com/gin-gonic/gin v1.10.1
 	github.com/jawher/mow.cli v1.2.0
-	github.com/miekg/dns v1.1.66
+	github.com/miekg/dns v1.1.67
 	golang.org/x/text v0.27.0
 )
 
