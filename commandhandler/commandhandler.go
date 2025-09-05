@@ -1,33 +1,14 @@
 package commandhandler
 
 import (
-	"fmt"
-	"os"
-	"sort"
-	"strings"
-	"time"
-
 	"dnsresolver/data"
 	"dnsresolver/dnsrecordcache"
 	"dnsresolver/dnsrecords"
 	"dnsresolver/dnsservers"
-
-	"github.com/chzyer/readline"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
+	"dnsresolver/tui"
+	"fmt"
+	"time"
 )
-
-// cmdHelp represents a command and its subcommands for help display
-type cmdHelp struct {
-	Name        string
-	Description string
-	SubCommands map[string]cmdHelp
-}
-
-// Excluded commands from history
-var excludedCommands = map[string]bool{
-	"q": true, "quit": true, "exit": true, "h": true, "help": true, "ls": true, "l": true, "/": true,
-}
 
 // Function variables for server control
 var (
@@ -38,639 +19,349 @@ var (
 	startGinAPIFunc      func(string)
 )
 
-// HandleCommandLoop manages the interactive command loop
-// func HandleCommandLoop(rl *readline.Instance, startDNS func(string), stopDNS func(), restartDNS func(string), getStatus func() bool, startMDNS func(string), startAPI func(string)) {
-func HandleCommandLoop(rl *readline.Instance) {
-	// Assign function variables
-	// stopDNSServerFunc = stopDNS
-	// restartDNSServerFunc = restartDNS
-	// getServerStatusFunc = getStatus
-	// startMDNSServerFunc = startMDNS
-	// startGinAPIFunc = startAPI
-
-	var currentContext string
-	setupAutocomplete(rl, currentContext)
-
-	for {
-		updatePrompt(rl, currentContext)
-		commandLine, err := rl.Readline()
-		if err != nil {
-			break
-		}
-
-		commandLine = strings.TrimSpace(commandLine)
-		if commandLine == "" {
-			continue
-		}
-
-		args := strings.Fields(commandLine)
-		if len(args) == 0 {
-			continue
-		}
-
-		if isExitCommand(args[0]) {
-			fmt.Println("Shutting down.")
-			os.Exit(0)
-		}
-
-		if !excludedCommands[args[0]] {
-			if err := rl.SaveHistory(commandLine); err != nil {
-				fmt.Println("Error saving history:", err)
-			}
-		}
-
-		if currentContext == "" {
-			handleGlobalCommands(args, rl, &currentContext)
-		} else {
-			handleContextCommands(args, rl, &currentContext)
-		}
-	}
+type simpleCommand struct {
+	name string
+	help string
+	exec func([]string)
 }
 
-// isExitCommand checks if the command is an exit command
-func isExitCommand(cmd string) bool {
-	return cmd == "q" || cmd == "quit" || cmd == "exit"
+func (c simpleCommand) Name() string       { return c.name }
+func (c simpleCommand) Help() string       { return c.help }
+func (c simpleCommand) Exec(args []string) { c.exec(args) }
+
+// RegisterCommands registers all DNS related contexts and commands with the TUI package.
+func RegisterCommands() {
+	tui.RegisterCommand("", simpleCommand{"stats", "- Display server statistics", handleStats})
+
+	tui.RegisterContext("record", "- Record Management")
+	tui.RegisterCommand("record", simpleCommand{"add", "- Add a new DNS record", recordAdd})
+	tui.RegisterCommand("record", simpleCommand{"remove", "- Remove a DNS record", recordRemove})
+	tui.RegisterCommand("record", simpleCommand{"update", "- Update a DNS record", recordUpdate})
+	tui.RegisterCommand("record", simpleCommand{"list", "- List all DNS records", recordList})
+	tui.RegisterCommand("record", simpleCommand{"clear", "- Clear all DNS records", recordClear})
+	tui.RegisterCommand("record", simpleCommand{"load", "- Load DNS records from a file", recordLoad})
+	tui.RegisterCommand("record", simpleCommand{"save", "- Save DNS records to a file", recordSave})
+
+	tui.RegisterContext("cache", "- Cache Management")
+	tui.RegisterCommand("cache", simpleCommand{"list", "- List all cache entries", cacheList})
+	tui.RegisterCommand("cache", simpleCommand{"remove", "- Remove a cache entry", cacheRemove})
+	tui.RegisterCommand("cache", simpleCommand{"clear", "- Clear the cache", cacheClear})
+	tui.RegisterCommand("cache", simpleCommand{"load", "- Load cache records from a file", cacheLoad})
+	tui.RegisterCommand("cache", simpleCommand{"save", "- Save cache records to a file", cacheSave})
+
+	tui.RegisterContext("dns", "- DNS Server Management")
+	tui.RegisterCommand("dns", simpleCommand{"add", "- Add a new DNS server", dnsAdd})
+	tui.RegisterCommand("dns", simpleCommand{"remove", "- Remove a DNS server", dnsRemove})
+	tui.RegisterCommand("dns", simpleCommand{"update", "- Update a DNS server", dnsUpdate})
+	tui.RegisterCommand("dns", simpleCommand{"list", "- List all DNS servers", dnsList})
+	tui.RegisterCommand("dns", simpleCommand{"clear", "- Clear all DNS servers", dnsClear})
+	tui.RegisterCommand("dns", simpleCommand{"load", "- Load DNS servers from a file", dnsLoad})
+	tui.RegisterCommand("dns", simpleCommand{"save", "- Save DNS servers to a file", dnsSave})
+
+	tui.RegisterContext("server", "- Server Management")
+	tui.RegisterCommand("server", simpleCommand{"start", "- Start server components", handleServerStart})
+	tui.RegisterCommand("server", simpleCommand{"stop", "- Stop server components", handleServerStop})
+	tui.RegisterCommand("server", simpleCommand{"status", "- Show server component status", handleServerStatus})
+	tui.RegisterCommand("server", simpleCommand{"configure", "- Set or list server configuration", handleServerConfigure})
+	tui.RegisterCommand("server", simpleCommand{"load", "- Load server settings from a file", handleServerLoad})
+	tui.RegisterCommand("server", simpleCommand{"save", "- Save server settings to a file", handleServerSave})
 }
 
-// handleGlobalCommands processes commands at the global context
-func handleGlobalCommands(args []string, rl *readline.Instance, currentContext *string) {
-	switch args[0] {
-	case "stats":
-		handleStats()
-	case "record", "cache", "dns", "server":
-		handleContextCommand(args[0], args[1:], rl, currentContext)
-	case "help", "h", "?", "ls", "l":
-		showHelp("")
-	case "clear":
-		// Clear the screen
-		fmt.Print("\033[H\033[2J")
-		rl.Refresh()
-	case "exit", "quit", "q":
-		fmt.Println("Shutting down.")
-		os.Exit(0)
-	default:
-		fmt.Printf("Unknown command: %s. Type 'help' for available commands.\n", args[0])
-	}
-}
-
-// handleContextCommands processes commands within a specific context
-func handleContextCommands(args []string, rl *readline.Instance, currentContext *string) {
-	if args[0] == "/" {
-		*currentContext = "" // Exit context
-		setupAutocomplete(rl, *currentContext)
-		return
-	}
-
-	if args[0] == "help" || args[0] == "?" || args[0] == "h" {
-		showHelp(*currentContext)
-		return
-	}
-
-	// Handle subcommand within context
-	handleContextCommand(*currentContext, args, rl, currentContext)
-}
-
-// handleContextCommand handles commands within a context or executes a subcommand directly
-func handleContextCommand(context string, args []string, rl *readline.Instance, currentContext *string) {
-	if len(args) == 0 {
-		// Enter context
-		*currentContext = context
-		setupAutocomplete(rl, *currentContext)
-		return
-	}
-
-	handlers := map[string]func([]string){
-		"record": handleRecord,
-		"cache":  handleCache,
-		"dns":    handleDNS,
-		"server": handleServer,
-	}
-
-	if handler, ok := handlers[context]; ok {
-		handler(args)
-	} else {
-		fmt.Printf("Unknown context: %s. Type 'help' for available commands.\n", context)
-	}
-}
-
-// handleRecord processes 'record' subcommands
-func handleRecord(args []string) {
+// Record commands
+func recordAdd(args []string) {
 	dnsData := data.GetInstance()
 	dnsData.Initialize()
-
-	gDNSRecords := dnsData.DNSRecords
-
-	commands := map[string]func([]string){
-		"add": func(args []string) {
-			gDNSRecords = dnsrecords.Add(args, gDNSRecords, false)
-			dnsData.UpdateRecords(gDNSRecords)
-		},
-		"remove": func(args []string) {
-			gDNSRecords = dnsrecords.Remove(args, gDNSRecords)
-			dnsData.UpdateRecords(gDNSRecords)
-		},
-		"update": func(args []string) {
-			//update is add with overwrite arg set to true
-			gDNSRecords = dnsrecords.Add(args, gDNSRecords, true)
-			dnsData.UpdateRecords(gDNSRecords)
-		},
-		"list": func(args []string) {
-			//if args not empty and not d or details use it as filter
-			if len(args) > 0 && args[0] != "d" && args[0] != "details" {
-				if args[0] == "?" || args[0] == "h" || args[0] == "help" {
-					fmt.Println("Usage: record list [details] [filter]")
-					fmt.Println("  details: Show detailed information")
-					fmt.Println("  filter: Filter records by name or type")
-					return
-				}
-				fmt.Println("Filtering records by:", args[0])
-			}
-
-			dnsrecords.List(gDNSRecords, args)
-		},
-		"clear": func(args []string) {
-			gDNSRecords = []dnsrecords.DNSRecord{}
-			dnsData.UpdateRecords(gDNSRecords)
-			fmt.Println("All DNS records have been cleared.")
-		},
-		"load": func(args []string) {
-			gDNSRecords = data.LoadDNSRecords()
-			dnsData.UpdateRecords(gDNSRecords)
-			fmt.Println("DNS records loaded.")
-		},
-		"save": func(args []string) {
-			err := data.SaveDNSRecords(gDNSRecords)
-			if err != nil {
-				fmt.Println("Error saving DNS records:", err)
-				return
-			}
-
-			fmt.Println("DNS records saved.")
-		},
-	}
-
-	executeSubCommand("record", args, commands)
+	records := dnsData.DNSRecords
+	records = dnsrecords.Add(args, records, false)
+	dnsData.UpdateRecords(records)
 }
 
-// handleCache processes 'cache' subcommands
-func handleCache(args []string) {
+func recordRemove(args []string) {
 	dnsData := data.GetInstance()
-	cacheRecordsData := dnsData.CacheRecords
-
-	commands := map[string]func([]string){
-		"list": func(args []string) {
-			dnsrecordcache.List(cacheRecordsData)
-		},
-		"remove": func(args []string) {
-			cacheRecordsData = dnsrecordcache.Remove(args, cacheRecordsData)
-			dnsData.UpdateCacheRecords(cacheRecordsData)
-		},
-		"clear": func(args []string) {
-			cacheRecordsData = []dnsrecordcache.CacheRecord{}
-			dnsData.UpdateCacheRecords(cacheRecordsData)
-			fmt.Println("Cache cleared.")
-		},
-		"load": func(args []string) {
-			cacheRecordsData = data.LoadCacheRecords()
-			dnsData.UpdateCacheRecords(cacheRecordsData)
-			fmt.Println("Cache records loaded.")
-		},
-		"save": func(args []string) {
-			err := data.SaveCacheRecords(cacheRecordsData)
-			if err != nil {
-				fmt.Println("Error saving cache records:", err)
-				return
-			}
-			fmt.Println("Cache records saved.")
-		},
-	}
-
-	executeSubCommand("cache", args, commands)
+	records := dnsData.DNSRecords
+	records = dnsrecords.Remove(args, records)
+	dnsData.UpdateRecords(records)
 }
 
-// handleDNS processes 'dns' subcommands
-func handleDNS(args []string) {
+func recordUpdate(args []string) {
 	dnsData := data.GetInstance()
-	dnsServers := dnsData.DNSServers
-
-	commands := map[string]func([]string){
-		"add": func(args []string) {
-			dnsServers = dnsservers.Add(args, dnsServers)
-			dnsData.UpdateServers(dnsServers)
-		},
-		"remove": func(args []string) {
-			dnsServers = dnsservers.Remove(args, dnsServers)
-			dnsData.UpdateServers(dnsServers)
-		},
-		"update": func(args []string) {
-			dnsServers = dnsservers.Update(args, dnsServers)
-			dnsData.UpdateServers(dnsServers)
-		},
-		"list": func(args []string) {
-			dnsservers.List(dnsServers)
-		},
-		"clear": func(args []string) {
-			dnsServers = []dnsservers.DNSServer{}
-			dnsData.UpdateServers(dnsServers)
-			fmt.Println("All DNS servers have been cleared.")
-		},
-		"load": func(args []string) {
-			dnsServers = data.LoadDNSServers()
-			dnsData.UpdateServers(dnsServers)
-			fmt.Println("DNS servers loaded.")
-		},
-		"save": func(args []string) {
-			err := data.SaveDNSServers(dnsServers)
-			if err != nil {
-				fmt.Println("Error saving DNS servers:", err)
-				return
-			}
-			fmt.Println("DNS servers saved.")
-		},
-	}
-
-	executeSubCommand("dns", args, commands)
+	records := dnsData.DNSRecords
+	records = dnsrecords.Add(args, records, true)
+	dnsData.UpdateRecords(records)
 }
 
-// handleServer manages 'server' subcommands, utilizing the passed-in functions
-func handleServer(args []string) {
-	commands := map[string]func([]string){
-		"start":     handleServerStart,
-		"stop":      handleServerStop,
-		"status":    handleServerStatus,
-		"configure": handleServerConfigure,
-		"load":      handleServerLoad,
-		"save":      handleServerSave,
+func recordList(args []string) {
+	dnsData := data.GetInstance()
+	records := dnsData.DNSRecords
+	if len(args) > 0 && args[0] != "d" && args[0] != "details" {
+		if args[0] == "?" || args[0] == "h" || args[0] == "help" {
+			fmt.Println("Usage: record list [details] [filter]")
+			fmt.Println("  details: Show detailed information")
+			fmt.Println("  filter: Filter records by name or type")
+			return
+		}
+		fmt.Println("Filtering records by:", args[0])
 	}
-
-	executeSubCommand("server", args, commands)
+	dnsrecords.List(records, args)
 }
 
-// executeSubCommand executes the appropriate subcommand handler
-func executeSubCommand(context string, args []string, commands map[string]func([]string)) {
-	if len(args) == 0 {
-		fmt.Printf("Subcommand required. Use '%s ?' for help.\n", context)
+func recordClear(args []string) {
+	dnsData := data.GetInstance()
+	dnsData.UpdateRecords([]dnsrecords.DNSRecord{})
+	fmt.Println("All DNS records have been cleared.")
+}
+
+func recordLoad(args []string) {
+	dnsData := data.GetInstance()
+	records := data.LoadDNSRecords()
+	dnsData.UpdateRecords(records)
+	fmt.Println("DNS records loaded.")
+}
+
+func recordSave(args []string) {
+	dnsData := data.GetInstance()
+	records := dnsData.DNSRecords
+	if err := data.SaveDNSRecords(records); err != nil {
+		fmt.Println("Error saving DNS records:", err)
 		return
 	}
-
-	subCmd := args[0]
-
-	if !checkHelp(subCmd, context) {
-		return
-	}
-
-	if handler, ok := commands[subCmd]; ok {
-		handler(args[1:])
-	} else {
-		fmt.Printf("Unknown '%s' subcommand: %s. Use '%s ?' for help.\n", context, subCmd, context)
-	}
+	fmt.Println("DNS records saved.")
 }
 
-// handleServerLoad handles 'server load' command
+// Cache commands
+func cacheList(args []string) {
+	dnsData := data.GetInstance()
+	cache := dnsData.CacheRecords
+	dnsrecordcache.List(cache)
+}
+
+func cacheRemove(args []string) {
+	dnsData := data.GetInstance()
+	cache := dnsData.CacheRecords
+	cache = dnsrecordcache.Remove(args, cache)
+	dnsData.UpdateCacheRecords(cache)
+}
+
+func cacheClear(args []string) {
+	dnsData := data.GetInstance()
+	dnsData.UpdateCacheRecords([]dnsrecordcache.CacheRecord{})
+	fmt.Println("Cache cleared.")
+}
+
+func cacheLoad(args []string) {
+	dnsData := data.GetInstance()
+	cache := data.LoadCacheRecords()
+	dnsData.UpdateCacheRecords(cache)
+	fmt.Println("Cache records loaded.")
+}
+
+func cacheSave(args []string) {
+	dnsData := data.GetInstance()
+	cache := dnsData.CacheRecords
+	if err := data.SaveCacheRecords(cache); err != nil {
+		fmt.Println("Error saving cache records:", err)
+		return
+	}
+	fmt.Println("Cache records saved.")
+}
+
+// DNS server list commands
+func dnsAdd(args []string) {
+	dnsData := data.GetInstance()
+	servers := dnsData.DNSServers
+	servers = dnsservers.Add(args, servers)
+	dnsData.UpdateServers(servers)
+}
+
+func dnsRemove(args []string) {
+	dnsData := data.GetInstance()
+	servers := dnsData.DNSServers
+	servers = dnsservers.Remove(args, servers)
+	dnsData.UpdateServers(servers)
+}
+
+func dnsUpdate(args []string) {
+	dnsData := data.GetInstance()
+	servers := dnsData.DNSServers
+	servers = dnsservers.Update(args, servers)
+	dnsData.UpdateServers(servers)
+}
+
+func dnsList(args []string) {
+	dnsData := data.GetInstance()
+	servers := dnsData.DNSServers
+	dnsservers.List(servers)
+}
+
+func dnsClear(args []string) {
+	dnsData := data.GetInstance()
+	dnsData.UpdateServers([]dnsservers.DNSServer{})
+	fmt.Println("All DNS servers have been cleared.")
+}
+
+func dnsLoad(args []string) {
+	dnsData := data.GetInstance()
+	servers := data.LoadDNSServers()
+	dnsData.UpdateServers(servers)
+	fmt.Println("DNS servers loaded.")
+}
+
+func dnsSave(args []string) {
+	dnsData := data.GetInstance()
+	servers := dnsData.DNSServers
+	if err := data.SaveDNSServers(servers); err != nil {
+		fmt.Println("Error saving DNS servers:", err)
+		return
+	}
+	fmt.Println("DNS servers saved.")
+}
+
+// Server commands rely on function variables.
 func handleServerLoad(args []string) {
 	dnsData := data.GetInstance()
-	dnsServerSettings := data.LoadSettings()
-	dnsData.UpdateSettings(dnsServerSettings)
+	settings := data.LoadSettings()
+	dnsData.UpdateSettings(settings)
 	fmt.Println("Server settings loaded.")
 }
 
-// handleServerSave handles 'server save' command
 func handleServerSave(args []string) {
 	dnsData := data.GetInstance()
 	data.SaveSettings(dnsData.Settings)
 	fmt.Println("Server settings saved.")
 }
 
-// handleServerStart handles 'server start' command
 func handleServerStart(args []string) {
 	if len(args) == 0 {
 		fmt.Println("Server component to start required. Use 'server start ?' for help.")
 		return
 	}
-
 	dnsData := data.GetInstance()
-	dnsServerSettings := dnsData.Settings
-
+	settings := dnsData.Settings
 	startCommands := map[string]func(){
 		"dns": func() {
-			restartDNSServerFunc(dnsServerSettings.DNSPort)
+			if restartDNSServerFunc != nil {
+				restartDNSServerFunc(settings.DNSPort)
+			}
 			fmt.Println("DNS server started.")
 		},
 		"mdns": func() {
-			startMDNSServerFunc(dnsServerSettings.MDNSPort)
+			if startMDNSServerFunc != nil {
+				startMDNSServerFunc(settings.MDNSPort)
+			}
 			fmt.Println("mDNS server started.")
 		},
 		"api": func() {
-			startGinAPIFunc(dnsServerSettings.RESTPort)
+			if startGinAPIFunc != nil {
+				startGinAPIFunc(settings.RESTPort)
+			}
 			fmt.Println("API server started.")
 		},
 	}
-
-	component := args[0]
-
-	if cmd, ok := startCommands[component]; ok {
+	if cmd, ok := startCommands[args[0]]; ok {
 		cmd()
 	} else {
-		fmt.Printf("Unknown component to start: %s. Use 'server start ?' for help.\n", component)
+		fmt.Printf("Unknown component to start: %s. Use 'server start ?' for help.\n", args[0])
 	}
 }
 
-// handleServerStop handles 'server stop' command
 func handleServerStop(args []string) {
 	if len(args) == 0 {
 		fmt.Println("Server component to stop required. Use 'server stop ?' for help.")
 		return
 	}
-
 	stopCommands := map[string]func(){
 		"dns": func() {
-			stopDNSServerFunc()
+			if stopDNSServerFunc != nil {
+				stopDNSServerFunc()
+			}
 			fmt.Println("DNS server stopped.")
 		},
 		"mdns": func() {
-			// Implement mDNS stop logic if needed
 			fmt.Println("mDNS server stop not implemented yet.")
 		},
 		"api": func() {
-			// Implement API stop logic if needed
 			fmt.Println("API server stop not implemented yet.")
 		},
 	}
-
-	component := args[0]
-
-	if cmd, ok := stopCommands[component]; ok {
+	if cmd, ok := stopCommands[args[0]]; ok {
 		cmd()
 	} else {
-		fmt.Printf("Unknown component to stop: %s. Use 'server stop ?' for help.\n", component)
+		fmt.Printf("Unknown component to stop: %s. Use 'server stop ?' for help.\n", args[0])
 	}
 }
 
-// handleServerStatus handles 'server status' command
 func handleServerStatus(args []string) {
 	if len(args) == 0 {
 		fmt.Println("Server component required. Use 'server status ?' for help.")
 		return
 	}
-
 	statusCommands := map[string]func(){
 		"dns": func() {
 			status := "stopped"
-			if getServerStatusFunc() {
+			if getServerStatusFunc != nil && getServerStatusFunc() {
 				status = "running"
 			}
 			fmt.Printf("DNS Server is %s.\n", status)
 		},
 		"mdns": func() {
-			// Implement mDNS status logic if needed
 			fmt.Println("mDNS server status not implemented yet.")
 		},
 		"api": func() {
-			// Implement API status logic if needed
 			fmt.Println("API server status not implemented yet.")
 		},
 	}
-
-	component := args[0]
-
-	if cmd, ok := statusCommands[component]; ok {
+	if cmd, ok := statusCommands[args[0]]; ok {
 		cmd()
 	} else {
-		fmt.Printf("Unknown component: %s. Use 'server status ?' for help.\n", component)
+		fmt.Printf("Unknown component: %s. Use 'server status ?' for help.\n", args[0])
 	}
 }
 
-// handleServerConfigure handles 'server configure' command
 func handleServerConfigure(args []string) {
 	dnsData := data.GetInstance()
-	dnsServerSettings := dnsData.Settings
-
+	settings := dnsData.Settings
 	if len(args) == 0 {
-		// List current configuration
 		fmt.Println("Current Server Configuration:")
-		fmt.Printf("DNS Port: %s\n", dnsServerSettings.DNSPort)
-		fmt.Printf("mDNS Port: %s\n", dnsServerSettings.MDNSPort)
-		fmt.Printf("API Port: %s\n", dnsServerSettings.RESTPort)
-		fmt.Printf("Fallback Server IP: %s\n", dnsServerSettings.FallbackServerIP)
-		fmt.Printf("Fallback Server Port: %s\n", dnsServerSettings.FallbackServerPort)
-	} else {
-		// Set configuration parameters
-		if len(args) < 2 {
-			fmt.Println("Usage: server configure [setting] [value]")
-			return
-		}
-		setting := args[0]
-		value := args[1]
-
-		switch setting {
-		case "dns_port":
-			dnsServerSettings.DNSPort = value
-			fmt.Printf("DNS Port set to %s\n", value)
-		case "mdns_port":
-			dnsServerSettings.MDNSPort = value
-			fmt.Printf("mDNS Port set to %s\n", value)
-		case "api_port":
-			dnsServerSettings.RESTPort = value
-			fmt.Printf("API Port set to %s\n", value)
-		case "fallback_ip":
-			dnsServerSettings.FallbackServerIP = value
-			fmt.Printf("Fallback Server IP set to %s\n", value)
-		case "fallback_port":
-			dnsServerSettings.FallbackServerPort = value
-			fmt.Printf("Fallback Server Port set to %s\n", value)
-		default:
-			fmt.Printf("Unknown setting: %s\n", setting)
-			return
-		}
-
-		dnsData.UpdateSettings(dnsServerSettings)
-		fmt.Println("Server configuration updated.")
+		fmt.Printf("DNS Port: %s\n", settings.DNSPort)
+		fmt.Printf("mDNS Port: %s\n", settings.MDNSPort)
+		fmt.Printf("API Port: %s\n", settings.RESTPort)
+		fmt.Printf("Fallback Server IP: %s\n", settings.FallbackServerIP)
+		fmt.Printf("Fallback Server Port: %s\n", settings.FallbackServerPort)
+		return
 	}
+	if len(args) < 2 {
+		fmt.Println("Usage: server configure [setting] [value]")
+		return
+	}
+	setting := args[0]
+	value := args[1]
+	switch setting {
+	case "dns_port":
+		settings.DNSPort = value
+		fmt.Printf("DNS Port set to %s\n", value)
+	case "mdns_port":
+		settings.MDNSPort = value
+		fmt.Printf("mDNS Port set to %s\n", value)
+	case "api_port":
+		settings.RESTPort = value
+		fmt.Printf("API Port set to %s\n", value)
+	case "fallback_ip":
+		settings.FallbackServerIP = value
+		fmt.Printf("Fallback Server IP set to %s\n", value)
+	case "fallback_port":
+		settings.FallbackServerPort = value
+		fmt.Printf("Fallback Server Port set to %s\n", value)
+	default:
+		fmt.Printf("Unknown setting: %s\n", setting)
+		return
+	}
+	dnsData.UpdateSettings(settings)
+	fmt.Println("Server configuration updated.")
 }
 
-// setupAutocomplete sets up command autocompletion
-func setupAutocomplete(rl *readline.Instance, context string) {
-	updatePrompt(rl, context)
-
-	var completer *readline.PrefixCompleter
-
-	if context == "" {
-		completer = readline.NewPrefixCompleter(
-			readline.PcItem("record"),
-			readline.PcItem("cache"),
-			readline.PcItem("dns"),
-			readline.PcItem("server"),
-			readline.PcItem("stats"),
-			readline.PcItem("help"),
-			readline.PcItem("h"),
-			readline.PcItem("?"),
-			readline.PcItem("exit"),
-			readline.PcItem("quit"),
-			readline.PcItem("q"),
-		)
-	} else {
-		subCommands := getSubCommands(context)
-		completer = readline.NewPrefixCompleter(
-			readline.PcItemDynamic(func(string) []string { return subCommands }),
-		)
-	}
-
-	rl.Config.AutoComplete = completer
-}
-
-// getSubCommands returns the subcommands for the given context
-func getSubCommands(context string) []string {
-	commands := loadCommands()
-	if cmd, exists := commands[context]; exists {
-		subCmds := []string{}
-		for subCmd := range cmd.SubCommands {
-			subCmds = append(subCmds, subCmd)
-		}
-		// Add common commands
-		subCmds = append(subCmds, "/", "help", "h", "?")
-		sort.Strings(subCmds)
-		return subCmds
-	}
-	return []string{}
-}
-
-// updatePrompt updates the readline prompt based on the current context
-func updatePrompt(rl *readline.Instance, currentContext string) {
-	prompt := "> "
-	if currentContext != "" {
-		prompt = fmt.Sprintf("(%s) > ", currentContext)
-	}
-	rl.SetPrompt(prompt)
-	rl.Refresh()
-}
-
-// showHelp displays help information based on the context
-func showHelp(context string) {
-	commands := loadCommands()
-	caser := cases.Title(language.English)
-
-	if context == "" {
-		fmt.Println("Available commands:")
-		helpPrinter(commands, false, false)
-		commonHelp(false)
-	} else if cmd, exists := commands[context]; exists {
-		fmt.Printf("%s commands:\n", caser.String(context))
-		helpPrinter(map[string]cmdHelp{context: cmd}, true, true)
-		commonHelp(true)
-	} else {
-		fmt.Printf("Unknown context: %s. Available commands:\n", context)
-		helpPrinter(commands, false, false)
-		commonHelp(false)
-	}
-}
-
-// helpPrinter prints help for commands, optionally including subcommands.
-func helpPrinter(commands map[string]cmdHelp, includeSubCommands bool, isSubCmd bool) {
-	var lines []string
-
-	for _, cmd := range commands {
-		if !isSubCmd {
-			lines = append(lines, fmt.Sprintf("%-15s %s", cmd.Name, cmd.Description))
-		}
-
-		if includeSubCommands && len(cmd.SubCommands) > 0 {
-			for _, subCmd := range cmd.SubCommands {
-				lines = append(lines, fmt.Sprintf("  %-15s %s", subCmd.Name, subCmd.Description))
-			}
-		}
-	}
-
-	sort.Strings(lines)
-
-	for _, line := range lines {
-		fmt.Println(line)
-	}
-}
-
-// commonHelp prints common help commands.
-func commonHelp(indent bool) {
-	indentation := ""
-	if indent {
-		indentation = "  "
-	}
-	fmt.Printf("%s%-15s %s\n", indentation, "/", "- Go up one level")
-	fmt.Printf("%s%-15s %s\n", indentation, "exit, quit, q", "- Shutdown the server")
-	fmt.Printf("%s%-15s %s\n", indentation, "help, h, ?", "- Show help")
-}
-
-// checkHelp determines if the argument is for help.
-func checkHelp(arg, context string) bool {
-	helpCommands := []string{"?", "help", "h"}
-
-	for _, cmd := range helpCommands {
-		if arg == cmd {
-			showHelp(context)
-			return false
-		}
-	}
-
-	return true
-}
-
-// loadCommands returns a map with command information.
-func loadCommands() map[string]cmdHelp {
-	return map[string]cmdHelp{
-		"record": {
-			Name:        "record",
-			Description: "- Record Management",
-			SubCommands: map[string]cmdHelp{
-				"add":    {"add", "- Add a new DNS record", nil},
-				"remove": {"remove", "- Remove a DNS record", nil},
-				"update": {"update", "- Update a DNS record", nil},
-				"list":   {"list", "- List all DNS records", nil},
-				"clear":  {"clear", "- Clear all DNS records", nil},
-				"load":   {"load", "- Load DNS records from a file", nil},
-				"save":   {"save", "- Save DNS records to a file", nil},
-			},
-		},
-		"cache": {
-			Name:        "cache",
-			Description: "- Cache Management",
-			SubCommands: map[string]cmdHelp{
-				"remove": {"remove", "- Remove a cache entry", nil},
-				"list":   {"list", "- List all cache entries", nil},
-				"clear":  {"clear", "- Clear the cache", nil},
-				"load":   {"load", "- Load cache records from a file", nil},
-				"save":   {"save", "- Save cache records to a file", nil},
-			},
-		},
-		"dns": {
-			Name:        "dns",
-			Description: "- DNS Server Management",
-			SubCommands: map[string]cmdHelp{
-				"add":    {"add", "- Add a new DNS server", nil},
-				"remove": {"remove", "- Remove a DNS server", nil},
-				"update": {"update", "- Update a DNS server", nil},
-				"list":   {"list", "- List all DNS servers", nil},
-				"clear":  {"clear", "- Clear all DNS servers", nil},
-				"load":   {"load", "- Load DNS servers from a file", nil},
-				"save":   {"save", "- Save DNS servers to a file", nil},
-			},
-		},
-		"server": {
-			Name:        "server",
-			Description: "- Server Management",
-			SubCommands: map[string]cmdHelp{
-				"start":     {"start", "- Start server components", nil},
-				"stop":      {"stop", "- Stop server components", nil},
-				"status":    {"status", "- Show server component status", nil},
-				"configure": {"configure", "- Set or list server configuration", nil},
-				"load":      {"load", "- Load server settings from a file", nil},
-				"save":      {"save", "- Save server settings to a file", nil},
-			},
-		},
-	}
-}
-
-// handleStats displays server statistics
-func handleStats() {
+// Stats command
+func handleStats(args []string) {
 	dnsData := data.GetInstance()
-
 	fmt.Println("Server start time:", dnsData.Stats.ServerStartTime)
 	fmt.Println("Server Up Time:", serverUpTimeFormat(dnsData.Stats.ServerStartTime))
 	fmt.Println()
@@ -684,10 +375,9 @@ func handleStats() {
 	fmt.Println("Total queries forwarded:", dnsData.Stats.TotalQueriesForwarded)
 }
 
-// Helper function for formatting uptime
+// Helper for formatting uptime
 func serverUpTimeFormat(startTime time.Time) string {
 	duration := time.Since(startTime)
-
 	days := duration / (24 * time.Hour)
 	duration -= days * 24 * time.Hour
 	hours := duration / time.Hour
@@ -695,7 +385,6 @@ func serverUpTimeFormat(startTime time.Time) string {
 	minutes := duration / time.Minute
 	duration -= minutes * time.Minute
 	seconds := duration / time.Second
-
 	if days > 0 {
 		return fmt.Sprintf("%d days, %d hours, %d minutes, %d seconds", days, hours, minutes, seconds)
 	}

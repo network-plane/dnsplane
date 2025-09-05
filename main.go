@@ -18,6 +18,7 @@ import (
 	"dnsresolver/dnsrecordcache"
 	"dnsresolver/dnsrecords"
 	"dnsresolver/dnsservers"
+	"dnsresolver/tui"
 
 	// "github.com/bettercap/readline"
 	// "github.com/reeflective/readline"
@@ -119,10 +120,10 @@ func main() {
 			}
 			defer rl.Close()
 
-			// Use the command handler from the package
-			commandhandler.HandleCommandLoop(
-				rl,
-			)
+			// Register commands and start the TUI loop
+			commandhandler.RegisterCommands()
+			tui.SetPrompt("dnsresolver> ")
+			tui.Run(rl)
 		}
 	}
 
@@ -466,9 +467,9 @@ func connectToUnixSocket(socketPath string) {
 	}
 	defer rl.Close() // Close readline when done
 
-	commandhandler.HandleCommandLoop(
-		rl,
-	)
+	commandhandler.RegisterCommands()
+	tui.SetPrompt("dnsresolver> ")
+	tui.Run(rl)
 }
 
 ////////////////////////////////////////////////////
