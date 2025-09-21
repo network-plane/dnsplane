@@ -87,7 +87,31 @@ func main() {
 		}
 
 		// Start DNS Server
-		startDNSServer(*port)
+		startedCh, dnsErrCh := startDNSServer(*port)
+
+		waitForServer := func() error {
+			select {
+			case <-startedCh:
+				return nil
+			case err := <-dnsErrCh:
+				return err
+			}
+		}
+
+		if err := waitForServer(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error starting DNS server: %v\n", err)
+			return
+		}
+
+		monitorDNSErrors := func() {
+			go func() {
+				if err := <-dnsErrCh; err != nil {
+					fmt.Fprintf(os.Stderr, "DNS server error: %v\n", err)
+				}
+			}()
+		}
+
+		monitorDNSErrors()
 
 		// mDNS server setup
 		if *mdnsMode {
@@ -118,6 +142,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "readline: %v\n", err)
 				return
 			}
+			rl.CaptureExitSignal()
 			defer rl.Close()
 
 			// Register commands and start the TUI loop
@@ -133,7 +158,7 @@ func main() {
 	}
 }
 
-func startDNSServer(port string) {
+func startDNSServer(port string) (<-chan struct{}, <-chan error) {
 	dnsData := data.GetInstance()
 
 	server := &dns.Server{
@@ -142,17 +167,30 @@ func startDNSServer(port string) {
 	}
 
 	log.Printf("Starting DNS server on %s\n", server.Addr)
-	updateServerStatus(true)
 
-	// Update the server start time
-	stats := dnsData.GetStats()
-	stats.ServerStartTime = time.Now()
-	dnsData.UpdateStats(stats)
+	startedCh := make(chan struct{})
+	errCh := make(chan error, 1)
+	var once sync.Once
+
+	server.NotifyStartedFunc = func() {
+		once.Do(func() {
+			updateServerStatus(true)
+			stats := dnsData.GetStats()
+			stats.ServerStartTime = time.Now()
+			dnsData.UpdateStats(stats)
+			close(startedCh)
+		})
+	}
 
 	go func() {
 		defer close(stoppedDNS)
 		if err := server.ListenAndServe(); err != nil {
-			log.Fatalf("Error starting server: %v", err)
+			updateServerStatus(false)
+			select {
+			case errCh <- err:
+			default:
+			}
+			return
 		}
 		updateServerStatus(false)
 	}()
@@ -160,9 +198,14 @@ func startDNSServer(port string) {
 	go func() {
 		<-stopDNSCh
 		if err := server.Shutdown(); err != nil {
-			log.Fatalf("Error stopping server: %v", err)
+			select {
+			case errCh <- err:
+			default:
+			}
 		}
 	}()
+
+	return startedCh, errCh
 }
 
 func restartDNSServer(port string) {
@@ -172,7 +215,12 @@ func restartDNSServer(port string) {
 	stopDNSCh = make(chan struct{})
 	stoppedDNS = make(chan struct{})
 
-	startDNSServer(port)
+	startedCh, errCh := startDNSServer(port)
+	select {
+	case <-startedCh:
+	case err := <-errCh:
+		fmt.Fprintf(os.Stderr, "Error restarting DNS server: %v\n", err)
+	}
 }
 
 func stopDNSServer() {
@@ -215,7 +263,7 @@ func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
 func handleQuestion(question dns.Question, response *dns.Msg) {
 	dnsdata := data.GetInstance()
 	dnsServerSettings := dnsdata.GetResolverSettings()
-	dnsRecords := data.LoadDNSRecords()
+	dnsRecords := dnsdata.GetRecords()
 
 	switch question.Qtype {
 	case dns.TypePTR:
@@ -229,7 +277,7 @@ func handleQuestion(question dns.Question, response *dns.Msg) {
 		if cachedRecord != nil {
 			processCachedRecord(question, cachedRecord, response)
 		} else {
-			cachedRecord = findCacheRecord(dnsdata.CacheRecords, question.Name, recordType)
+			cachedRecord = findCacheRecord(dnsdata.GetCacheRecords(), question.Name, recordType)
 			if cachedRecord != nil {
 				dnsdata.IncrementCacheHits()
 				processCacheRecord(question, cachedRecord, response)
@@ -250,7 +298,7 @@ func handlePTRQuestion(question dns.Question, response *dns.Msg) {
 	dnsServerSettings := dnsdata.GetResolverSettings()
 
 	ipAddr := converters.ConvertReverseDNSToIP(question.Name)
-	dnsRecords := data.LoadDNSRecords()
+	dnsRecords := dnsdata.GetRecords()
 	recordType := dns.TypeToString[question.Qtype]
 
 	rrPointer := dnsrecords.FindRecord(dnsRecords, ipAddr, recordType, dnsServerSettings.DNSRecordSettings.AutoBuildPTRFromA)
@@ -294,39 +342,56 @@ func dnsRecordToRR(dnsRecord *dnsrecords.DNSRecord, ttl uint32) *dns.RR {
 }
 
 func processAuthoritativeAnswer(question dns.Question, answer *dns.Msg, response *dns.Msg) {
-	dnsdata := data.GetInstance()
-
 	response.Answer = append(response.Answer, answer.Answer...)
 	response.Authoritative = true
 	fmt.Printf("Query: %s, Reply: %s, Method: DNS server: %s\n", question.Name, answer.Answer[0].String(), answer.Answer[0].Header().Name[:len(answer.Answer[0].Header().Name)-1])
 
-	err := data.SaveCacheRecords(dnsdata.CacheRecords)
-	if err != nil {
-		log.Println("Error saving cache records:", err)
-	}
+	cacheDNSResponse(answer)
 }
 
 func handleFallbackServer(question dns.Question, fallbackServer string, response *dns.Msg) {
-	dnsdata := data.GetInstance()
-
 	fallbackResponse, _ := queryAuthoritative(question.Name, fallbackServer)
 	if fallbackResponse != nil {
 		response.Answer = append(response.Answer, fallbackResponse.Answer...)
 		fmt.Printf("Query: %s, Reply: %s, Method: Fallback DNS server: %s\n", question.Name, fallbackResponse.Answer[0].String(), fallbackServer)
 
-		err := data.SaveCacheRecords(dnsdata.CacheRecords)
-		if err != nil {
-			log.Println("Error saving cache records:", err)
-		}
+		cacheDNSResponse(fallbackResponse)
 	} else {
 		fmt.Printf("Query: %s, No response\n", question.Name)
 	}
+}
+
+func cacheDNSResponse(answer *dns.Msg) {
+	if answer == nil || len(answer.Answer) == 0 {
+		return
+	}
+	cacheRRs(answer.Answer)
+}
+
+func cacheRRs(rrs []dns.RR) {
+	if len(rrs) == 0 {
+		return
+	}
+
+	dnsdata := data.GetInstance()
+	settings := dnsdata.GetResolverSettings()
+	if !settings.CacheRecords {
+		return
+	}
+
+	cache := dnsdata.GetCacheRecords()
+	for i := range rrs {
+		rr := rrs[i]
+		cache = dnsrecordcache.Add(cache, &rr)
+	}
+	dnsdata.UpdateCacheRecords(cache)
 }
 
 func processCachedRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
 	response.Answer = append(response.Answer, *cachedRecord)
 	response.Authoritative = true
 	fmt.Printf("Query: %s, Reply: %s, Method: dnsrecords.json\n", question.Name, (*cachedRecord).String())
+	cacheRRs([]dns.RR{*cachedRecord})
 }
 
 func processCacheRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
@@ -337,7 +402,8 @@ func processCacheRecord(question dns.Question, cachedRecord *dns.RR, response *d
 func findCacheRecord(cacheRecords []dnsrecordcache.CacheRecord, name string, recordType string) *dns.RR {
 	now := time.Now()
 	for _, record := range cacheRecords {
-		if record.DNSRecord.Name == name && record.DNSRecord.Type == recordType {
+		if dnsrecords.NormalizeRecordNameKey(record.DNSRecord.Name) == dnsrecords.NormalizeRecordNameKey(name) &&
+			dnsrecords.NormalizeRecordType(record.DNSRecord.Type) == dnsrecords.NormalizeRecordType(recordType) {
 			if now.Before(record.Expiry) {
 				remainingTTL := uint32(record.Expiry.Sub(now).Seconds())
 				return dnsRecordToRR(&record.DNSRecord, remainingTTL)
@@ -465,6 +531,7 @@ func connectToUnixSocket(socketPath string) {
 		fmt.Fprintf(os.Stderr, "readline: %v\n", err)
 		return
 	}
+	rl.CaptureExitSignal()
 	defer rl.Close() // Close readline when done
 
 	commandhandler.RegisterCommands()

@@ -85,50 +85,71 @@ func List(cacheRecordsData []CacheRecord) {
 }
 
 // Remove a record from the cache
+
 func Remove(fullCommand []string, cacheRecordsData []CacheRecord) []CacheRecord {
-	if len(fullCommand) > 1 && fullCommand[1] == "?" {
-		fmt.Println("Enter the cache record in the format: <Name>")
+	if len(fullCommand) == 0 {
+		fmt.Println("Enter the cache record in the format: <Name> [Type] [Value]")
 		fmt.Println("Example: example.com")
-		return nil
+		return cacheRecordsData
 	}
 
-	if len(fullCommand) < 2 {
-		fmt.Println("Please specify at least the record name.")
-		return nil
+	if fullCommand[0] == "?" {
+		fmt.Println("Enter the cache record in the format: <Name> [Type] [Value]")
+		fmt.Println("Example: example.com")
+		return cacheRecordsData
 	}
 
-	name := fullCommand[1]
+	nameArg := strings.TrimSpace(fullCommand[0])
+	nameKey := dnsrecords.NormalizeRecordNameKey(nameArg)
 
-	matchingRecords := []CacheRecord{}
-	for _, record := range cacheRecordsData {
-		if record.DNSRecord.Name == name {
-			matchingRecords = append(matchingRecords, record)
+	typeArg := ""
+	if len(fullCommand) >= 2 {
+		typeArg = fullCommand[1]
+	}
+	typeKey := dnsrecords.NormalizeRecordType(typeArg)
+
+	valueArg := ""
+	if len(fullCommand) >= 3 {
+		valueArg = strings.Join(fullCommand[2:], " ")
+	}
+	valueKey := ""
+	if valueArg != "" {
+		valueKey = dnsrecords.NormalizeRecordValueKey(typeKey, valueArg)
+	}
+
+	matchingIdx := make([]int, 0)
+	for i, record := range cacheRecordsData {
+		if dnsrecords.NormalizeRecordNameKey(record.DNSRecord.Name) != nameKey {
+			continue
 		}
-	}
-
-	if len(matchingRecords) == 0 {
-		fmt.Println("No records found with the name:", name)
-		return nil
-	}
-
-	if len(fullCommand) == 2 {
-		if len(matchingRecords) == 1 {
-			for i, r := range cacheRecordsData {
-				if r == matchingRecords[0] {
-					cacheRecordsData = append(cacheRecordsData[:i], cacheRecordsData[i+1:]...)
-					removedRecToPrint := fmt.Sprintf("%s %s %s %d", matchingRecords[0].DNSRecord.Name, matchingRecords[0].DNSRecord.Type, matchingRecords[0].DNSRecord.Value, matchingRecords[0].DNSRecord.TTL)
-					fmt.Println("Removed:", removedRecToPrint)
-					return cacheRecordsData
-				}
-			}
-			return nil
+		recordType := dnsrecords.NormalizeRecordType(record.DNSRecord.Type)
+		if typeKey != "" && recordType != typeKey {
+			continue
 		}
-		fmt.Println("Multiple records found with the name:", name)
-		for i, record := range matchingRecords {
-			fmt.Printf("%d. %v\n", i+1, record)
+		recordValueKey := dnsrecords.NormalizeRecordValueKey(recordType, record.DNSRecord.Value)
+		if valueKey != "" && recordValueKey != valueKey {
+			continue
 		}
-		return nil
+		matchingIdx = append(matchingIdx, i)
 	}
 
+	if len(matchingIdx) == 0 {
+		fmt.Println("No records found with the specified criteria.")
+		return cacheRecordsData
+	}
+
+	if len(matchingIdx) > 1 && valueKey == "" {
+		fmt.Println("Multiple records found. Please specify the type and value to remove a specific entry.")
+		for _, idx := range matchingIdx {
+			record := cacheRecordsData[idx]
+			fmt.Printf("- %s %s %s %d\n", record.DNSRecord.Name, record.DNSRecord.Type, record.DNSRecord.Value, record.DNSRecord.TTL)
+		}
+		return cacheRecordsData
+	}
+
+	idx := matchingIdx[0]
+	removed := cacheRecordsData[idx]
+	cacheRecordsData = append(cacheRecordsData[:idx], cacheRecordsData[idx+1:]...)
+	fmt.Printf("Removed: %s %s %s %d\n", removed.DNSRecord.Name, removed.DNSRecord.Type, removed.DNSRecord.Value, removed.DNSRecord.TTL)
 	return cacheRecordsData
 }

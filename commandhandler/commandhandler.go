@@ -107,7 +107,7 @@ func recordList(args []string) {
 
 func recordClear(args []string) {
 	dnsData := data.GetInstance()
-	dnsData.UpdateRecords([]dnsrecords.DNSRecord{})
+	dnsData.UpdateRecordsInMemory([]dnsrecords.DNSRecord{})
 	fmt.Println("All DNS records have been cleared.")
 }
 
@@ -137,21 +137,21 @@ func cacheList(args []string) {
 
 func cacheRemove(args []string) {
 	dnsData := data.GetInstance()
-	cache := dnsData.CacheRecords
+	cache := dnsData.GetCacheRecords()
 	cache = dnsrecordcache.Remove(args, cache)
-	dnsData.UpdateCacheRecords(cache)
+	dnsData.UpdateCacheRecordsInMemory(cache)
 }
 
 func cacheClear(args []string) {
 	dnsData := data.GetInstance()
-	dnsData.UpdateCacheRecords([]dnsrecordcache.CacheRecord{})
+	dnsData.UpdateCacheRecordsInMemory([]dnsrecordcache.CacheRecord{})
 	fmt.Println("Cache cleared.")
 }
 
 func cacheLoad(args []string) {
 	dnsData := data.GetInstance()
 	cache := data.LoadCacheRecords()
-	dnsData.UpdateCacheRecords(cache)
+	dnsData.UpdateCacheRecordsInMemory(cache)
 	fmt.Println("Cache records loaded.")
 }
 

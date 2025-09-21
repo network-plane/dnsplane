@@ -165,13 +165,12 @@ func (d *DNSResolverData) GetRecords() []dnsrecords.DNSRecord {
 
 // UpdateRecords updates the DNS records
 func (d *DNSResolverData) UpdateRecords(records []dnsrecords.DNSRecord) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.DNSRecords = records
-	err := SaveDNSRecords(records)
-	if err != nil {
-		fmt.Println("Failed to save cache records:", err)
-	}
+	d.storeRecords(records, true)
+}
+
+// UpdateRecordsInMemory replaces DNS records without writing to disk.
+func (d *DNSResolverData) UpdateRecordsInMemory(records []dnsrecords.DNSRecord) {
+	d.storeRecords(records, false)
 }
 
 // GetCacheRecords returns the current cache records
@@ -183,13 +182,12 @@ func (d *DNSResolverData) GetCacheRecords() []dnsrecordcache.CacheRecord {
 
 // UpdateCacheRecords updates the cache records
 func (d *DNSResolverData) UpdateCacheRecords(records []dnsrecordcache.CacheRecord) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.CacheRecords = records
-	err := SaveCacheRecords(records)
-	if err != nil {
-		fmt.Println("Failed to save cache records:", err)
-	}
+	d.storeCacheRecords(records, true)
+}
+
+// UpdateCacheRecordsInMemory replaces cache records without writing to disk.
+func (d *DNSResolverData) UpdateCacheRecordsInMemory(records []dnsrecordcache.CacheRecord) {
+	d.storeCacheRecords(records, false)
 }
 
 // IncrementTotalQueries increments the total queries count
@@ -313,6 +311,28 @@ func SaveCacheRecords(cacheRecords []dnsrecordcache.CacheRecord) error {
 	data := cacheType{Cache: cacheRecords}
 	_ = data
 	return SaveToJSON("dnscache.json", data)
+}
+
+func (d *DNSResolverData) storeRecords(records []dnsrecords.DNSRecord, persist bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.DNSRecords = records
+	if persist {
+		if err := SaveDNSRecords(records); err != nil {
+			fmt.Println("Failed to save DNS records:", err)
+		}
+	}
+}
+
+func (d *DNSResolverData) storeCacheRecords(records []dnsrecordcache.CacheRecord, persist bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.CacheRecords = records
+	if persist {
+		if err := SaveCacheRecords(records); err != nil {
+			fmt.Println("Failed to save cache records:", err)
+		}
+	}
 }
 
 // InitializeJSONFiles creates the JSON files if they don't exist
