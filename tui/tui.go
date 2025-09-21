@@ -2,13 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
 
 	"github.com/chzyer/readline"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 // Command represents an executable command in a context.
@@ -65,7 +64,15 @@ func Run(rl *readline.Instance) {
 		updatePrompt(rl)
 		line, err := rl.Readline()
 		if err != nil {
-			break
+			if err == readline.ErrInterrupt {
+				fmt.Println("Shutting down.")
+				return
+			}
+			if err == io.EOF {
+				return
+			}
+			fmt.Fprintf(os.Stderr, "readline error: %v\n", err)
+			return
 		}
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -124,12 +131,12 @@ func handleRootCommand(args []string, rl *readline.Instance) {
 }
 
 func handleContextCommand(args []string, rl *readline.Instance) {
-	if args[0] == "/" {
+	if args[0] == "/" || (args[0] == "cd" && len(args) > 1 && args[1] == "..") {
 		currentCtx = ""
 		setupAutocomplete(rl)
 		return
 	}
-	if args[0] == "help" || args[0] == "?" || args[0] == "h" {
+	if args[0] == "help" || args[0] == "?" || args[0] == "h" || args[0] == "ls" {
 		showHelp(currentCtx)
 		return
 	}
@@ -145,23 +152,48 @@ func updatePrompt(rl *readline.Instance) {
 	if currentCtx == "" {
 		rl.SetPrompt(basePrompt)
 	} else {
-		title := cases.Title(language.English).String(currentCtx)
-		rl.SetPrompt(fmt.Sprintf("%s%s> ", basePrompt, title))
+		rl.SetPrompt(fmt.Sprintf("%s%s> ", basePrompt, currentCtx))
 	}
 }
 
 func setupAutocomplete(rl *readline.Instance) {
 	if currentCtx == "" {
 		var items []readline.PrefixCompleterInterface
+
+		// Context names with their subcommands.
+		ctxNames := make([]string, 0, len(contexts))
 		for name := range contexts {
 			if name == "" {
 				continue
 			}
+			ctxNames = append(ctxNames, name)
+		}
+		sort.Strings(ctxNames)
+		for _, name := range ctxNames {
+			ctx := contexts[name]
+			subNames := make([]string, 0, len(ctx.commands))
+			for cmdName := range ctx.commands {
+				subNames = append(subNames, cmdName)
+			}
+			sort.Strings(subNames)
+			subItems := make([]readline.PrefixCompleterInterface, 0, len(subNames))
+			for _, cmdName := range subNames {
+				subItems = append(subItems, readline.PcItem(cmdName))
+			}
+			items = append(items, readline.PcItem(name, subItems...))
+		}
+
+		// Global commands (root context).
+		root := contexts[""]
+		rootNames := make([]string, 0, len(root.commands))
+		for name := range root.commands {
+			rootNames = append(rootNames, name)
+		}
+		sort.Strings(rootNames)
+		for _, name := range rootNames {
 			items = append(items, readline.PcItem(name))
 		}
-		for name := range contexts[""].commands {
-			items = append(items, readline.PcItem(name))
-		}
+
 		rl.Config.AutoComplete = readline.NewPrefixCompleter(items...)
 	} else {
 		ctx := contexts[currentCtx]
@@ -169,8 +201,11 @@ func setupAutocomplete(rl *readline.Instance) {
 		for name := range ctx.commands {
 			cmds = append(cmds, name)
 		}
+		sort.Strings(cmds)
 		rl.Config.AutoComplete = readline.NewPrefixCompleter(
-			readline.PcItemDynamic(func(string) []string { return cmds }),
+			readline.PcItemDynamic(func(string) []string {
+				return cmds
+			}),
 		)
 	}
 }

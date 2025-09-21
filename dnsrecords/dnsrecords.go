@@ -27,14 +27,61 @@ type DNSRecord struct {
 }
 
 // findDNSRecordIndex returns the index of the DNSRecord in dnsRecords
-// that matches the given name and value. If no match is found, it returns -1.
-func findDNSRecordIndex(dnsRecords []DNSRecord, name, value string) int {
+// that matches the given name, type, and value. If no match is found, it returns -1.
+func findDNSRecordIndex(dnsRecords []DNSRecord, name, recordType, value string) int {
+	targetName := normalizeRecordNameKey(name)
+	targetType := normalizeRecordType(recordType)
+	targetValue := normalizeRecordValueKey(targetType, value)
+
 	for i, record := range dnsRecords {
-		if record.Name == name && record.Value == value {
+		if normalizeRecordNameKey(record.Name) == targetName &&
+			normalizeRecordType(record.Type) == targetType &&
+			normalizeRecordValueKey(record.Type, record.Value) == targetValue {
 			return i
 		}
 	}
 	return -1
+}
+
+func normalizeRecordType(recordType string) string {
+	return strings.ToUpper(strings.TrimSpace(recordType))
+}
+
+func normalizeRecordNameKey(name string) string {
+	name = strings.TrimSpace(name)
+	for strings.HasSuffix(name, ".") {
+		name = strings.TrimSuffix(name, ".")
+	}
+	return strings.ToLower(name)
+}
+
+func normalizeRecordValueKey(recordType, value string) string {
+	recordType = normalizeRecordType(recordType)
+	value = strings.TrimSpace(value)
+	if recordType == "" {
+		return value
+	}
+	switch recordType {
+	case "CNAME", "NS", "PTR":
+		return normalizeRecordNameKey(value)
+	case "A", "AAAA":
+		return strings.ToLower(value)
+	default:
+		return value
+	}
+}
+
+// Exported helpers for re-use in other packages.
+func NormalizeRecordNameKey(name string) string {
+	return normalizeRecordNameKey(name)
+}
+
+func NormalizeRecordType(recordType string) string {
+	return normalizeRecordType(recordType)
+}
+
+func NormalizeRecordValueKey(recordType, value string) string {
+	return normalizeRecordValueKey(recordType, value)
 }
 
 // Add a new DNS record to the list of DNS records or update an existing one.
@@ -53,10 +100,11 @@ func Add(fullCommand []string, dnsRecords []DNSRecord, allowUpdate bool) []DNSRe
 		fmt.Println("Error:", err)
 		return dnsRecords
 	}
+	dnsRecord.Type = normalizeRecordType(dnsRecord.Type)
 	dnsRecord.AddedOn = time.Now()
 
 	// 2) Use helper to find if a record with the same Name and Value already exists
-	existingIndex := findDNSRecordIndex(dnsRecords, dnsRecord.Name, dnsRecord.Value)
+	existingIndex := findDNSRecordIndex(dnsRecords, dnsRecord.Name, dnsRecord.Type, dnsRecord.Value)
 
 	// 3) If found in the slice, either update it (if allowed) or inform user it already exists
 	if existingIndex != -1 {
@@ -168,14 +216,18 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 		fmt.Println("         remove example.com A 127.0.0.1")
 	}
 
-	// 1) Check for help
+	if len(fullCommand) == 0 {
+		help()
+		return dnsRecords
+	}
+
 	if checkHelpCommand(fullCommand) {
 		help()
 		return dnsRecords
 	}
 
-	// 2) Parse arguments
 	var (
+		inputName  = strings.TrimSpace(fullCommand[0])
 		name       string
 		recordType string
 		value      string
@@ -183,34 +235,45 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 
 	switch len(fullCommand) {
 	case 2:
-		// Example: remove example.com 127.0.0.1
-		name, value, recordType = validateIPAndDomain(fullCommand[0], fullCommand[1])
-
+		// remove <Name> <IP>
+		var detectedType string
+		name, value, detectedType = validateIPAndDomain(fullCommand[0], fullCommand[1])
+		if name == "" || detectedType == "" {
+			fmt.Println("Invalid record format. Please use: remove <Name> [Type] <Value>")
+			return dnsRecords
+		}
+		recordType = detectedType
 	case 3:
-		// Example: remove example.com A 127.0.0.1
 		name = fullCommand[0]
 		recordType = fullCommand[1]
 		value = fullCommand[2]
-
 	default:
-		// Invalid usage
 		fmt.Println("Invalid usage. Please see help:")
 		help()
 		return dnsRecords
 	}
 
-	// 3) Locate the record by Name, Type, and Value
+	if name == "" || recordType == "" || value == "" {
+		fmt.Println("Invalid record format. Please use: remove <Name> [Type] <Value>")
+		return dnsRecords
+	}
+
+	normType := normalizeRecordType(recordType)
+	targetName := normalizeRecordNameKey(name)
+	targetValue := normalizeRecordValueKey(normType, value)
+
 	existingIndex := -1
 	for i, record := range dnsRecords {
-		if record.Name == name && record.Type == recordType && record.Value == value {
+		if normalizeRecordNameKey(record.Name) == targetName &&
+			normalizeRecordType(record.Type) == normType &&
+			normalizeRecordValueKey(record.Type, record.Value) == targetValue {
 			existingIndex = i
 			break
 		}
 	}
 
-	// 4) If not found, inform the user; otherwise remove and inform
 	if existingIndex == -1 {
-		fmt.Printf("No record found for [%s %s %s].\n", name, recordType, value)
+		fmt.Printf("No record found for [%s %s %s].\n", inputName, recordType, value)
 		return dnsRecords
 	}
 
@@ -248,7 +311,7 @@ func validateIPAndDomain(arg1, arg2 string) (string, string, string) {
 	if ipvalidator.IsValidIP(arg1) {
 		_, isDomain := dns.IsDomainName(arg2)
 		if isDomain {
-			return arg2, arg1, ipvToRecordType(ipvalidator.GetIPVersion(arg1)) // Return domain, IP, version
+			return strings.TrimSpace(arg2), strings.TrimSpace(arg1), ipvToRecordType(ipvalidator.GetIPVersion(arg1)) // Return domain, IP, version
 		}
 	}
 
@@ -256,7 +319,7 @@ func validateIPAndDomain(arg1, arg2 string) (string, string, string) {
 	if ipvalidator.IsValidIP(arg2) {
 		_, isDomain := dns.IsDomainName(arg1)
 		if isDomain {
-			return arg1, arg2, ipvToRecordType(ipvalidator.GetIPVersion(arg2)) // Return domain, IP, version
+			return strings.TrimSpace(arg1), strings.TrimSpace(arg2), ipvToRecordType(ipvalidator.GetIPVersion(arg2)) // Return domain, IP, version
 		}
 	}
 
@@ -266,35 +329,41 @@ func validateIPAndDomain(arg1, arg2 string) (string, string, string) {
 
 // Helper function to parse DNS record arguments and return a DNSRecord struct.
 func parseDNSRecordArgs(args []string) (DNSRecord, error) {
-	var name, recordType, value, ttlStr string
-
-	// Attempt to parse Name, Value, Type if len(args) >= 2.
-	// If validateIPAndDomain fails (name is ""), we error out.
-	if len(args) >= 2 {
-		name, value, recordType = validateIPAndDomain(args[0], args[1])
-		if name == "" {
-			return DNSRecord{}, fmt.Errorf("invalid DNS record format. Please enter the DNS record in the format: <Name> [Type] <Value> [TTL]")
-		} else {
-			ttlStr = "3600"
-		}
-	}
-
-	// If we still don’t have name set, but total args < 3, error out.
-	if len(args) < 3 && name == "" {
+	if len(args) < 2 {
 		return DNSRecord{}, fmt.Errorf("invalid DNS record format. Please enter the DNS record in the format: <Name> [Type] <Value> [TTL]")
 	}
 
-	// If validateIPAndDomain did not populate name, we fall back to "normal" argument parsing.
-	if name == "" {
+	var (
+		name       string
+		recordType string
+		value      string
+		ttlStr     string
+	)
+
+	switch {
+	case len(args) == 2:
+		name, value, recordType = validateIPAndDomain(args[0], args[1])
+		if name == "" || recordType == "" || value == "" {
+			return DNSRecord{}, fmt.Errorf("invalid DNS record format. Please enter the DNS record in the format: <Name> [Type] <Value> [TTL]")
+		}
+		ttlStr = "3600"
+	case len(args) >= 3:
 		name = args[0]
-		recordType = args[1]
+		recordType = strings.ToUpper(args[1])
 		value = args[2]
-		if len(args) < 4 {
+		if len(args) >= 4 {
 			ttlStr = args[3]
 		} else {
 			ttlStr = "3600"
 		}
+		if len(args) > 4 {
+			return DNSRecord{}, fmt.Errorf("invalid DNS record format. Please enter the DNS record in the format: <Name> [Type] <Value> [TTL]")
+		}
 	}
+
+	name = strings.TrimSpace(name)
+	value = strings.TrimSpace(value)
+	recordType = normalizeRecordType(recordType)
 
 	// Validate DNS record type against known types
 	if _, ok := dns.StringToType[recordType]; !ok {
