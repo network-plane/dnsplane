@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -35,6 +34,7 @@ var (
 	serverStatus sync.RWMutex
 	isServerUp   bool
 	appversion   = "0.1.17"
+	daemonMode   bool
 )
 
 func main() {
@@ -55,8 +55,6 @@ func main() {
 	clientMode := app.BoolOpt("client-mode", false, "Run in client mode (connect to UNIX socket)")
 	apiMode := app.BoolOpt("api", false, "Enable the REST API")
 	apiport := app.StringOpt("apiport", "8080", "Port for the REST API")
-	mdnsMode := app.BoolOpt("mdns", false, "Enable mDNS server")
-	mdnsPort := app.StringOpt("mdns-port", "5353", "Port for mDNS server")
 
 	app.Action = func() {
 		//if we run in client mode we dont need to run the rest of the code
@@ -64,6 +62,8 @@ func main() {
 			connectToUnixSocket(*remoteUnix) // Connect to UNIX socket as client
 			return
 		}
+
+		daemonMode = *daemon
 
 		// Start the REST API if enabled
 		if *apiMode {
@@ -76,10 +76,6 @@ func main() {
 		//handle settings overriden by command line
 		if *port != dnsServerSettings.DNSPort {
 			dnsServerSettings.DNSPort = *port
-		}
-
-		if *mdnsPort != dnsServerSettings.MDNSPort {
-			dnsServerSettings.MDNSPort = *mdnsPort
 		}
 
 		if *apiport != dnsServerSettings.RESTPort {
@@ -112,11 +108,6 @@ func main() {
 		}
 
 		monitorDNSErrors()
-
-		// mDNS server setup
-		if *mdnsMode {
-			go startMDNSServer(*mdnsPort)
-		}
 
 		// Configure readline
 		rlconfig = readline.Config{
@@ -241,6 +232,13 @@ func getServerStatus() bool {
 	return isServerUp
 }
 
+func logQuery(format string, args ...interface{}) {
+	if !daemonMode {
+		return
+	}
+	fmt.Printf(format, args...)
+}
+
 // DNS
 func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
 	response := new(dns.Msg)
@@ -326,7 +324,7 @@ func handlePTRQuestion(question dns.Question, response *dns.Msg) {
 		}
 
 	} else {
-		fmt.Println("PTR record not found in dnsrecords.json")
+		logQuery("PTR record not found in dnsrecords.json\n")
 		handleDNSServers(question, dnsservers.GetDNSArray(dnsdata.DNSServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
 	}
 }
@@ -344,7 +342,7 @@ func dnsRecordToRR(dnsRecord *dnsrecords.DNSRecord, ttl uint32) *dns.RR {
 func processAuthoritativeAnswer(question dns.Question, answer *dns.Msg, response *dns.Msg) {
 	response.Answer = append(response.Answer, answer.Answer...)
 	response.Authoritative = true
-	fmt.Printf("Query: %s, Reply: %s, Method: DNS server: %s\n", question.Name, answer.Answer[0].String(), answer.Answer[0].Header().Name[:len(answer.Answer[0].Header().Name)-1])
+	logQuery("Query: %s, Reply: %s, Method: DNS server: %s\n", question.Name, answer.Answer[0].String(), answer.Answer[0].Header().Name[:len(answer.Answer[0].Header().Name)-1])
 
 	cacheDNSResponse(answer)
 }
@@ -353,11 +351,11 @@ func handleFallbackServer(question dns.Question, fallbackServer string, response
 	fallbackResponse, _ := queryAuthoritative(question.Name, fallbackServer)
 	if fallbackResponse != nil {
 		response.Answer = append(response.Answer, fallbackResponse.Answer...)
-		fmt.Printf("Query: %s, Reply: %s, Method: Fallback DNS server: %s\n", question.Name, fallbackResponse.Answer[0].String(), fallbackServer)
+		logQuery("Query: %s, Reply: %s, Method: Fallback DNS server: %s\n", question.Name, fallbackResponse.Answer[0].String(), fallbackServer)
 
 		cacheDNSResponse(fallbackResponse)
 	} else {
-		fmt.Printf("Query: %s, No response\n", question.Name)
+		logQuery("Query: %s, No response\n", question.Name)
 	}
 }
 
@@ -390,13 +388,13 @@ func cacheRRs(rrs []dns.RR) {
 func processCachedRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
 	response.Answer = append(response.Answer, *cachedRecord)
 	response.Authoritative = true
-	fmt.Printf("Query: %s, Reply: %s, Method: dnsrecords.json\n", question.Name, (*cachedRecord).String())
+	logQuery("Query: %s, Reply: %s, Method: dnsrecords.json\n", question.Name, (*cachedRecord).String())
 	cacheRRs([]dns.RR{*cachedRecord})
 }
 
 func processCacheRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
 	response.Answer = append(response.Answer, *cachedRecord)
-	fmt.Printf("Query: %s, Reply: %s, Method: dnscache.json\n", question.Name, (*cachedRecord).String())
+	logQuery("Query: %s, Reply: %s, Method: dnscache.json\n", question.Name, (*cachedRecord).String())
 }
 
 func findCacheRecord(cacheRecords []dnsrecordcache.CacheRecord, name string, recordType string) *dns.RR {
@@ -429,7 +427,7 @@ func queryAuthoritative(questionName string, server string) (*dns.Msg, error) {
 		return nil, errors.New("no answer received")
 	}
 
-	fmt.Println("response", response.Answer[0].String())
+	logQuery("response %s\n", response.Answer[0].String())
 
 	return response, nil
 }
@@ -537,93 +535,6 @@ func connectToUnixSocket(socketPath string) {
 	commandhandler.RegisterCommands()
 	tui.SetPrompt("dnsresolver> ")
 	tui.Run(rl)
-}
-
-////////////////////////////////////////////////////
-//// IGNORE FOR NOW ////////////////////////////////
-////////////////////////////////////////////////////
-
-// mdns server
-func startMDNSServer(port string) {
-	portInt, _ := strconv.Atoi(port)
-
-	// Set up the multicast address for mDNS
-	addr := &net.UDPAddr{IP: net.ParseIP("224.0.0.251"), Port: portInt}
-
-	// Create a UDP connection to listen on multicast address
-	conn, err := net.ListenMulticastUDP("udp4", nil, addr)
-	if err != nil {
-		log.Fatalf("Error setting up mDNS server: %v", err)
-	}
-
-	// Set reuse address option to allow multiple listeners on the same address
-	if err := conn.SetReadBuffer(65535); err != nil {
-		log.Fatalf("Failed to set read buffer size: %v", err)
-	}
-
-	server := &dns.Server{
-		PacketConn: conn,
-	}
-
-	dns.HandleFunc("local.", handleMDNSRequest)
-
-	log.Printf("Starting mDNS server on %s\n", addr)
-	if err := server.ActivateAndServe(); err != nil {
-		log.Fatalf("Error starting mDNS server: %v", err)
-	}
-}
-
-// This is JUST a test, it will always return the same IP :P
-func handleMDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
-	if len(r.Question) == 0 {
-		return
-	}
-
-	q := r.Question[0]
-	log.Printf("Received mDNS query: %s %s\n", q.Name, dns.TypeToString[q.Qtype])
-
-	// Check if the request is for the .local domain
-	if q.Qclass != dns.ClassINET || !dns.IsSubDomain("local.", q.Name) {
-		log.Printf("Not an mDNS query, ignoring: %s\n", q.Name)
-		return
-	}
-
-	m := new(dns.Msg)
-	m.SetReply(r)
-	m.Compress = false
-
-	switch q.Qtype {
-	case dns.TypeA:
-		// Return IPv4 address for A query
-		ipv4 := net.ParseIP("127.0.0.1")
-		if ipv4 == nil {
-			log.Printf("Invalid IPv4 address provided\n")
-			return
-		}
-		m.Answer = append(m.Answer, &dns.A{
-			Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 120},
-			A:   ipv4,
-		})
-	case dns.TypeAAAA:
-		// Return IPv6 address for AAAA query
-		ipv6 := net.ParseIP("::1")
-		if ipv6 == nil {
-			log.Printf("Invalid IPv6 address provided\n")
-			return
-		}
-		m.Answer = append(m.Answer, &dns.AAAA{
-			Hdr:  dns.RR_Header{Name: q.Name, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: 120},
-			AAAA: ipv6,
-		})
-	default:
-		log.Printf("Unsupported mDNS query type: %d\n", q.Qtype)
-		return
-	}
-
-	// Write the response to the multicast address
-	if err := w.WriteMsg(m); err != nil {
-		log.Printf("Failed to write mDNS response: %v\n", err)
-	}
 }
 
 // api

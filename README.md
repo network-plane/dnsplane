@@ -54,9 +54,7 @@ https://github.com/user-attachments/assets/f5ca52cb-3874-499c-a594-ba3bf64b3ba9
 
 ## Roadmap
 
-- mDNS Server
-- DHCP Server
-- REST API
+- REST API enhancements
 - Remote Client (Over TCP)
 
 ## Dependancies & Documentation
