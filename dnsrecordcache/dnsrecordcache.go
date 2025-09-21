@@ -2,6 +2,7 @@
 package dnsrecordcache
 
 import (
+	"dnsresolver/cliutil"
 	"dnsresolver/dnsrecords"
 	"fmt"
 	"strings"
@@ -87,15 +88,8 @@ func List(cacheRecordsData []CacheRecord) {
 // Remove a record from the cache
 
 func Remove(fullCommand []string, cacheRecordsData []CacheRecord) []CacheRecord {
-	if len(fullCommand) == 0 {
-		fmt.Println("Enter the cache record in the format: <Name> [Type] [Value]")
-		fmt.Println("Example: example.com")
-		return cacheRecordsData
-	}
-
-	if fullCommand[0] == "?" {
-		fmt.Println("Enter the cache record in the format: <Name> [Type] [Value]")
-		fmt.Println("Example: example.com")
+	if len(fullCommand) == 0 || cliutil.IsHelpRequest(fullCommand) {
+		printCacheRemoveUsage()
 		return cacheRecordsData
 	}
 
@@ -135,6 +129,7 @@ func Remove(fullCommand []string, cacheRecordsData []CacheRecord) []CacheRecord 
 
 	if len(matchingIdx) == 0 {
 		fmt.Println("No records found with the specified criteria.")
+		printCacheRemoveUsage()
 		return cacheRecordsData
 	}
 
@@ -144,6 +139,7 @@ func Remove(fullCommand []string, cacheRecordsData []CacheRecord) []CacheRecord 
 			record := cacheRecordsData[idx]
 			fmt.Printf("- %s %s %s %d\n", record.DNSRecord.Name, record.DNSRecord.Type, record.DNSRecord.Value, record.DNSRecord.TTL)
 		}
+		printCacheRemoveUsage()
 		return cacheRecordsData
 	}
 
@@ -152,4 +148,14 @@ func Remove(fullCommand []string, cacheRecordsData []CacheRecord) []CacheRecord 
 	cacheRecordsData = append(cacheRecordsData[:idx], cacheRecordsData[idx+1:]...)
 	fmt.Printf("Removed: %s %s %s %d\n", removed.DNSRecord.Name, removed.DNSRecord.Type, removed.DNSRecord.Value, removed.DNSRecord.TTL)
 	return cacheRecordsData
+}
+
+func printCacheRemoveUsage() {
+	fmt.Println("Usage: cache remove <Name> [Type] [Value]")
+	fmt.Println("Description: Remove a cache entry, optionally narrowing by record type and value.")
+	printHelpAliasesHint()
+}
+
+func printHelpAliasesHint() {
+	fmt.Println("Hint: append '?', 'help', or 'h' after the command to view this usage.")
 }

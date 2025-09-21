@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"dnsresolver/cliutil"
 	"dnsresolver/converters"
 	"dnsresolver/ipvalidator"
 
@@ -87,10 +88,7 @@ func NormalizeRecordValueKey(recordType, value string) string {
 // Add a new DNS record to the list of DNS records or update an existing one.
 func Add(fullCommand []string, dnsRecords []DNSRecord, allowUpdate bool) []DNSRecord {
 	if checkHelpCommand(fullCommand) {
-		fmt.Println("Usage  : add <Name> [Type] <Value> [TTL]")
-		fmt.Println("Example: add example.com 127.0.0.1")
-		fmt.Println("         add example.com A 127.0.0.1")
-		fmt.Println("         add example.com A 127.0.0.1 3600")
+		printAddUsage()
 		return dnsRecords
 	}
 
@@ -98,6 +96,7 @@ func Add(fullCommand []string, dnsRecords []DNSRecord, allowUpdate bool) []DNSRe
 	dnsRecord, err := parseDNSRecordArgs(fullCommand)
 	if err != nil {
 		fmt.Println("Error:", err)
+		printAddUsage()
 		return dnsRecords
 	}
 	dnsRecord.Type = normalizeRecordType(dnsRecord.Type)
@@ -210,19 +209,8 @@ func List(dnsRecords []DNSRecord, args []string) {
 
 // Remove deletes a DNS record from the list of DNS records if found.
 func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
-	help := func() {
-		fmt.Println("Usage  : remove <Name> [Type] <Value>")
-		fmt.Println("Example: remove example.com 127.0.0.1")
-		fmt.Println("         remove example.com A 127.0.0.1")
-	}
-
-	if len(fullCommand) == 0 {
-		help()
-		return dnsRecords
-	}
-
 	if checkHelpCommand(fullCommand) {
-		help()
+		printRemoveUsage()
 		return dnsRecords
 	}
 
@@ -240,6 +228,7 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 		name, value, detectedType = validateIPAndDomain(fullCommand[0], fullCommand[1])
 		if name == "" || detectedType == "" {
 			fmt.Println("Invalid record format. Please use: remove <Name> [Type] <Value>")
+			printRemoveUsage()
 			return dnsRecords
 		}
 		recordType = detectedType
@@ -249,12 +238,13 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 		value = fullCommand[2]
 	default:
 		fmt.Println("Invalid usage. Please see help:")
-		help()
+		printRemoveUsage()
 		return dnsRecords
 	}
 
 	if name == "" || recordType == "" || value == "" {
 		fmt.Println("Invalid record format. Please use: remove <Name> [Type] <Value>")
+		printRemoveUsage()
 		return dnsRecords
 	}
 
@@ -274,6 +264,7 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 
 	if existingIndex == -1 {
 		fmt.Printf("No record found for [%s %s %s].\n", inputName, recordType, value)
+		printRemoveUsage()
 		return dnsRecords
 	}
 
@@ -292,7 +283,28 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 
 // Helper function to check if the help command is invoked.
 func checkHelpCommand(fullCommand []string) bool {
-	return len(fullCommand) <= 0 || fullCommand[0] == "?"
+	return len(fullCommand) == 0 || cliutil.IsHelpRequest(fullCommand)
+}
+
+func printAddUsage() {
+	fmt.Println("Usage  : add <Name> [Type] <Value> [TTL]")
+	fmt.Println("Examples:")
+	fmt.Println("  add example.com 127.0.0.1")
+	fmt.Println("  add example.com A 127.0.0.1")
+	fmt.Println("  add example.com A 127.0.0.1 3600")
+	printHelpAliasesHint()
+}
+
+func printRemoveUsage() {
+	fmt.Println("Usage  : remove <Name> [Type] <Value>")
+	fmt.Println("Examples:")
+	fmt.Println("  remove example.com 127.0.0.1")
+	fmt.Println("  remove example.com A 127.0.0.1")
+	printHelpAliasesHint()
+}
+
+func printHelpAliasesHint() {
+	fmt.Println("Hint: append '?', 'help', or 'h' after the command to view this usage.")
 }
 
 // ipvToRecordType returns the DNS record type for the given IP version.
