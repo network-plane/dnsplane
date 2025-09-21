@@ -15,7 +15,6 @@ var (
 	stopDNSServerFunc    func()
 	restartDNSServerFunc func(string)
 	getServerStatusFunc  func() bool
-	startMDNSServerFunc  func(string)
 	startGinAPIFunc      func(string)
 )
 
@@ -244,12 +243,6 @@ func handleServerStart(args []string) {
 			}
 			fmt.Println("DNS server started.")
 		},
-		"mdns": func() {
-			if startMDNSServerFunc != nil {
-				startMDNSServerFunc(settings.MDNSPort)
-			}
-			fmt.Println("mDNS server started.")
-		},
 		"api": func() {
 			if startGinAPIFunc != nil {
 				startGinAPIFunc(settings.RESTPort)
@@ -276,9 +269,6 @@ func handleServerStop(args []string) {
 			}
 			fmt.Println("DNS server stopped.")
 		},
-		"mdns": func() {
-			fmt.Println("mDNS server stop not implemented yet.")
-		},
 		"api": func() {
 			fmt.Println("API server stop not implemented yet.")
 		},
@@ -303,9 +293,6 @@ func handleServerStatus(args []string) {
 			}
 			fmt.Printf("DNS Server is %s.\n", status)
 		},
-		"mdns": func() {
-			fmt.Println("mDNS server status not implemented yet.")
-		},
 		"api": func() {
 			fmt.Println("API server status not implemented yet.")
 		},
@@ -323,7 +310,6 @@ func handleServerConfigure(args []string) {
 	if len(args) == 0 {
 		fmt.Println("Current Server Configuration:")
 		fmt.Printf("DNS Port: %s\n", settings.DNSPort)
-		fmt.Printf("mDNS Port: %s\n", settings.MDNSPort)
 		fmt.Printf("API Port: %s\n", settings.RESTPort)
 		fmt.Printf("Fallback Server IP: %s\n", settings.FallbackServerIP)
 		fmt.Printf("Fallback Server Port: %s\n", settings.FallbackServerPort)
@@ -339,9 +325,6 @@ func handleServerConfigure(args []string) {
 	case "dns_port":
 		settings.DNSPort = value
 		fmt.Printf("DNS Port set to %s\n", value)
-	case "mdns_port":
-		settings.MDNSPort = value
-		fmt.Printf("mDNS Port set to %s\n", value)
 	case "api_port":
 		settings.RESTPort = value
 		fmt.Printf("API Port set to %s\n", value)

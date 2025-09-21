@@ -55,7 +55,6 @@ type DNSResolverSettings struct {
 	FallbackServerPort string        `json:"fallback_server_port"`
 	Timeout            int           `json:"timeout"`
 	DNSPort            string        `json:"dns_port"`
-	MDNSPort           string        `json:"mdns_port"`
 	RESTPort           string        `json:"rest_port"`
 	CacheRecords       bool          `json:"cache_records"`
 	FileLocations      FileLocations `json:"file_locations"`
