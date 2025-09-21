@@ -531,6 +531,8 @@ func setupUnixSocketListener(socketPath string) {
 			continue
 		}
 
+		fmt.Printf("Socket client connected: %s\n", formatUnixAddr(conn.RemoteAddr()))
+
 		// Handle each connection in a separate goroutine
 		go func(c net.Conn) {
 			defer c.Close() // Ensure the connection is closed after processing
@@ -539,6 +541,7 @@ func setupUnixSocketListener(socketPath string) {
 			n, err := c.Read(buf)     // Read the incoming data
 			if err != nil {
 				if errors.Is(err, io.EOF) {
+					fmt.Printf("Socket client disconnected: %s\n", formatUnixAddr(c.RemoteAddr()))
 					return
 				}
 				log.Printf("Error reading from connection: %v", err)
@@ -547,8 +550,21 @@ func setupUnixSocketListener(socketPath string) {
 
 			command := string(buf[:n]) // Convert buffer to a string for command processing
 			log.Printf("Received command: %s", command)
+			fmt.Printf("Socket client disconnected: %s\n", formatUnixAddr(c.RemoteAddr()))
 		}(conn) // Start the goroutine with the current connection
 	}
+}
+
+func formatUnixAddr(addr net.Addr) string {
+	if addr == nil {
+		return "unix-local"
+	}
+	if addr.Network() == "unix" {
+		if addr.String() == "" {
+			return "unix-local"
+		}
+	}
+	return addr.String()
 }
 
 func connectToUnixSocket(socketPath string) {
