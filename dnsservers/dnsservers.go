@@ -6,6 +6,8 @@ import (
 	"net"
 	"strconv"
 	"time"
+
+	"dnsresolver/cliutil"
 )
 
 // DNSServer holds the data for a DNS server
@@ -33,9 +35,8 @@ func GetDNSArray(dnsServerData []DNSServer, activeOnly bool) []string {
 
 // Add adds a DNS server to the list of DNS servers.
 func Add(fullCommand []string, dnsServers []DNSServer) []DNSServer {
-	if checkHelpCommand(fullCommand) {
-		fmt.Println("Usage: add <Address> [Port] [Active] [LocalResolver] [AdBlocker]")
-		fmt.Println("Example: add 1.1.1.1 53 true false false")
+	if cliutil.IsHelpRequest(fullCommand) {
+		printAddUsage()
 		return dnsServers
 	}
 
@@ -48,6 +49,7 @@ func Add(fullCommand []string, dnsServers []DNSServer) []DNSServer {
 
 	if err := applyArgsToDNSServer(&server, fullCommand); err != nil {
 		fmt.Println("Error:", err)
+		printAddUsage()
 		return dnsServers
 	}
 
@@ -55,22 +57,29 @@ func Add(fullCommand []string, dnsServers []DNSServer) []DNSServer {
 }
 
 // Remove removes a DNS server from the list of DNS servers.
+
 func Remove(fullCommand []string, dnsServerData []DNSServer) []DNSServer {
-	if checkHelpCommand(fullCommand) {
-		fmt.Println("Usage: remove <Address>")
-		fmt.Println("Example: remove 127.0.0.1")
+	if cliutil.IsHelpRequest(fullCommand) {
+		printRemoveUsage()
 		return dnsServerData
 	}
 
-	if len(fullCommand) < 2 {
-		fmt.Println("Error: Address is required.")
+	if len(fullCommand) < 1 {
+		fmt.Println("Error: address is required.")
+		printRemoveUsage()
+		return dnsServerData
+	}
+	if len(fullCommand) > 1 {
+		fmt.Println("Error: provide only the server address.")
+		printRemoveUsage()
 		return dnsServerData
 	}
 
-	address := fullCommand[1]
+	address := fullCommand[0]
 	index := findDNSServerIndex(dnsServerData, address)
 	if index == -1 {
 		fmt.Println("Error: No DNS server found with the address:", address)
+		printRemoveUsage()
 		return dnsServerData
 	}
 
@@ -79,28 +88,31 @@ func Remove(fullCommand []string, dnsServerData []DNSServer) []DNSServer {
 }
 
 // Update modifies a DNS server's record in the list of DNS servers.
+
 func Update(fullCommand []string, dnsServerData []DNSServer) []DNSServer {
-	if checkHelpCommand(fullCommand) {
-		fmt.Println("Usage: update <Address> [Port] [Active] [LocalResolver] [AdBlocker]")
-		fmt.Println("Example: update 1.1.1.1 53 false true true")
+	if cliutil.IsHelpRequest(fullCommand) {
+		printUpdateUsage()
 		return dnsServerData
 	}
 
-	if len(fullCommand) < 2 {
-		fmt.Println("Error: Address is required.")
+	if len(fullCommand) < 1 {
+		fmt.Println("Error: address is required.")
+		printUpdateUsage()
 		return dnsServerData
 	}
 
-	address := fullCommand[1]
+	address := fullCommand[0]
 	index := findDNSServerIndex(dnsServerData, address)
 	if index == -1 {
 		fmt.Println("Error: DNS server not found:", address)
+		printUpdateUsage()
 		return dnsServerData
 	}
 
 	server := dnsServerData[index]
 	if err := applyArgsToDNSServer(&server, fullCommand); err != nil {
 		fmt.Println("Error:", err)
+		printUpdateUsage()
 		return dnsServerData
 	}
 
@@ -122,9 +134,10 @@ func List(dnsServerData []DNSServer) {
 }
 
 // Helper function to parse and apply command arguments to a DNSServer.
+
 func applyArgsToDNSServer(server *DNSServer, args []string) error {
-	if len(args) >= 2 {
-		server.Address = args[1]
+	if len(args) >= 1 {
+		server.Address = args[0]
 		if net.ParseIP(server.Address) == nil {
 			return fmt.Errorf("invalid IP address: %s", server.Address)
 		}
@@ -132,11 +145,11 @@ func applyArgsToDNSServer(server *DNSServer, args []string) error {
 		return fmt.Errorf("address is required")
 	}
 
-	if len(args) >= 3 {
-		if _, err := strconv.Atoi(args[2]); err != nil {
-			return fmt.Errorf("invalid port: %s", args[2])
+	if len(args) >= 2 {
+		if _, err := strconv.Atoi(args[1]); err != nil {
+			return fmt.Errorf("invalid port: %s", args[1])
 		}
-		server.Port = args[2]
+		server.Port = args[1]
 	}
 
 	boolFields := []struct {
@@ -144,9 +157,9 @@ func applyArgsToDNSServer(server *DNSServer, args []string) error {
 		index    int
 		assignTo *bool
 	}{
-		{"Active", 3, &server.Active},
-		{"LocalResolver", 4, &server.LocalResolver},
-		{"AdBlocker", 5, &server.AdBlocker},
+		{"Active", 2, &server.Active},
+		{"LocalResolver", 3, &server.LocalResolver},
+		{"AdBlocker", 4, &server.AdBlocker},
 	}
 
 	for _, field := range boolFields {
@@ -157,6 +170,11 @@ func applyArgsToDNSServer(server *DNSServer, args []string) error {
 			}
 			*field.assignTo = value
 		}
+	}
+
+	maxArgs := 2 + len(boolFields)
+	if len(args) > maxArgs {
+		return fmt.Errorf("too many arguments provided; expected at most %d parameters", maxArgs)
 	}
 
 	return nil
@@ -173,6 +191,24 @@ func findDNSServerIndex(dnsServers []DNSServer, address string) int {
 }
 
 // Helper function to handle the help command.
-func checkHelpCommand(fullCommand []string) bool {
-	return len(fullCommand) > 1 && fullCommand[1] == "?"
+func printAddUsage() {
+	fmt.Println("Usage  : add <Address> [Port] [Active] [LocalResolver] [AdBlocker]")
+	fmt.Println("Example: add 1.1.1.1 53 true false false")
+	printHelpAliasesHint()
+}
+
+func printRemoveUsage() {
+	fmt.Println("Usage  : remove <Address>")
+	fmt.Println("Example: remove 127.0.0.1")
+	printHelpAliasesHint()
+}
+
+func printUpdateUsage() {
+	fmt.Println("Usage  : update <Address> [Port] [Active] [LocalResolver] [AdBlocker]")
+	fmt.Println("Example: update 1.1.1.1 53 false true true")
+	printHelpAliasesHint()
+}
+
+func printHelpAliasesHint() {
+	fmt.Println("Hint: append '?', 'help', or 'h' after the command to view this usage.")
 }

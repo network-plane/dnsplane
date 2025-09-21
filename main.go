@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -23,9 +24,11 @@ import (
 	// "github.com/reeflective/readline"
 	"github.com/chzyer/readline"
 	"github.com/gin-gonic/gin"
-	cli "github.com/jawher/mow.cli"
 	"github.com/miekg/dns"
+	"github.com/spf13/cobra"
 )
+
+const defaultUnixSocketPath = "/tmp/dnsresolver.socket"
 
 var (
 	rlconfig     readline.Config
@@ -35,118 +38,150 @@ var (
 	isServerUp   bool
 	appversion   = "0.1.17"
 	daemonMode   bool
+
+	rootCmd = &cobra.Command{
+		Use:           "dnsresolver",
+		Short:         "DNS Server with optional CLI mode",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE:          runRoot,
+	}
 )
 
 func main() {
 	//Create JSON files if they don't exist
 	data.InitializeJSONFiles()
 
-	// Initialize data
+	// Ensure resolver settings are initialised before running commands
+	data.GetInstance().GetResolverSettings()
+
+	rootCmd.Version = fmt.Sprintf("DNS Resolver %s", appversion)
+	rootCmd.SetVersionTemplate("{{.Version}}\n")
+
+	if err := rootCmd.Execute(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func init() {
+	flags := rootCmd.PersistentFlags()
+	flags.String("port", "53", "Port for DNS server")
+	flags.String("server-socket", defaultUnixSocketPath, "Path to UNIX domain socket for the daemon listener")
+	flags.Bool("tui", false, "Run with interactive TUI")
+	flags.Bool("api", false, "Enable the REST API")
+	flags.String("apiport", "8080", "Port for the REST API")
+	flags.StringP("client", "c", "", "Run in client mode (optional UNIX socket path)")
+	if f := flags.Lookup("client"); f != nil {
+		f.NoOptDefVal = defaultUnixSocketPath
+	}
+}
+
+func runRoot(cmd *cobra.Command, args []string) error {
+	remaining := append([]string(nil), args...)
+
+	clientRequested := cmd.Flags().Changed("client")
+	clientSocket, _ := cmd.Flags().GetString("client")
+	if clientRequested {
+		if clientSocket == "" {
+			clientSocket = defaultUnixSocketPath
+		}
+		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
+			clientSocket = remaining[0]
+			remaining = remaining[1:]
+		}
+		if len(remaining) > 0 {
+			return fmt.Errorf("unexpected arguments: %v", remaining)
+		}
+		connectToUnixSocket(clientSocket)
+		return nil
+	}
+
+	if len(remaining) > 0 {
+		return fmt.Errorf("unexpected arguments: %v", remaining)
+	}
+
+	port, _ := cmd.Flags().GetString("port")
+	serverSocket, _ := cmd.Flags().GetString("server-socket")
+	tuiMode, _ := cmd.Flags().GetBool("tui")
+	apiMode, _ := cmd.Flags().GetBool("api")
+	apiport, _ := cmd.Flags().GetString("apiport")
+
 	dnsData := data.GetInstance()
 	dnsServerSettings := dnsData.GetResolverSettings()
 
-	app := cli.App("dnsapp", "DNS Server with optional CLI mode")
-	app.Version("v version", fmt.Sprintf("DNS Resolver %s", appversion))
+	daemonMode = !tuiMode
 
-	// Command-line options
-	daemon := app.BoolOpt("daemon", false, "Run as daemon (no interactive mode)")
-	port := app.StringOpt("port", "53", "Port for DNS server")
-	remoteUnix := app.StringOpt("remote-unix", "/tmp/dnsresolver.socket", "Path to UNIX domain socket")
-	clientMode := app.BoolOpt("client-mode", false, "Run in client mode (connect to UNIX socket)")
-	apiMode := app.BoolOpt("api", false, "Enable the REST API")
-	apiport := app.StringOpt("apiport", "8080", "Port for the REST API")
+	if apiMode {
+		go startGinAPI(apiport)
+	}
 
-	app.Action = func() {
-		//if we run in client mode we dont need to run the rest of the code
-		if *clientMode && *remoteUnix != "" {
-			connectToUnixSocket(*remoteUnix) // Connect to UNIX socket as client
-			return
+	dns.HandleFunc(".", handleRequest)
+
+	if port != dnsServerSettings.DNSPort {
+		dnsServerSettings.DNSPort = port
+	}
+
+	if apiport != dnsServerSettings.RESTPort {
+		dnsServerSettings.RESTPort = apiport
+	}
+
+	startedCh, dnsErrCh := startDNSServer(port)
+
+	waitForServer := func() error {
+		select {
+		case <-startedCh:
+			return nil
+		case err := <-dnsErrCh:
+			return err
 		}
+	}
 
-		daemonMode = *daemon
+	if err := waitForServer(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error starting DNS server: %v\n", err)
+		return nil
+	}
 
-		// Start the REST API if enabled
-		if *apiMode {
-			go startGinAPI(*apiport)
-		}
-
-		// Set up the DNS server handler
-		dns.HandleFunc(".", handleRequest)
-
-		//handle settings overriden by command line
-		if *port != dnsServerSettings.DNSPort {
-			dnsServerSettings.DNSPort = *port
-		}
-
-		if *apiport != dnsServerSettings.RESTPort {
-			dnsServerSettings.RESTPort = *apiport
-		}
-
-		// Start DNS Server
-		startedCh, dnsErrCh := startDNSServer(*port)
-
-		waitForServer := func() error {
-			select {
-			case <-startedCh:
-				return nil
-			case err := <-dnsErrCh:
-				return err
+	monitorDNSErrors := func() {
+		go func() {
+			if err := <-dnsErrCh; err != nil {
+				fmt.Fprintf(os.Stderr, "DNS server error: %v\n", err)
 			}
-		}
+		}()
+	}
 
-		if err := waitForServer(); err != nil {
-			fmt.Fprintf(os.Stderr, "Error starting DNS server: %v\n", err)
-			return
-		}
+	monitorDNSErrors()
 
-		monitorDNSErrors := func() {
-			go func() {
-				if err := <-dnsErrCh; err != nil {
-					fmt.Fprintf(os.Stderr, "DNS server error: %v\n", err)
-				}
-			}()
-		}
+	rlconfig = readline.Config{
+		Prompt:                 "> ",
+		HistoryFile:            "/tmp/dnsresolver.history",
+		DisableAutoSaveHistory: true,
+		InterruptPrompt:        "^C",
+		EOFPrompt:              "exit",
+		HistorySearchFold:      true,
+	}
 
-		monitorDNSErrors()
-
-		// Configure readline
-		rlconfig = readline.Config{
-			Prompt:                 "> ",
-			HistoryFile:            "/tmp/dnsresolver.history",
-			DisableAutoSaveHistory: true,
-			InterruptPrompt:        "^C",
-			EOFPrompt:              "exit",
-			HistorySearchFold:      true,
-		}
-
-		// If running in daemon mode, exit after starting the server
-		if *daemon {
-			if *remoteUnix != "" {
-				setupUnixSocketListener(*remoteUnix) // Set up UNIX socket listener for daemon mode
-			} else {
-				select {} // Keeps the program alive
-			}
+	if !tuiMode {
+		if serverSocket != "" {
+			setupUnixSocketListener(serverSocket)
 		} else {
-			// Interactive Mode
-			rl, err := readline.NewEx(&rlconfig)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "readline: %v\n", err)
-				return
-			}
-			rl.CaptureExitSignal()
-			defer rl.Close()
-
-			// Register commands and start the TUI loop
-			commandhandler.RegisterCommands()
-			tui.SetPrompt("dnsresolver> ")
-			tui.Run(rl)
+			select {}
 		}
+		return nil
 	}
 
-	err := app.Run(os.Args)
+	rl, err := readline.NewEx(&rlconfig)
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(os.Stderr, "readline: %v\n", err)
+		return nil
 	}
+	rl.CaptureExitSignal()
+	defer rl.Close()
+
+	commandhandler.RegisterCommands()
+	tui.SetPrompt("dnsresolver> ")
+	tui.Run(rl)
+
+	return nil
 }
 
 func startDNSServer(port string) (<-chan struct{}, <-chan error) {
@@ -503,6 +538,9 @@ func setupUnixSocketListener(socketPath string) {
 			buf := make([]byte, 1024) // Buffer for reading data from the connection
 			n, err := c.Read(buf)     // Read the incoming data
 			if err != nil {
+				if errors.Is(err, io.EOF) {
+					return
+				}
 				log.Printf("Error reading from connection: %v", err)
 				return
 			}

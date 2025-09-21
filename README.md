@@ -11,7 +11,7 @@ A non standard DNS Server with multiple management interfaces. Its main function
 
 ### start with interactive CLI
 ```bash
-./dnsresolver
+./dnsresolver --tui
 ```
 It will look like this:
 ```bash
@@ -29,14 +29,21 @@ help, h, ?      - Show help
 >
 ```
 
-### start as daemon
+### start as daemon (default)
 ```bash
-./dnsresolver --daemon
+./dnsresolver
 ```
 
-### start in client mode (it will try to connect to the default unix socket)
+### start in client mode (connects to the default unix socket unless overridden)
 ```bash
-./dnsresolver --client-mode
+./dnsresolver --client
+# or specify a custom socket path
+./dnsresolver --client /tmp/dnsresolver.sock
+```
+
+### change the server socket path
+```bash
+./dnsresolver --server-socket /tmp/custom.sock
 ```
 
 ### Recording of clearing and adding dns records

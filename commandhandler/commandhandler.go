@@ -1,12 +1,14 @@
 package commandhandler
 
 import (
+	"dnsresolver/cliutil"
 	"dnsresolver/data"
 	"dnsresolver/dnsrecordcache"
 	"dnsresolver/dnsrecords"
 	"dnsresolver/dnsservers"
 	"dnsresolver/tui"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -90,27 +92,43 @@ func recordUpdate(args []string) {
 }
 
 func recordList(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printRecordListUsage()
+		return
+	}
 	dnsData := data.GetInstance()
 	records := dnsData.DNSRecords
 	if len(args) > 0 && args[0] != "d" && args[0] != "details" {
-		if args[0] == "?" || args[0] == "h" || args[0] == "help" {
-			fmt.Println("Usage: record list [details] [filter]")
-			fmt.Println("  details: Show detailed information")
-			fmt.Println("  filter: Filter records by name or type")
-			return
-		}
 		fmt.Println("Filtering records by:", args[0])
 	}
 	dnsrecords.List(records, args)
 }
 
 func recordClear(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printRecordClearUsage()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("record clear does not accept arguments.")
+		printRecordClearUsage()
+		return
+	}
 	dnsData := data.GetInstance()
 	dnsData.UpdateRecordsInMemory([]dnsrecords.DNSRecord{})
 	fmt.Println("All DNS records have been cleared.")
 }
 
 func recordLoad(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printRecordLoadUsage()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("record load does not accept arguments.")
+		printRecordLoadUsage()
+		return
+	}
 	dnsData := data.GetInstance()
 	records := data.LoadDNSRecords()
 	dnsData.UpdateRecords(records)
@@ -118,6 +136,15 @@ func recordLoad(args []string) {
 }
 
 func recordSave(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printRecordSaveUsage()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("record save does not accept arguments.")
+		printRecordSaveUsage()
+		return
+	}
 	dnsData := data.GetInstance()
 	records := dnsData.DNSRecords
 	if err := data.SaveDNSRecords(records); err != nil {
@@ -129,6 +156,15 @@ func recordSave(args []string) {
 
 // Cache commands
 func cacheList(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printCacheListUsage()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("cache list does not accept arguments.")
+		printCacheListUsage()
+		return
+	}
 	dnsData := data.GetInstance()
 	cache := dnsData.CacheRecords
 	dnsrecordcache.List(cache)
@@ -142,12 +178,30 @@ func cacheRemove(args []string) {
 }
 
 func cacheClear(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printCacheClearUsage()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("cache clear does not accept arguments.")
+		printCacheClearUsage()
+		return
+	}
 	dnsData := data.GetInstance()
 	dnsData.UpdateCacheRecordsInMemory([]dnsrecordcache.CacheRecord{})
 	fmt.Println("Cache cleared.")
 }
 
 func cacheLoad(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printCacheLoadUsage()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("cache load does not accept arguments.")
+		printCacheLoadUsage()
+		return
+	}
 	dnsData := data.GetInstance()
 	cache := data.LoadCacheRecords()
 	dnsData.UpdateCacheRecordsInMemory(cache)
@@ -155,6 +209,15 @@ func cacheLoad(args []string) {
 }
 
 func cacheSave(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printCacheSaveUsage()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("cache save does not accept arguments.")
+		printCacheSaveUsage()
+		return
+	}
 	dnsData := data.GetInstance()
 	cache := dnsData.CacheRecords
 	if err := data.SaveCacheRecords(cache); err != nil {
@@ -187,18 +250,45 @@ func dnsUpdate(args []string) {
 }
 
 func dnsList(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printDNSListUsage()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("dns list does not accept arguments.")
+		printDNSListUsage()
+		return
+	}
 	dnsData := data.GetInstance()
 	servers := dnsData.DNSServers
 	dnsservers.List(servers)
 }
 
 func dnsClear(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printDNSClearUsage()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("dns clear does not accept arguments.")
+		printDNSClearUsage()
+		return
+	}
 	dnsData := data.GetInstance()
 	dnsData.UpdateServers([]dnsservers.DNSServer{})
 	fmt.Println("All DNS servers have been cleared.")
 }
 
 func dnsLoad(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printDNSLoadUsage()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("dns load does not accept arguments.")
+		printDNSLoadUsage()
+		return
+	}
 	dnsData := data.GetInstance()
 	servers := data.LoadDNSServers()
 	dnsData.UpdateServers(servers)
@@ -206,6 +296,15 @@ func dnsLoad(args []string) {
 }
 
 func dnsSave(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printDNSSaveUsage()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("dns save does not accept arguments.")
+		printDNSSaveUsage()
+		return
+	}
 	dnsData := data.GetInstance()
 	servers := dnsData.DNSServers
 	if err := data.SaveDNSServers(servers); err != nil {
@@ -217,6 +316,15 @@ func dnsSave(args []string) {
 
 // Server commands rely on function variables.
 func handleServerLoad(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printServerLoadUsage()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("server load does not accept arguments.")
+		printServerLoadUsage()
+		return
+	}
 	dnsData := data.GetInstance()
 	settings := data.LoadSettings()
 	dnsData.UpdateSettings(settings)
@@ -224,14 +332,28 @@ func handleServerLoad(args []string) {
 }
 
 func handleServerSave(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printServerSaveUsage()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("server save does not accept arguments.")
+		printServerSaveUsage()
+		return
+	}
 	dnsData := data.GetInstance()
 	data.SaveSettings(dnsData.Settings)
 	fmt.Println("Server settings saved.")
 }
 
 func handleServerStart(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printServerStartUsage()
+		return
+	}
 	if len(args) == 0 {
-		fmt.Println("Server component to start required. Use 'server start ?' for help.")
+		fmt.Println("Server component to start required.")
+		printServerStartUsage()
 		return
 	}
 	dnsData := data.GetInstance()
@@ -250,16 +372,23 @@ func handleServerStart(args []string) {
 			fmt.Println("API server started.")
 		},
 	}
-	if cmd, ok := startCommands[args[0]]; ok {
+	component := strings.ToLower(args[0])
+	if cmd, ok := startCommands[component]; ok {
 		cmd()
 	} else {
-		fmt.Printf("Unknown component to start: %s. Use 'server start ?' for help.\n", args[0])
+		fmt.Printf("Unknown component to start: %s\n", args[0])
+		printServerStartUsage()
 	}
 }
 
 func handleServerStop(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printServerStopUsage()
+		return
+	}
 	if len(args) == 0 {
-		fmt.Println("Server component to stop required. Use 'server stop ?' for help.")
+		fmt.Println("Server component to stop required.")
+		printServerStopUsage()
 		return
 	}
 	stopCommands := map[string]func(){
@@ -273,16 +402,23 @@ func handleServerStop(args []string) {
 			fmt.Println("API server stop not implemented yet.")
 		},
 	}
-	if cmd, ok := stopCommands[args[0]]; ok {
+	component := strings.ToLower(args[0])
+	if cmd, ok := stopCommands[component]; ok {
 		cmd()
 	} else {
-		fmt.Printf("Unknown component to stop: %s. Use 'server stop ?' for help.\n", args[0])
+		fmt.Printf("Unknown component to stop: %s\n", args[0])
+		printServerStopUsage()
 	}
 }
 
 func handleServerStatus(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printServerStatusUsage()
+		return
+	}
 	if len(args) == 0 {
-		fmt.Println("Server component required. Use 'server status ?' for help.")
+		fmt.Println("Server component required.")
+		printServerStatusUsage()
 		return
 	}
 	statusCommands := map[string]func(){
@@ -297,16 +433,22 @@ func handleServerStatus(args []string) {
 			fmt.Println("API server status not implemented yet.")
 		},
 	}
-	if cmd, ok := statusCommands[args[0]]; ok {
+	component := strings.ToLower(args[0])
+	if cmd, ok := statusCommands[component]; ok {
 		cmd()
 	} else {
-		fmt.Printf("Unknown component: %s. Use 'server status ?' for help.\n", args[0])
+		fmt.Printf("Unknown component: %s\n", args[0])
+		printServerStatusUsage()
 	}
 }
 
 func handleServerConfigure(args []string) {
 	dnsData := data.GetInstance()
 	settings := dnsData.Settings
+	if cliutil.IsHelpRequest(args) {
+		printServerConfigureUsage()
+		return
+	}
 	if len(args) == 0 {
 		fmt.Println("Current Server Configuration:")
 		fmt.Printf("DNS Port: %s\n", settings.DNSPort)
@@ -316,10 +458,16 @@ func handleServerConfigure(args []string) {
 		return
 	}
 	if len(args) < 2 {
-		fmt.Println("Usage: server configure [setting] [value]")
+		fmt.Println("server configure requires both setting and value.")
+		printServerConfigureUsage()
 		return
 	}
-	setting := args[0]
+	if len(args) > 2 {
+		fmt.Println("server configure accepts exactly two arguments.")
+		printServerConfigureUsage()
+		return
+	}
+	setting := strings.ToLower(args[0])
 	value := args[1]
 	switch setting {
 	case "dns_port":
@@ -336,6 +484,7 @@ func handleServerConfigure(args []string) {
 		fmt.Printf("Fallback Server Port set to %s\n", value)
 	default:
 		fmt.Printf("Unknown setting: %s\n", setting)
+		printServerConfigureUsage()
 		return
 	}
 	dnsData.UpdateSettings(settings)
@@ -344,6 +493,15 @@ func handleServerConfigure(args []string) {
 
 // Stats command
 func handleStats(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printStatsUsage()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("stats does not accept arguments.")
+		printStatsUsage()
+		return
+	}
 	dnsData := data.GetInstance()
 	fmt.Println("Server start time:", dnsData.Stats.ServerStartTime)
 	fmt.Println("Server Up Time:", serverUpTimeFormat(dnsData.Stats.ServerStartTime))
@@ -378,4 +536,122 @@ func serverUpTimeFormat(startTime time.Time) string {
 		return fmt.Sprintf("%d minutes, %d seconds", minutes, seconds)
 	}
 	return fmt.Sprintf("%d seconds", seconds)
+}
+
+func printRecordClearUsage() {
+	fmt.Println("Usage: record clear")
+	fmt.Println("Description: Remove all DNS records from memory.")
+	printHelpAliasesHint()
+}
+
+func printRecordLoadUsage() {
+	fmt.Println("Usage: record load")
+	fmt.Println("Description: Load DNS records from the default storage file.")
+	printHelpAliasesHint()
+}
+
+func printRecordSaveUsage() {
+	fmt.Println("Usage: record save")
+	fmt.Println("Description: Save current DNS records to the default storage file.")
+	printHelpAliasesHint()
+}
+
+func printRecordListUsage() {
+	fmt.Println("Usage: record list [details|d] [filter]")
+	fmt.Println("Description: List DNS records. Use 'details' to include timestamps, or provide a filter by name/type.")
+	printHelpAliasesHint()
+}
+
+func printCacheListUsage() {
+	fmt.Println("Usage: cache list")
+	fmt.Println("Description: List all cache entries in memory.")
+	printHelpAliasesHint()
+}
+
+func printCacheClearUsage() {
+	fmt.Println("Usage: cache clear")
+	fmt.Println("Description: Remove every cached DNS entry.")
+	printHelpAliasesHint()
+}
+
+func printCacheLoadUsage() {
+	fmt.Println("Usage: cache load")
+	fmt.Println("Description: Load cache records from the default storage file.")
+	printHelpAliasesHint()
+}
+
+func printCacheSaveUsage() {
+	fmt.Println("Usage: cache save")
+	fmt.Println("Description: Save cache records to the default storage file.")
+	printHelpAliasesHint()
+}
+
+func printDNSListUsage() {
+	fmt.Println("Usage: dns list")
+	fmt.Println("Description: Show all configured upstream DNS servers.")
+	printHelpAliasesHint()
+}
+
+func printDNSClearUsage() {
+	fmt.Println("Usage: dns clear")
+	fmt.Println("Description: Remove all configured upstream DNS servers.")
+	printHelpAliasesHint()
+}
+
+func printDNSLoadUsage() {
+	fmt.Println("Usage: dns load")
+	fmt.Println("Description: Load DNS server definitions from the default storage file.")
+	printHelpAliasesHint()
+}
+
+func printDNSSaveUsage() {
+	fmt.Println("Usage: dns save")
+	fmt.Println("Description: Save DNS server definitions to the default storage file.")
+	printHelpAliasesHint()
+}
+
+func printServerStartUsage() {
+	fmt.Println("Usage: server start <dns|api>")
+	fmt.Println("Description: Start the specified server component.")
+	printHelpAliasesHint()
+}
+
+func printServerStopUsage() {
+	fmt.Println("Usage: server stop <dns|api>")
+	fmt.Println("Description: Stop the specified server component.")
+	printHelpAliasesHint()
+}
+
+func printServerStatusUsage() {
+	fmt.Println("Usage: server status <dns|api>")
+	fmt.Println("Description: Show the status of the specified server component.")
+	printHelpAliasesHint()
+}
+
+func printServerConfigureUsage() {
+	fmt.Println("Usage: server configure <dns_port|api_port|fallback_ip|fallback_port> <value>")
+	fmt.Println("Description: Update a server configuration setting. Run without arguments to view current settings.")
+	printHelpAliasesHint()
+}
+
+func printServerLoadUsage() {
+	fmt.Println("Usage: server load")
+	fmt.Println("Description: Load server settings from the default storage file.")
+	printHelpAliasesHint()
+}
+
+func printServerSaveUsage() {
+	fmt.Println("Usage: server save")
+	fmt.Println("Description: Save current server settings to the default storage file.")
+	printHelpAliasesHint()
+}
+
+func printStatsUsage() {
+	fmt.Println("Usage: stats")
+	fmt.Println("Description: Display runtime statistics for the resolver.")
+	printHelpAliasesHint()
+}
+
+func printHelpAliasesHint() {
+	fmt.Println("Hint: append '?', 'help', or 'h' after the command to view this usage.")
 }
