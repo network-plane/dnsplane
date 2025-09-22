@@ -4,6 +4,7 @@ package dnsrecordcache
 import (
 	"dnsresolver/cliutil"
 	"dnsresolver/dnsrecords"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -18,6 +19,11 @@ type CacheRecord struct {
 	Timestamp time.Time            `json:"timestamp,omitempty"`
 	LastQuery time.Time            `json:"last_query,omitempty"`
 }
+
+var (
+	ErrHelpRequested = errors.New("help requested")
+	ErrInvalidArgs   = errors.New("invalid arguments")
+)
 
 // Add a new record to the cache
 func Add(cacheRecordsData []CacheRecord, record *dns.RR) []CacheRecord {
@@ -77,20 +83,17 @@ func Add(cacheRecordsData []CacheRecord, record *dns.RR) []CacheRecord {
 	return cacheRecordsData
 }
 
-// List all records in the cache
-func List(cacheRecordsData []CacheRecord) {
-	fmt.Println("Cache Records:")
-	for i, record := range cacheRecordsData {
-		fmt.Printf("%d. %s %s %s %d\n", i+1, record.DNSRecord.Name, record.DNSRecord.Type, record.DNSRecord.Value, record.DNSRecord.TTL)
-	}
+// List returns the cache records without mutating them.
+func List(cacheRecordsData []CacheRecord) []CacheRecord {
+	return cacheRecordsData
 }
 
 // Remove a record from the cache
 
-func Remove(fullCommand []string, cacheRecordsData []CacheRecord) []CacheRecord {
+func Remove(fullCommand []string, cacheRecordsData []CacheRecord) ([]CacheRecord, []dnsrecords.Message, error) {
+	messages := make([]dnsrecords.Message, 0)
 	if len(fullCommand) == 0 || cliutil.IsHelpRequest(fullCommand) {
-		printCacheRemoveUsage()
-		return cacheRecordsData
+		return cacheRecordsData, usageCacheRemove(), ErrHelpRequested
 	}
 
 	nameArg := strings.TrimSpace(fullCommand[0])
@@ -128,34 +131,35 @@ func Remove(fullCommand []string, cacheRecordsData []CacheRecord) []CacheRecord 
 	}
 
 	if len(matchingIdx) == 0 {
-		fmt.Println("No records found with the specified criteria.")
-		printCacheRemoveUsage()
-		return cacheRecordsData
+		msgs := append([]dnsrecords.Message{{Level: dnsrecords.LevelWarn, Text: "No records found with the specified criteria."}}, usageCacheRemove()...)
+		return cacheRecordsData, msgs, ErrInvalidArgs
 	}
 
 	if len(matchingIdx) > 1 && valueKey == "" {
-		fmt.Println("Multiple records found. Please specify the type and value to remove a specific entry.")
+		msgs := []dnsrecords.Message{{Level: dnsrecords.LevelWarn, Text: "Multiple records found. Please specify the type and value to remove a specific entry."}}
 		for _, idx := range matchingIdx {
 			record := cacheRecordsData[idx]
-			fmt.Printf("- %s %s %s %d\n", record.DNSRecord.Name, record.DNSRecord.Type, record.DNSRecord.Value, record.DNSRecord.TTL)
+			msgs = append(msgs, dnsrecords.Message{Level: dnsrecords.LevelInfo, Text: fmt.Sprintf("- %s %s %s %d", record.DNSRecord.Name, record.DNSRecord.Type, record.DNSRecord.Value, record.DNSRecord.TTL)})
 		}
-		printCacheRemoveUsage()
-		return cacheRecordsData
+		msgs = append(msgs, usageCacheRemove()...)
+		return cacheRecordsData, msgs, ErrInvalidArgs
 	}
 
 	idx := matchingIdx[0]
 	removed := cacheRecordsData[idx]
 	cacheRecordsData = append(cacheRecordsData[:idx], cacheRecordsData[idx+1:]...)
-	fmt.Printf("Removed: %s %s %s %d\n", removed.DNSRecord.Name, removed.DNSRecord.Type, removed.DNSRecord.Value, removed.DNSRecord.TTL)
-	return cacheRecordsData
+	messages = append(messages, dnsrecords.Message{Level: dnsrecords.LevelInfo, Text: fmt.Sprintf("Removed: %s %s %s %d", removed.DNSRecord.Name, removed.DNSRecord.Type, removed.DNSRecord.Value, removed.DNSRecord.TTL)})
+	return cacheRecordsData, messages, nil
 }
 
-func printCacheRemoveUsage() {
-	fmt.Println("Usage: cache remove <Name> [Type] [Value]")
-	fmt.Println("Description: Remove a cache entry, optionally narrowing by record type and value.")
-	printHelpAliasesHint()
+func usageCacheRemove() []dnsrecords.Message {
+	msgs := []dnsrecords.Message{
+		{Level: dnsrecords.LevelInfo, Text: "Usage: cache remove <Name> [Type] [Value]"},
+		{Level: dnsrecords.LevelInfo, Text: "Description: Remove a cache entry, optionally narrowing by record type and value."},
+	}
+	return append(msgs, cacheHelpHint())
 }
 
-func printHelpAliasesHint() {
-	fmt.Println("Hint: append '?', 'help', or 'h' after the command to view this usage.")
+func cacheHelpHint() dnsrecords.Message {
+	return dnsrecords.Message{Level: dnsrecords.LevelInfo, Text: "Hint: append '?', 'help', or 'h' after the command to view this usage."}
 }

@@ -54,8 +54,8 @@ github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd h1:TRLaZ9cD/w
 github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd/go.mod h1:6dJC0mAP4ikYIbvyc7fijjWJddQyLn8Ig3JB5CqoB9Q=
 github.com/modern-go/reflect2 v1.0.2 h1:xBagoLtFs94CBntxluKeaWgTMpvLxC4ur3nMaC9Gz0M=
 github.com/modern-go/reflect2 v1.0.2/go.mod h1:yWuevngMOJpCy52FWWMvUC8ws7m/LJsjYzDa0/r8luk=
-github.com/network-plane/planetui v0.0.0-20250922111346-a82cb09408bb h1:Ut/qaiO84dBgGRWBkw9WSEo4LurydwR1bbWvPYKG7A8=
-github.com/network-plane/planetui v0.0.0-20250922111346-a82cb09408bb/go.mod h1:4pWdCeRfb8XsFtmp+T1ZT/MSx/oyfKVQ2yGE0/XWjCI=
+github.com/network-plane/planetui v1.0.1 h1:ZAj74lsMwFweFIbxVE/Mz+iT9b2BRpvGyI1ite4Dzwc=
+github.com/network-plane/planetui v1.0.1/go.mod h1:4pWdCeRfb8XsFtmp+T1ZT/MSx/oyfKVQ2yGE0/XWjCI=
 github.com/pelletier/go-toml/v2 v2.2.4 h1:mye9XuhQ6gvn5h28+VilKrrPoQVanw5PMw/TB0t5Ec4=
 github.com/pelletier/go-toml/v2 v2.2.4/go.mod h1:2gIqNv+qfxSVS7cM2xJQKtLSTLUE9V8t9Stt+h56mCY=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=

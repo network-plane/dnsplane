@@ -2,6 +2,7 @@
 package dnsservers
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -21,6 +22,29 @@ type DNSServer struct {
 	LastSuccess   time.Time `json:"last_success,omitempty"`
 }
 
+var (
+	ErrHelpRequested = errors.New("help requested")
+	ErrInvalidArgs   = errors.New("invalid arguments")
+)
+
+type Level string
+
+const (
+	LevelInfo  Level = "info"
+	LevelWarn  Level = "warn"
+	LevelError Level = "error"
+)
+
+type Message struct {
+	Level Level
+	Text  string
+}
+
+type ListResult struct {
+	Servers  []DNSServer
+	Messages []Message
+}
+
 // GetDNSArray returns an array of DNS servers in the format "Address:Port".
 func GetDNSArray(dnsServerData []DNSServer, activeOnly bool) []string {
 	var dnsArray []string
@@ -33,11 +57,11 @@ func GetDNSArray(dnsServerData []DNSServer, activeOnly bool) []string {
 	return dnsArray
 }
 
-// Add adds a DNS server to the list of DNS servers.
-func Add(fullCommand []string, dnsServers []DNSServer) []DNSServer {
+// Add adds a DNS server to the list, returning the updated slice and messages.
+func Add(fullCommand []string, dnsServers []DNSServer) ([]DNSServer, []Message, error) {
+	messages := make([]Message, 0)
 	if cliutil.IsHelpRequest(fullCommand) {
-		printAddUsage()
-		return dnsServers
+		return dnsServers, usageAdd(), ErrHelpRequested
 	}
 
 	server := DNSServer{
@@ -48,89 +72,78 @@ func Add(fullCommand []string, dnsServers []DNSServer) []DNSServer {
 	}
 
 	if err := applyArgsToDNSServer(&server, fullCommand); err != nil {
-		fmt.Println("Error:", err)
-		printAddUsage()
-		return dnsServers
+		msgs := append([]Message{{Level: LevelError, Text: err.Error()}}, usageAdd()...)
+		return dnsServers, msgs, ErrInvalidArgs
 	}
 
-	return append(dnsServers, server)
+	dnsServers = append(dnsServers, server)
+	messages = append(messages, Message{Level: LevelInfo, Text: fmt.Sprintf("Added DNS server: %s:%s", server.Address, server.Port)})
+	return dnsServers, messages, nil
 }
 
 // Remove removes a DNS server from the list of DNS servers.
 
-func Remove(fullCommand []string, dnsServerData []DNSServer) []DNSServer {
+func Remove(fullCommand []string, dnsServerData []DNSServer) ([]DNSServer, []Message, error) {
+	messages := make([]Message, 0)
 	if cliutil.IsHelpRequest(fullCommand) {
-		printRemoveUsage()
-		return dnsServerData
+		return dnsServerData, usageRemove(), ErrHelpRequested
 	}
 
-	if len(fullCommand) < 1 {
-		fmt.Println("Error: address is required.")
-		printRemoveUsage()
-		return dnsServerData
-	}
-	if len(fullCommand) > 1 {
-		fmt.Println("Error: provide only the server address.")
-		printRemoveUsage()
-		return dnsServerData
+	if len(fullCommand) != 1 {
+		msgs := append([]Message{{Level: LevelError, Text: "address is required"}}, usageRemove()...)
+		return dnsServerData, msgs, ErrInvalidArgs
 	}
 
 	address := fullCommand[0]
 	index := findDNSServerIndex(dnsServerData, address)
 	if index == -1 {
-		fmt.Println("Error: No DNS server found with the address:", address)
-		printRemoveUsage()
-		return dnsServerData
+		msgs := append([]Message{{Level: LevelWarn, Text: fmt.Sprintf("No DNS server found with the address: %s", address)}}, usageRemove()...)
+		return dnsServerData, msgs, ErrInvalidArgs
 	}
 
-	fmt.Println("Removed DNS server:", address)
-	return append(dnsServerData[:index], dnsServerData[index+1:]...)
+	dnsServerData = append(dnsServerData[:index], dnsServerData[index+1:]...)
+	messages = append(messages, Message{Level: LevelInfo, Text: fmt.Sprintf("Removed DNS server: %s", address)})
+	return dnsServerData, messages, nil
 }
 
 // Update modifies a DNS server's record in the list of DNS servers.
 
-func Update(fullCommand []string, dnsServerData []DNSServer) []DNSServer {
+func Update(fullCommand []string, dnsServerData []DNSServer) ([]DNSServer, []Message, error) {
+	messages := make([]Message, 0)
 	if cliutil.IsHelpRequest(fullCommand) {
-		printUpdateUsage()
-		return dnsServerData
+		return dnsServerData, usageUpdate(), ErrHelpRequested
 	}
 
 	if len(fullCommand) < 1 {
-		fmt.Println("Error: address is required.")
-		printUpdateUsage()
-		return dnsServerData
+		msgs := append([]Message{{Level: LevelError, Text: "address is required."}}, usageUpdate()...)
+		return dnsServerData, msgs, ErrInvalidArgs
 	}
 
 	address := fullCommand[0]
 	index := findDNSServerIndex(dnsServerData, address)
 	if index == -1 {
-		fmt.Println("Error: DNS server not found:", address)
-		printUpdateUsage()
-		return dnsServerData
+		msgs := append([]Message{{Level: LevelWarn, Text: fmt.Sprintf("DNS server not found: %s", address)}}, usageUpdate()...)
+		return dnsServerData, msgs, ErrInvalidArgs
 	}
 
 	server := dnsServerData[index]
 	if err := applyArgsToDNSServer(&server, fullCommand); err != nil {
-		fmt.Println("Error:", err)
-		printUpdateUsage()
-		return dnsServerData
+		msgs := append([]Message{{Level: LevelError, Text: err.Error()}}, usageUpdate()...)
+		return dnsServerData, msgs, ErrInvalidArgs
 	}
 
 	dnsServerData[index] = server
-	return dnsServerData
+	messages = append(messages, Message{Level: LevelInfo, Text: fmt.Sprintf("Updated DNS server: %s", address)})
+	return dnsServerData, messages, nil
 }
 
 // List lists all the DNS servers in the list of DNS servers.
-func List(dnsServerData []DNSServer) {
+func List(dnsServerData []DNSServer) ListResult {
+	result := ListResult{Servers: dnsServerData}
 	if len(dnsServerData) == 0 {
-		fmt.Println("No DNS servers found.")
-		return
+		result.Messages = append(result.Messages, Message{Level: LevelInfo, Text: "No DNS servers found."})
 	}
-
-	fmt.Printf("%-20s %-5s %-6s %-6s %-9s\n", "Address", "Port", "Active", "Local", "AdBlocker")
-	for _, dnsServer := range dnsServerData {
-		fmt.Printf("%-20s %-5s %-6t %-6t %-9t\n", dnsServer.Address, dnsServer.Port, dnsServer.Active, dnsServer.LocalResolver, dnsServer.AdBlocker)
-	}
+	return result
 }
 
 // Helper function to parse and apply command arguments to a DNSServer.
@@ -191,24 +204,30 @@ func findDNSServerIndex(dnsServers []DNSServer, address string) int {
 }
 
 // Helper function to handle the help command.
-func printAddUsage() {
-	fmt.Println("Usage  : add <Address> [Port] [Active] [LocalResolver] [AdBlocker]")
-	fmt.Println("Example: add 1.1.1.1 53 true false false")
-	printHelpAliasesHint()
+func usageAdd() []Message {
+	msgs := []Message{
+		{Level: LevelInfo, Text: "Usage  : add <Address> [Port] [Active] [LocalResolver] [AdBlocker]"},
+		{Level: LevelInfo, Text: "Example: add 1.1.1.1 53 true false false"},
+	}
+	return append(msgs, helpHint())
 }
 
-func printRemoveUsage() {
-	fmt.Println("Usage  : remove <Address>")
-	fmt.Println("Example: remove 127.0.0.1")
-	printHelpAliasesHint()
+func usageRemove() []Message {
+	msgs := []Message{
+		{Level: LevelInfo, Text: "Usage  : remove <Address>"},
+		{Level: LevelInfo, Text: "Example: remove 127.0.0.1"},
+	}
+	return append(msgs, helpHint())
 }
 
-func printUpdateUsage() {
-	fmt.Println("Usage  : update <Address> [Port] [Active] [LocalResolver] [AdBlocker]")
-	fmt.Println("Example: update 1.1.1.1 53 false true true")
-	printHelpAliasesHint()
+func usageUpdate() []Message {
+	msgs := []Message{
+		{Level: LevelInfo, Text: "Usage  : update <Address> [Port] [Active] [LocalResolver] [AdBlocker]"},
+		{Level: LevelInfo, Text: "Example: update 1.1.1.1 53 false true true"},
+	}
+	return append(msgs, helpHint())
 }
 
-func printHelpAliasesHint() {
-	fmt.Println("Hint: append '?', 'help', or 'h' after the command to view this usage.")
+func helpHint() Message {
+	return Message{Level: LevelInfo, Text: "Hint: append '?', 'help', or 'h' after the command to view this usage."}
 }

@@ -2,6 +2,7 @@
 package dnsrecords
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -25,6 +26,36 @@ type DNSRecord struct {
 	MACAddress  string    `json:"mac,omitempty"`
 	CacheRecord bool      `json:"cache_record,omitempty"`
 	LastQuery   time.Time `json:"last_query,omitempty"`
+}
+
+var (
+	// ErrHelpRequested indicates the caller asked for usage information.
+	ErrHelpRequested = errors.New("help requested")
+	// ErrInvalidArgs indicates user-provided arguments were invalid.
+	ErrInvalidArgs = errors.New("invalid arguments")
+)
+
+// Level represents a message severity level returned from operations.
+type Level string
+
+const (
+	LevelInfo  Level = "info"
+	LevelWarn  Level = "warn"
+	LevelError Level = "error"
+)
+
+// Message conveys informational output from record operations.
+type Message struct {
+	Level Level
+	Text  string
+}
+
+// ListResult captures the outcome of listing DNS records.
+type ListResult struct {
+	Records  []DNSRecord
+	Detailed bool
+	Filter   string
+	Messages []Message
 }
 
 // findDNSRecordIndex returns the index of the DNSRecord in dnsRecords
@@ -85,167 +116,126 @@ func NormalizeRecordValueKey(recordType, value string) string {
 	return normalizeRecordValueKey(recordType, value)
 }
 
-// Add a new DNS record to the list of DNS records or update an existing one.
-func Add(fullCommand []string, dnsRecords []DNSRecord, allowUpdate bool) []DNSRecord {
+// Add inserts a DNS record or updates an existing one when allowed. It returns the
+// updated slice alongside informational messages.
+func Add(fullCommand []string, dnsRecords []DNSRecord, allowUpdate bool) ([]DNSRecord, []Message, error) {
+	messages := make([]Message, 0)
 	if checkHelpCommand(fullCommand) {
-		printAddUsage()
-		return dnsRecords
+		return dnsRecords, usageAdd(), ErrHelpRequested
 	}
 
-	// 1) Parse arguments to get a DNSRecord struct
 	dnsRecord, err := parseDNSRecordArgs(fullCommand)
 	if err != nil {
-		fmt.Println("Error:", err)
-		printAddUsage()
-		return dnsRecords
+		msgs := append([]Message{{Level: LevelError, Text: err.Error()}}, usageAdd()...)
+		return dnsRecords, msgs, ErrInvalidArgs
 	}
 	dnsRecord.Type = normalizeRecordType(dnsRecord.Type)
 	dnsRecord.AddedOn = time.Now()
 
-	// 2) Use helper to find if a record with the same Name and Value already exists
 	existingIndex := findDNSRecordIndex(dnsRecords, dnsRecord.Name, dnsRecord.Type, dnsRecord.Value)
-
-	// 3) If found in the slice, either update it (if allowed) or inform user it already exists
 	if existingIndex != -1 {
 		oldRecord := dnsRecords[existingIndex]
-
-		// If updates are allowed, overwrite
 		if allowUpdate {
+			dnsRecord.UpdatedOn = time.Now()
 			dnsRecords[existingIndex] = dnsRecord
-
 			updatedRecToPrint := converters.ConvertValuesToStrings(
 				converters.GetFieldValuesByNamesArray(dnsRecord,
 					[]string{"Name", "Type", "Value", "TTL"}))
 			oldRecToPrint := converters.ConvertValuesToStrings(
 				converters.GetFieldValuesByNamesArray(oldRecord,
 					[]string{"Name", "Type", "Value", "TTL"}))
-
-			fmt.Println("Existing record found. Updating...")
-			fmt.Println("Previous:", oldRecToPrint)
-			fmt.Println("Current :", updatedRecToPrint)
-
-		} else {
-			// If updates are NOT allowed, just inform the user
-			attemptedRecToPrint := converters.ConvertValuesToStrings(
-				converters.GetFieldValuesByNamesArray(dnsRecord,
-					[]string{"Name", "Type", "Value", "TTL"}))
-			oldRecToPrint := converters.ConvertValuesToStrings(
-				converters.GetFieldValuesByNamesArray(oldRecord,
-					[]string{"Name", "Type", "Value", "TTL"}))
-
-			fmt.Println("A record already exists.")
-			fmt.Println("Attempted:", attemptedRecToPrint)
-			fmt.Println("Current  :", oldRecToPrint)
+			messages = append(messages,
+				Message{Level: LevelInfo, Text: "Existing record found. Updating..."},
+				Message{Level: LevelInfo, Text: fmt.Sprintf("Previous: %v", oldRecToPrint)},
+				Message{Level: LevelInfo, Text: fmt.Sprintf("Current : %v", updatedRecToPrint)},
+			)
+			return dnsRecords, messages, nil
 		}
-		return dnsRecords
+		attemptedRec := converters.ConvertValuesToStrings(
+			converters.GetFieldValuesByNamesArray(dnsRecord,
+				[]string{"Name", "Type", "Value", "TTL"}))
+		existingRec := converters.ConvertValuesToStrings(
+			converters.GetFieldValuesByNamesArray(oldRecord,
+				[]string{"Name", "Type", "Value", "TTL"}))
+		messages = append(messages,
+			Message{Level: LevelWarn, Text: "A record already exists."},
+			Message{Level: LevelWarn, Text: fmt.Sprintf("Attempted: %v", attemptedRec)},
+			Message{Level: LevelWarn, Text: fmt.Sprintf("Current  : %v", existingRec)},
+		)
+		return dnsRecords, messages, nil
 	}
 
-	// 4) If not found in the slice, append the new record
 	dnsRecords = append(dnsRecords, dnsRecord)
-	addedRecToPrint := converters.ConvertValuesToStrings(
+	addedRec := converters.ConvertValuesToStrings(
 		converters.GetFieldValuesByNamesArray(dnsRecord,
 			[]string{"Name", "Type", "Value", "TTL"}))
-
-	fmt.Println("Added:", addedRecToPrint)
-	return dnsRecords
+	messages = append(messages, Message{Level: LevelInfo, Text: fmt.Sprintf("Added: %v", addedRec)})
+	return dnsRecords, messages, nil
 }
 
-// List all the DNS records in the list of DNS records.
-func List(dnsRecords []DNSRecord, args []string) {
-	if len(dnsRecords) == 0 {
-		fmt.Println("No records found.")
-		return
+// List prepares a view of DNS records along with parsing options from args.
+func List(dnsRecords []DNSRecord, args []string) (ListResult, error) {
+	result := ListResult{Records: dnsRecords}
+	if checkHelpCommand(args) {
+		result.Messages = usageList()
+		return result, ErrHelpRequested
 	}
 
-	// Find maximum lengths of Name and Value fields
-	maxNameLength := 4  // Length of "Name"
-	maxValueLength := 5 // Length of "Value"
-	for _, record := range dnsRecords {
-		if len(record.Name) > maxNameLength {
-			maxNameLength = len(record.Name)
-		}
-		if len(record.Value) > maxValueLength {
-			maxValueLength = len(record.Value)
+	if len(args) > 0 {
+		if args[0] == "details" || args[0] == "d" {
+			result.Detailed = true
+			if len(args) > 1 {
+				result.Filter = args[1]
+			}
+		} else {
+			result.Filter = args[0]
 		}
 	}
 
-	// Helper function to check if the user wants to see details
-	isDetails := func(args []string) bool {
-		return len(args) > 0 && (args[0] == "details" || args[0] == "d")
+	if result.Filter != "" {
+		result.Messages = append(result.Messages, Message{Level: LevelInfo, Text: fmt.Sprintf("Filtering records by: %s", result.Filter)})
 	}
 
-	// Define format string with variable widths for Name and Value
-	formatString := fmt.Sprintf("%%-%ds %%-7s %%-%ds %%-5s\n", maxNameLength+2, maxValueLength+2)
-
-	fmt.Printf(formatString, "Name", "Type", "Value", "TTL")
-
-	for _, record := range dnsRecords {
-		valToPrint := converters.ConvertValuesToStrings(converters.GetFieldValuesByNamesArray(record, []string{"Name", "Type", "Value", "TTL"}))
-		fmt.Printf(formatString, valToPrint[0], valToPrint[1], valToPrint[2], valToPrint[3])
-
-		if !record.AddedOn.IsZero() && isDetails(args) {
-			fmt.Println("Added On:", record.AddedOn)
-		}
-
-		if !record.UpdatedOn.IsZero() && isDetails(args) {
-			fmt.Println("Updated On:", record.UpdatedOn)
-		}
-
-		if !record.LastQuery.IsZero() && isDetails(args) {
-			fmt.Println("Last Query:", record.LastQuery)
-		}
-
-		if record.MACAddress != "" && isDetails(args) {
-			fmt.Println("MAC Address:", record.MACAddress)
-		}
-
-		if record.CacheRecord && isDetails(args) {
-			fmt.Println("Cache Record: true")
-		}
-
-		fmt.Println()
+	if len(result.Records) == 0 {
+		result.Messages = append(result.Messages, Message{Level: LevelInfo, Text: "No records found."})
 	}
+
+	return result, nil
 }
 
-// Remove deletes a DNS record from the list of DNS records if found.
-func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
+// Remove deletes a DNS record from the list when found.
+func Remove(fullCommand []string, dnsRecords []DNSRecord) ([]DNSRecord, []Message, error) {
+	messages := make([]Message, 0)
 	if checkHelpCommand(fullCommand) {
-		printRemoveUsage()
-		return dnsRecords
+		return dnsRecords, usageRemove(), ErrHelpRequested
 	}
 
-	var (
-		inputName  = strings.TrimSpace(fullCommand[0])
-		name       string
-		recordType string
-		value      string
-	)
+	if len(fullCommand) < 2 || len(fullCommand) > 3 {
+		msgs := append([]Message{{Level: LevelError, Text: "invalid record format. Please use: remove <Name> [Type] <Value>"}}, usageRemove()...)
+		return dnsRecords, msgs, ErrInvalidArgs
+	}
+
+	name := strings.TrimSpace(fullCommand[0])
+	recordType := ""
+	value := ""
 
 	switch len(fullCommand) {
 	case 2:
-		// remove <Name> <IP>
 		var detectedType string
 		name, value, detectedType = validateIPAndDomain(fullCommand[0], fullCommand[1])
 		if name == "" || detectedType == "" {
-			fmt.Println("Invalid record format. Please use: remove <Name> [Type] <Value>")
-			printRemoveUsage()
-			return dnsRecords
+			msgs := append([]Message{{Level: LevelError, Text: "invalid record format. Please use: remove <Name> [Type] <Value>"}}, usageRemove()...)
+			return dnsRecords, msgs, ErrInvalidArgs
 		}
 		recordType = detectedType
 	case 3:
-		name = fullCommand[0]
 		recordType = fullCommand[1]
 		value = fullCommand[2]
-	default:
-		fmt.Println("Invalid usage. Please see help:")
-		printRemoveUsage()
-		return dnsRecords
 	}
 
 	if name == "" || recordType == "" || value == "" {
-		fmt.Println("Invalid record format. Please use: remove <Name> [Type] <Value>")
-		printRemoveUsage()
-		return dnsRecords
+		msgs := append([]Message{{Level: LevelError, Text: "invalid record format. Please use: remove <Name> [Type] <Value>"}}, usageRemove()...)
+		return dnsRecords, msgs, ErrInvalidArgs
 	}
 
 	normType := normalizeRecordType(recordType)
@@ -263,22 +253,19 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) []DNSRecord {
 	}
 
 	if existingIndex == -1 {
-		fmt.Printf("No record found for [%s %s %s].\n", inputName, recordType, value)
-		printRemoveUsage()
-		return dnsRecords
+		msg := Message{Level: LevelWarn, Text: fmt.Sprintf("No record found for [%s %s %s].", name, recordType, value)}
+		msgs := append([]Message{msg}, usageRemove()...)
+		return dnsRecords, msgs, ErrInvalidArgs
 	}
 
 	removedRecord := dnsRecords[existingIndex]
-	removedRecToPrint := converters.ConvertValuesToStrings(
+	removedRec := converters.ConvertValuesToStrings(
 		converters.GetFieldValuesByNamesArray(removedRecord,
 			[]string{"Name", "Type", "Value", "TTL"}))
 
-	// Remove it from the slice
 	dnsRecords = append(dnsRecords[:existingIndex], dnsRecords[existingIndex+1:]...)
-
-	// 5) Print removal details
-	fmt.Println("Removed:", removedRecToPrint)
-	return dnsRecords
+	messages = append(messages, Message{Level: LevelInfo, Text: fmt.Sprintf("Removed: %v", removedRec)})
+	return dnsRecords, messages, nil
 }
 
 // Helper function to check if the help command is invoked.
@@ -286,25 +273,37 @@ func checkHelpCommand(fullCommand []string) bool {
 	return len(fullCommand) == 0 || cliutil.IsHelpRequest(fullCommand)
 }
 
-func printAddUsage() {
-	fmt.Println("Usage  : add <Name> [Type] <Value> [TTL]")
-	fmt.Println("Examples:")
-	fmt.Println("  add example.com 127.0.0.1")
-	fmt.Println("  add example.com A 127.0.0.1")
-	fmt.Println("  add example.com A 127.0.0.1 3600")
-	printHelpAliasesHint()
+func usageAdd() []Message {
+	msgs := []Message{
+		{Level: LevelInfo, Text: "Usage  : add <Name> [Type] <Value> [TTL]"},
+		{Level: LevelInfo, Text: "Examples:"},
+		{Level: LevelInfo, Text: "  add example.com 127.0.0.1"},
+		{Level: LevelInfo, Text: "  add example.com A 127.0.0.1"},
+		{Level: LevelInfo, Text: "  add example.com A 127.0.0.1 3600"},
+	}
+	return append(msgs, helpHint())
 }
 
-func printRemoveUsage() {
-	fmt.Println("Usage  : remove <Name> [Type] <Value>")
-	fmt.Println("Examples:")
-	fmt.Println("  remove example.com 127.0.0.1")
-	fmt.Println("  remove example.com A 127.0.0.1")
-	printHelpAliasesHint()
+func usageRemove() []Message {
+	msgs := []Message{
+		{Level: LevelInfo, Text: "Usage  : remove <Name> [Type] <Value>"},
+		{Level: LevelInfo, Text: "Examples:"},
+		{Level: LevelInfo, Text: "  remove example.com 127.0.0.1"},
+		{Level: LevelInfo, Text: "  remove example.com A 127.0.0.1"},
+	}
+	return append(msgs, helpHint())
 }
 
-func printHelpAliasesHint() {
-	fmt.Println("Hint: append '?', 'help', or 'h' after the command to view this usage.")
+func usageList() []Message {
+	msgs := []Message{
+		{Level: LevelInfo, Text: "Usage  : record list [details|d] [filter]"},
+		{Level: LevelInfo, Text: "Description: List DNS records. Use 'details' to include timestamps, or provide a filter by name/type."},
+	}
+	return append(msgs, helpHint())
+}
+
+func helpHint() Message {
+	return Message{Level: LevelInfo, Text: "Hint: append '?', 'help', or 'h' after the command to view this usage."}
 }
 
 // ipvToRecordType returns the DNS record type for the given IP version.
