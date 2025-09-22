@@ -1,13 +1,18 @@
 package commandhandler
 
 import (
+	"bytes"
 	"dnsresolver/cliutil"
 	"dnsresolver/data"
 	"dnsresolver/dnsrecordcache"
 	"dnsresolver/dnsrecords"
 	"dnsresolver/dnsservers"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	tui "github.com/network-plane/planetui"
@@ -21,298 +26,958 @@ var (
 	startGinAPIFunc      func(string)
 )
 
-type simpleCommand struct {
-	name string
-	help string
-	exec func([]string)
+var captureMu sync.Mutex
+
+type factory struct {
+	spec tui.CommandSpec
+	run  func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult
 }
 
-func (c simpleCommand) Name() string       { return c.name }
-func (c simpleCommand) Help() string       { return c.help }
-func (c simpleCommand) Exec(args []string) { c.exec(args) }
+func (f *factory) Spec() tui.CommandSpec { return f.spec }
+
+func (f *factory) New(tui.CommandRuntime) (tui.Command, error) {
+	return &command{spec: f.spec, run: f.run}, nil
+}
+
+type command struct {
+	spec tui.CommandSpec
+	run  func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult
+}
+
+func (c *command) Spec() tui.CommandSpec { return c.spec }
+
+func (c *command) Execute(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+	return c.run(rt, input)
+}
+
+func legacyRunner(legacy func([]string)) func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if legacy == nil {
+			return tui.CommandResult{
+				Status: tui.StatusFailed,
+				Error:  &tui.CommandError{Message: "command not available", Severity: tui.SeverityError},
+			}
+		}
+		args := append([]string(nil), input.Raw...)
+		output, err := captureLegacyOutput(func() { legacy(args) })
+		if err != nil {
+			return tui.CommandResult{
+				Status: tui.StatusFailed,
+				Error:  &tui.CommandError{Err: err, Message: "legacy command execution failed", Severity: tui.SeverityError},
+			}
+		}
+		lines := normalizeLines(output)
+		messages := make([]tui.OutputMessage, 0, len(lines))
+		for _, line := range lines {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			messages = append(messages, tui.OutputMessage{Level: tui.SeverityInfo, Content: line})
+		}
+		return tui.CommandResult{Status: tui.StatusSuccess, Messages: messages}
+	}
+}
+
+func captureLegacyOutput(fn func()) (string, error) {
+	captureMu.Lock()
+	defer captureMu.Unlock()
+	if fn == nil {
+		return "", nil
+	}
+	stdout := os.Stdout
+	stderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
+	os.Stdout = w
+	os.Stderr = w
+	var buf bytes.Buffer
+	done := make(chan error, 1)
+	go func() {
+		_, copyErr := io.Copy(&buf, r)
+		_ = r.Close()
+		done <- copyErr
+	}()
+	var runErr error
+	func() {
+		defer func() {
+			if rec := recover(); rec != nil {
+				runErr = fmt.Errorf("panic: %v", rec)
+			}
+		}()
+		fn()
+	}()
+	_ = w.Close()
+	copyErr := <-done
+	os.Stdout = stdout
+	os.Stderr = stderr
+	if runErr != nil {
+		return buf.String(), runErr
+	}
+	if copyErr != nil {
+		return buf.String(), copyErr
+	}
+	return buf.String(), nil
+}
+
+func normalizeLines(out string) []string {
+	if out == "" {
+		return nil
+	}
+	out = strings.ReplaceAll(out, "\r\n", "\n")
+	out = strings.TrimRight(out, "\n")
+	if out == "" {
+		return nil
+	}
+	return strings.Split(out, "\n")
+}
+
+func convertRecordMessages(msgs []dnsrecords.Message) []tui.OutputMessage {
+	converted := make([]tui.OutputMessage, 0, len(msgs))
+	for _, msg := range msgs {
+		converted = append(converted, tui.OutputMessage{Level: mapRecordLevel(msg.Level), Content: msg.Text})
+	}
+	return converted
+}
+
+func mapRecordLevel(level dnsrecords.Level) tui.SeverityLevel {
+	switch level {
+	case dnsrecords.LevelWarn:
+		return tui.SeverityWarning
+	case dnsrecords.LevelError:
+		return tui.SeverityError
+	default:
+		return tui.SeverityInfo
+	}
+}
+
+func convertServerMessages(msgs []dnsservers.Message) []tui.OutputMessage {
+	converted := make([]tui.OutputMessage, 0, len(msgs))
+	for _, msg := range msgs {
+		converted = append(converted, tui.OutputMessage{Level: mapServerLevel(msg.Level), Content: msg.Text})
+	}
+	return converted
+}
+
+func mapServerLevel(level dnsservers.Level) tui.SeverityLevel {
+	switch level {
+	case dnsservers.LevelWarn:
+		return tui.SeverityWarning
+	case dnsservers.LevelError:
+		return tui.SeverityError
+	default:
+		return tui.SeverityInfo
+	}
+}
+
+func commandErrorFromRecordErr(err error) *tui.CommandError {
+	if err == nil {
+		return nil
+	}
+	severity := tui.SeverityError
+	if errors.Is(err, dnsrecords.ErrInvalidArgs) {
+		severity = tui.SeverityWarning
+	}
+	return &tui.CommandError{Err: err, Message: err.Error(), Severity: severity}
+}
+
+func commandErrorFromCacheErr(err error) *tui.CommandError {
+	if err == nil {
+		return nil
+	}
+	severity := tui.SeverityError
+	if errors.Is(err, dnsrecordcache.ErrInvalidArgs) {
+		severity = tui.SeverityWarning
+	}
+	return &tui.CommandError{Err: err, Message: err.Error(), Severity: severity}
+}
+
+func commandErrorFromServerErr(err error) *tui.CommandError {
+	if err == nil {
+		return nil
+	}
+	severity := tui.SeverityError
+	if errors.Is(err, dnsservers.ErrInvalidArgs) {
+		severity = tui.SeverityWarning
+	}
+	return &tui.CommandError{Err: err, Message: err.Error(), Severity: severity}
+}
+
+func infoMessages(lines ...string) []tui.OutputMessage {
+	msgs := make([]tui.OutputMessage, 0, len(lines))
+	for _, line := range lines {
+		msgs = append(msgs, tui.OutputMessage{Level: tui.SeverityInfo, Content: line})
+	}
+	return msgs
+}
+
+func warnMessages(lines ...string) []tui.OutputMessage {
+	msgs := make([]tui.OutputMessage, 0, len(lines))
+	for _, line := range lines {
+		msgs = append(msgs, tui.OutputMessage{Level: tui.SeverityWarning, Content: line})
+	}
+	return msgs
+}
+
+func newLegacyFactory(spec tui.CommandSpec, run func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult) tui.CommandFactory {
+	if spec.Name == "" {
+		panic("command spec must include a name")
+	}
+	wrapped := run
+	if wrapped == nil {
+		wrapped = func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+			return tui.CommandResult{Status: tui.StatusSuccess}
+		}
+	}
+	return &factory{spec: spec, run: wrapped}
+}
+
+func registerContexts() {
+	contexts := []struct {
+		name        string
+		description string
+		tags        []string
+	}{
+		{name: "record", description: "- Record Management", tags: []string{"dns", "records"}},
+		{name: "cache", description: "- Cache Management", tags: []string{"cache"}},
+		{name: "dns", description: "- DNS Server Management", tags: []string{"dns", "servers"}},
+		{name: "server", description: "- Server Management", tags: []string{"server"}},
+	}
+	for _, ctx := range contexts {
+		var opts []tui.ContextOption
+		if len(ctx.tags) > 0 {
+			opts = append(opts, tui.WithContextTags(ctx.tags...))
+		}
+		tui.RegisterContext(ctx.name, ctx.description, opts...)
+	}
+}
+
+func runRecordList() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		dnsData := data.GetInstance()
+		listResult, err := dnsrecords.List(dnsData.DNSRecords, input.Raw)
+		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertRecordMessages(listResult.Messages)}
+		if errors.Is(err, dnsrecords.ErrHelpRequested) {
+			return result
+		}
+		if err != nil {
+			result.Status = tui.StatusFailed
+			result.Error = commandErrorFromRecordErr(err)
+			return result
+		}
+		result.Payload = listResult.Records
+		rt.Session().Set("record:last_count", len(listResult.Records))
+		renderRecordTable(rt.Output(), listResult.Records)
+		if listResult.Detailed {
+			renderRecordDetails(rt.Output(), listResult.Records)
+		}
+		return result
+	}
+}
+
+func runRecordAdd(allowUpdate bool) func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		dnsData := data.GetInstance()
+		dnsData.Initialize()
+		updated, msgs, err := dnsrecords.Add(input.Raw, dnsData.DNSRecords, allowUpdate)
+		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertRecordMessages(msgs)}
+		if errors.Is(err, dnsrecords.ErrHelpRequested) {
+			return result
+		}
+		if err != nil {
+			result.Status = tui.StatusFailed
+			result.Error = commandErrorFromRecordErr(err)
+			return result
+		}
+		dnsData.UpdateRecords(updated)
+		result.Payload = updated
+		return result
+	}
+}
+
+func runRecordRemove() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		dnsData := data.GetInstance()
+		updated, msgs, err := dnsrecords.Remove(input.Raw, dnsData.DNSRecords)
+		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertRecordMessages(msgs)}
+		if errors.Is(err, dnsrecords.ErrHelpRequested) {
+			return result
+		}
+		if err != nil {
+			result.Status = tui.StatusFailed
+			result.Error = commandErrorFromRecordErr(err)
+			return result
+		}
+		dnsData.UpdateRecords(updated)
+		result.Payload = updated
+		return result
+	}
+}
+
+func runRecordClear() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.IsHelpRequest(input.Raw) {
+			msgs := infoMessages(
+				"Usage: record clear",
+				"Description: Remove all DNS records from memory.",
+				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
+			)
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
+		}
+		if len(input.Raw) > 0 {
+			msgs := append(warnMessages("record clear does not accept arguments."), infoMessages("Usage: record clear")...)
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
+		}
+		dnsData := data.GetInstance()
+		dnsData.UpdateRecordsInMemory([]dnsrecords.DNSRecord{})
+		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("All DNS records have been cleared.")}
+	}
+}
+
+func runRecordLoad() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.IsHelpRequest(input.Raw) {
+			msgs := infoMessages(
+				"Usage: record load",
+				"Description: Load DNS records from the default storage file.",
+				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
+			)
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
+		}
+		if len(input.Raw) > 0 {
+			msgs := append(warnMessages("record load does not accept arguments."), infoMessages("Usage: record load")...)
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
+		}
+		dnsData := data.GetInstance()
+		records := data.LoadDNSRecords()
+		dnsData.UpdateRecords(records)
+		return tui.CommandResult{Status: tui.StatusSuccess, Payload: records, Messages: infoMessages("DNS records loaded.")}
+	}
+}
+
+func runRecordSave() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.IsHelpRequest(input.Raw) {
+			msgs := infoMessages(
+				"Usage: record save",
+				"Description: Save current DNS records to the default storage file.",
+				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
+			)
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
+		}
+		if len(input.Raw) > 0 {
+			msgs := append(warnMessages("record save does not accept arguments."), infoMessages("Usage: record save")...)
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
+		}
+		dnsData := data.GetInstance()
+		if err := data.SaveDNSRecords(dnsData.DNSRecords); err != nil {
+			return tui.CommandResult{Status: tui.StatusFailed, Error: &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError}}
+		}
+		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("DNS records saved.")}
+	}
+}
+
+func runCacheList() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.IsHelpRequest(input.Raw) {
+			msgs := infoMessages(
+				"Usage: cache list",
+				"Description: List all cache entries in memory.",
+				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
+			)
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
+		}
+		cache := dnsrecordcache.List(data.GetInstance().CacheRecords)
+		result := tui.CommandResult{Status: tui.StatusSuccess, Payload: cache}
+		rt.Session().Set("cache:last_count", len(cache))
+		renderCacheTable(rt.Output(), cache)
+		if len(cache) == 0 {
+			result.Messages = infoMessages("No cache records found.")
+		}
+		return result
+	}
+}
+
+func runCacheRemove() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		dnsData := data.GetInstance()
+		updated, msgs, err := dnsrecordcache.Remove(input.Raw, dnsData.CacheRecords)
+		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertRecordMessages(msgs)}
+		if errors.Is(err, dnsrecordcache.ErrHelpRequested) {
+			return result
+		}
+		if err != nil {
+			result.Status = tui.StatusFailed
+			result.Error = commandErrorFromCacheErr(err)
+			return result
+		}
+		dnsData.UpdateCacheRecordsInMemory(updated)
+		result.Payload = updated
+		return result
+	}
+}
+
+func runCacheClear() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.IsHelpRequest(input.Raw) {
+			msgs := infoMessages(
+				"Usage: cache clear",
+				"Description: Remove every cached DNS entry.",
+				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
+			)
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
+		}
+		if len(input.Raw) > 0 {
+			msgs := append(warnMessages("cache clear does not accept arguments."), infoMessages("Usage: cache clear")...)
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
+		}
+		dnsData := data.GetInstance()
+		dnsData.UpdateCacheRecordsInMemory([]dnsrecordcache.CacheRecord{})
+		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("Cache cleared.")}
+	}
+}
+
+func runCacheLoad() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.IsHelpRequest(input.Raw) {
+			msgs := infoMessages(
+				"Usage: cache load",
+				"Description: Load cache records from the default storage file.",
+				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
+			)
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
+		}
+		if len(input.Raw) > 0 {
+			msgs := append(warnMessages("cache load does not accept arguments."), infoMessages("Usage: cache load")...)
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
+		}
+		dnsData := data.GetInstance()
+		cache := data.LoadCacheRecords()
+		dnsData.UpdateCacheRecordsInMemory(cache)
+		return tui.CommandResult{Status: tui.StatusSuccess, Payload: cache, Messages: infoMessages("Cache records loaded.")}
+	}
+}
+
+func runCacheSave() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.IsHelpRequest(input.Raw) {
+			msgs := infoMessages(
+				"Usage: cache save",
+				"Description: Save cache records to the default storage file.",
+				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
+			)
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
+		}
+		if len(input.Raw) > 0 {
+			msgs := append(warnMessages("cache save does not accept arguments."), infoMessages("Usage: cache save")...)
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
+		}
+		dnsData := data.GetInstance()
+		if err := data.SaveCacheRecords(dnsData.CacheRecords); err != nil {
+			return tui.CommandResult{Status: tui.StatusFailed, Error: &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError}}
+		}
+		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("Cache records saved.")}
+	}
+}
+
+func runDNSList() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.IsHelpRequest(input.Raw) {
+			msgs := infoMessages(
+				"Usage: dns list",
+				"Description: Show all configured upstream DNS servers.",
+				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
+			)
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
+		}
+		listResult := dnsservers.List(data.GetInstance().DNSServers)
+		result := tui.CommandResult{Status: tui.StatusSuccess, Payload: listResult.Servers, Messages: convertServerMessages(listResult.Messages)}
+		rt.Session().Set("dns:last_count", len(listResult.Servers))
+		renderDNSServerTable(rt.Output(), listResult.Servers)
+		return result
+	}
+}
+
+func runDNSAdd() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		dnsData := data.GetInstance()
+		updated, msgs, err := dnsservers.Add(input.Raw, dnsData.DNSServers)
+		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertServerMessages(msgs)}
+		if errors.Is(err, dnsservers.ErrHelpRequested) {
+			return result
+		}
+		if err != nil {
+			result.Status = tui.StatusFailed
+			result.Error = commandErrorFromServerErr(err)
+			return result
+		}
+		dnsData.UpdateServers(updated)
+		result.Payload = updated
+		return result
+	}
+}
+
+func runDNSRemove() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		dnsData := data.GetInstance()
+		updated, msgs, err := dnsservers.Remove(input.Raw, dnsData.DNSServers)
+		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertServerMessages(msgs)}
+		if errors.Is(err, dnsservers.ErrHelpRequested) {
+			return result
+		}
+		if err != nil {
+			result.Status = tui.StatusFailed
+			result.Error = commandErrorFromServerErr(err)
+			return result
+		}
+		dnsData.UpdateServers(updated)
+		result.Payload = updated
+		return result
+	}
+}
+
+func runDNSUpdate() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		dnsData := data.GetInstance()
+		updated, msgs, err := dnsservers.Update(input.Raw, dnsData.DNSServers)
+		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertServerMessages(msgs)}
+		if errors.Is(err, dnsservers.ErrHelpRequested) {
+			return result
+		}
+		if err != nil {
+			result.Status = tui.StatusFailed
+			result.Error = commandErrorFromServerErr(err)
+			return result
+		}
+		dnsData.UpdateServers(updated)
+		result.Payload = updated
+		return result
+	}
+}
+
+func runDNSClear() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.IsHelpRequest(input.Raw) {
+			msgs := infoMessages(
+				"Usage: dns clear",
+				"Description: Remove all configured upstream DNS servers.",
+				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
+			)
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
+		}
+		if len(input.Raw) > 0 {
+			msgs := append(warnMessages("dns clear does not accept arguments."), infoMessages("Usage: dns clear")...)
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
+		}
+		dnsData := data.GetInstance()
+		dnsData.UpdateServers([]dnsservers.DNSServer{})
+		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("All DNS servers have been cleared.")}
+	}
+}
+
+func runDNSLoad() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.IsHelpRequest(input.Raw) {
+			msgs := infoMessages(
+				"Usage: dns load",
+				"Description: Load DNS servers from the default storage file.",
+				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
+			)
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
+		}
+		if len(input.Raw) > 0 {
+			msgs := append(warnMessages("dns load does not accept arguments."), infoMessages("Usage: dns load")...)
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
+		}
+		dnsData := data.GetInstance()
+		servers := data.LoadDNSServers()
+		dnsData.UpdateServers(servers)
+		return tui.CommandResult{Status: tui.StatusSuccess, Payload: servers, Messages: infoMessages("DNS servers loaded.")}
+	}
+}
+
+func runDNSSave() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.IsHelpRequest(input.Raw) {
+			msgs := infoMessages(
+				"Usage: dns save",
+				"Description: Save DNS server definitions to the default storage file.",
+				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
+			)
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
+		}
+		if len(input.Raw) > 0 {
+			msgs := append(warnMessages("dns save does not accept arguments."), infoMessages("Usage: dns save")...)
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
+		}
+		dnsData := data.GetInstance()
+		if err := data.SaveDNSServers(dnsData.DNSServers); err != nil {
+			return tui.CommandResult{Status: tui.StatusFailed, Error: &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError}}
+		}
+		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("DNS servers saved.")}
+	}
+}
+
+func renderRecordTable(out tui.OutputChannel, records []dnsrecords.DNSRecord) {
+	if len(records) == 0 {
+		return
+	}
+	rows := make([][]string, 0, len(records))
+	for _, record := range records {
+		rows = append(rows, []string{record.Name, record.Type, record.Value, fmt.Sprintf("%d", record.TTL)})
+	}
+	out.WriteTable([]string{"Name", "Type", "Value", "TTL"}, rows)
+}
+
+func renderRecordDetails(out tui.OutputChannel, records []dnsrecords.DNSRecord) {
+	for _, record := range records {
+		var details []string
+		if !record.AddedOn.IsZero() {
+			details = append(details, fmt.Sprintf("Added On: %s", record.AddedOn.Format(time.RFC3339)))
+		}
+		if !record.UpdatedOn.IsZero() {
+			details = append(details, fmt.Sprintf("Updated On: %s", record.UpdatedOn.Format(time.RFC3339)))
+		}
+		if !record.LastQuery.IsZero() {
+			details = append(details, fmt.Sprintf("Last Query: %s", record.LastQuery.Format(time.RFC3339)))
+		}
+		if record.MACAddress != "" {
+			details = append(details, fmt.Sprintf("MAC Address: %s", record.MACAddress))
+		}
+		if record.CacheRecord {
+			details = append(details, "Cache Record: true")
+		}
+		if len(details) == 0 {
+			continue
+		}
+		out.Info(fmt.Sprintf("%s %s %s %d", record.Name, record.Type, record.Value, record.TTL))
+		for _, line := range details {
+			out.Info("  " + line)
+		}
+		out.Info("")
+	}
+}
+
+func renderCacheTable(out tui.OutputChannel, cache []dnsrecordcache.CacheRecord) {
+	if len(cache) == 0 {
+		return
+	}
+	rows := make([][]string, 0, len(cache))
+	for _, record := range cache {
+		expires := ""
+		if !record.Expiry.IsZero() {
+			expires = record.Expiry.Format(time.RFC3339)
+		}
+		rows = append(rows, []string{record.DNSRecord.Name, record.DNSRecord.Type, record.DNSRecord.Value, fmt.Sprintf("%d", record.DNSRecord.TTL), expires})
+	}
+	out.WriteTable([]string{"Name", "Type", "Value", "TTL", "Expires"}, rows)
+}
+
+func renderDNSServerTable(out tui.OutputChannel, servers []dnsservers.DNSServer) {
+	if len(servers) == 0 {
+		return
+	}
+	rows := make([][]string, 0, len(servers))
+	for _, server := range servers {
+		rows = append(rows, []string{
+			server.Address,
+			server.Port,
+			fmt.Sprintf("%t", server.Active),
+			fmt.Sprintf("%t", server.LocalResolver),
+			fmt.Sprintf("%t", server.AdBlocker),
+		})
+	}
+	out.WriteTable([]string{"Address", "Port", "Active", "Local", "AdBlocker"}, rows)
+}
 
 // RegisterCommands registers all DNS related contexts and commands with the TUI package.
 func RegisterCommands() {
-	tui.RegisterLegacyCommand("", simpleCommand{"stats", "- Display server statistics", handleStats})
+	tui.UseMiddleware(tui.TimingMiddleware)
 
-	tui.RegisterContext("record", "- Record Management")
-	tui.RegisterLegacyCommand("record", simpleCommand{"add", "- Add a new DNS record", recordAdd})
-	tui.RegisterLegacyCommand("record", simpleCommand{"remove", "- Remove a DNS record", recordRemove})
-	tui.RegisterLegacyCommand("record", simpleCommand{"update", "- Update a DNS record", recordUpdate})
-	tui.RegisterLegacyCommand("record", simpleCommand{"list", "- List all DNS records", recordList})
-	tui.RegisterLegacyCommand("record", simpleCommand{"clear", "- Clear all DNS records", recordClear})
-	tui.RegisterLegacyCommand("record", simpleCommand{"load", "- Load DNS records from a file", recordLoad})
-	tui.RegisterLegacyCommand("record", simpleCommand{"save", "- Save DNS records to a file", recordSave})
+	registerContexts()
 
-	tui.RegisterContext("cache", "- Cache Management")
-	tui.RegisterLegacyCommand("cache", simpleCommand{"list", "- List all cache entries", cacheList})
-	tui.RegisterLegacyCommand("cache", simpleCommand{"remove", "- Remove a cache entry", cacheRemove})
-	tui.RegisterLegacyCommand("cache", simpleCommand{"clear", "- Clear the cache", cacheClear})
-	tui.RegisterLegacyCommand("cache", simpleCommand{"load", "- Load cache records from a file", cacheLoad})
-	tui.RegisterLegacyCommand("cache", simpleCommand{"save", "- Save cache records to a file", cacheSave})
+	commands := []tui.CommandFactory{
+		newLegacyFactory(tui.CommandSpec{
+			Name:        "stats",
+			Summary:     "Display resolver statistics",
+			Description: "Shows runtime counters, record totals, and cache statistics for the running resolver.",
+			Usage:       "stats",
+			Category:    "Monitoring",
+			Tags:        []string{"monitoring", "status"},
+			Examples: []tui.Example{
+				{Description: "Show resolver metrics", Command: "stats"},
+			},
+		}, legacyRunner(handleStats)),
 
-	tui.RegisterContext("dns", "- DNS Server Management")
-	tui.RegisterLegacyCommand("dns", simpleCommand{"add", "- Add a new DNS server", dnsAdd})
-	tui.RegisterLegacyCommand("dns", simpleCommand{"remove", "- Remove a DNS server", dnsRemove})
-	tui.RegisterLegacyCommand("dns", simpleCommand{"update", "- Update a DNS server", dnsUpdate})
-	tui.RegisterLegacyCommand("dns", simpleCommand{"list", "- List all DNS servers", dnsList})
-	tui.RegisterLegacyCommand("dns", simpleCommand{"clear", "- Clear all DNS servers", dnsClear})
-	tui.RegisterLegacyCommand("dns", simpleCommand{"load", "- Load DNS servers from a file", dnsLoad})
-	tui.RegisterLegacyCommand("dns", simpleCommand{"save", "- Save DNS servers to a file", dnsSave})
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "record",
+			Name:        "add",
+			Summary:     "Add a DNS record",
+			Description: "Adds a DNS record to the in-memory store. Accepts <name> [type] <value> [ttl] syntax.",
+			Usage:       "record add <name> [type] <value> [ttl]",
+			Category:    "DNS Records",
+			Tags:        []string{"records", "create"},
+			Args: []tui.ArgSpec{
+				{Name: "params", Description: "Name [Type] Value [TTL]", Repeatable: true},
+			},
+			Examples: []tui.Example{
+				{Description: "Add an A record", Command: "record add example.com A 127.0.0.1 3600"},
+				{Description: "Add record inferring type", Command: "record add example.com 127.0.0.1"},
+			},
+		}, runRecordAdd(false)),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "record",
+			Name:        "remove",
+			Summary:     "Remove a DNS record",
+			Description: "Deletes a DNS record matching the provided name, type, and value.",
+			Usage:       "record remove <name> [type] <value>",
+			Category:    "DNS Records",
+			Tags:        []string{"records", "delete"},
+			Args: []tui.ArgSpec{
+				{Name: "params", Description: "Name [Type] Value", Repeatable: true},
+			},
+			Examples: []tui.Example{{Description: "Remove an A record", Command: "record remove example.com A 127.0.0.1"}},
+		}, runRecordRemove()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "record",
+			Name:        "update",
+			Summary:     "Update an existing record",
+			Description: "Adds or updates a DNS record depending on whether it already exists.",
+			Usage:       "record update <name> [type] <value> [ttl]",
+			Category:    "DNS Records",
+			Tags:        []string{"records", "update"},
+			Args: []tui.ArgSpec{
+				{Name: "params", Description: "Name [Type] Value [TTL]", Repeatable: true},
+			},
+			Examples: []tui.Example{{Description: "Update TTL for record", Command: "record update example.com A 127.0.0.1 120"}},
+		}, runRecordAdd(true)),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "record",
+			Name:        "list",
+			Summary:     "List DNS records",
+			Description: "Displays configured DNS records with optional detail mode and filtering.",
+			Usage:       "record list [details|d] [filter]",
+			Category:    "DNS Records",
+			Tags:        []string{"records", "list"},
+			Args: []tui.ArgSpec{
+				{Name: "mode", Description: "Use 'details' or 'd' for verbose output"},
+				{Name: "filter", Description: "Optional filter by name or type", Required: false},
+			},
+			Examples: []tui.Example{
+				{Description: "List records", Command: "record list"},
+				{Description: "Show detailed records", Command: "record list details"},
+			},
+		}, runRecordList()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "record",
+			Name:        "clear",
+			Summary:     "Clear all DNS records",
+			Description: "Removes every DNS record from the in-memory store.",
+			Usage:       "record clear",
+			Category:    "DNS Records",
+			Tags:        []string{"records", "clear"},
+			Examples:    []tui.Example{{Description: "Clear records", Command: "record clear"}},
+		}, runRecordClear()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "record",
+			Name:        "load",
+			Summary:     "Load DNS records from disk",
+			Description: "Reloads DNS records from the default storage file.",
+			Usage:       "record load",
+			Category:    "DNS Records",
+			Tags:        []string{"records", "load"},
+			Examples:    []tui.Example{{Description: "Load records", Command: "record load"}},
+		}, runRecordLoad()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "record",
+			Name:        "save",
+			Summary:     "Save DNS records to disk",
+			Description: "Persists current DNS records to the default storage file.",
+			Usage:       "record save",
+			Category:    "DNS Records",
+			Tags:        []string{"records", "save"},
+			Examples:    []tui.Example{{Description: "Save records", Command: "record save"}},
+		}, runRecordSave()),
 
-	tui.RegisterContext("server", "- Server Management")
-	tui.RegisterLegacyCommand("server", simpleCommand{"start", "- Start server components", handleServerStart})
-	tui.RegisterLegacyCommand("server", simpleCommand{"stop", "- Stop server components", handleServerStop})
-	tui.RegisterLegacyCommand("server", simpleCommand{"status", "- Show server component status", handleServerStatus})
-	tui.RegisterLegacyCommand("server", simpleCommand{"configure", "- Set or list server configuration", handleServerConfigure})
-	tui.RegisterLegacyCommand("server", simpleCommand{"load", "- Load server settings from a file", handleServerLoad})
-	tui.RegisterLegacyCommand("server", simpleCommand{"save", "- Save server settings to a file", handleServerSave})
-}
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "cache",
+			Name:        "list",
+			Summary:     "List cache entries",
+			Description: "Displays cached DNS entries currently held in memory.",
+			Usage:       "cache list",
+			Category:    "Cache",
+			Tags:        []string{"cache", "list"},
+			Examples:    []tui.Example{{Description: "List cache", Command: "cache list"}},
+		}, runCacheList()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "cache",
+			Name:        "remove",
+			Summary:     "Remove cache entry",
+			Description: "Removes a cached DNS record matching the provided criteria.",
+			Usage:       "cache remove <name> [type] <value>",
+			Category:    "Cache",
+			Tags:        []string{"cache", "delete"},
+			Args:        []tui.ArgSpec{{Name: "params", Description: "Name [Type] Value", Repeatable: true}},
+		}, runCacheRemove()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "cache",
+			Name:        "clear",
+			Summary:     "Clear cache",
+			Description: "Empties all cached DNS entries.",
+			Usage:       "cache clear",
+			Category:    "Cache",
+			Tags:        []string{"cache", "clear"},
+		}, runCacheClear()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "cache",
+			Name:        "load",
+			Summary:     "Load cache from disk",
+			Description: "Loads cache entries from the default storage file.",
+			Usage:       "cache load",
+			Category:    "Cache",
+			Tags:        []string{"cache", "load"},
+		}, runCacheLoad()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "cache",
+			Name:        "save",
+			Summary:     "Save cache to disk",
+			Description: "Persists cache entries to the default storage file.",
+			Usage:       "cache save",
+			Category:    "Cache",
+			Tags:        []string{"cache", "save"},
+		}, runCacheSave()),
 
-// Record commands
-func recordAdd(args []string) {
-	dnsData := data.GetInstance()
-	dnsData.Initialize()
-	records := dnsData.DNSRecords
-	records = dnsrecords.Add(args, records, false)
-	dnsData.UpdateRecords(records)
-}
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "dns",
+			Name:        "add",
+			Summary:     "Add upstream DNS server",
+			Description: "Adds an upstream DNS server definition.",
+			Usage:       "dns add <address> [port]",
+			Category:    "Upstream Servers",
+			Tags:        []string{"dns", "servers", "add"},
+		}, runDNSAdd()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "dns",
+			Name:        "remove",
+			Summary:     "Remove upstream DNS server",
+			Description: "Removes an upstream DNS server definition.",
+			Usage:       "dns remove <address> [port]",
+			Category:    "Upstream Servers",
+			Tags:        []string{"dns", "servers", "remove"},
+		}, runDNSRemove()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "dns",
+			Name:        "update",
+			Summary:     "Update upstream DNS server",
+			Description: "Updates an existing upstream DNS server definition.",
+			Usage:       "dns update <address> [port]",
+			Category:    "Upstream Servers",
+			Tags:        []string{"dns", "servers", "update"},
+		}, runDNSUpdate()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "dns",
+			Name:        "list",
+			Summary:     "List upstream DNS servers",
+			Description: "Displays configured upstream DNS servers.",
+			Usage:       "dns list",
+			Category:    "Upstream Servers",
+			Tags:        []string{"dns", "servers", "list"},
+		}, runDNSList()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "dns",
+			Name:        "clear",
+			Summary:     "Clear upstream DNS servers",
+			Description: "Removes every upstream DNS server definition.",
+			Usage:       "dns clear",
+			Category:    "Upstream Servers",
+			Tags:        []string{"dns", "servers", "clear"},
+		}, runDNSClear()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "dns",
+			Name:        "load",
+			Summary:     "Load upstream DNS servers",
+			Description: "Loads upstream DNS server definitions from disk.",
+			Usage:       "dns load",
+			Category:    "Upstream Servers",
+			Tags:        []string{"dns", "servers", "load"},
+		}, runDNSLoad()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "dns",
+			Name:        "save",
+			Summary:     "Save upstream DNS servers",
+			Description: "Persists upstream DNS server definitions to disk.",
+			Usage:       "dns save",
+			Category:    "Upstream Servers",
+			Tags:        []string{"dns", "servers", "save"},
+		}, runDNSSave()),
 
-func recordRemove(args []string) {
-	dnsData := data.GetInstance()
-	records := dnsData.DNSRecords
-	records = dnsrecords.Remove(args, records)
-	dnsData.UpdateRecords(records)
-}
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "server",
+			Name:        "start",
+			Summary:     "Start server component",
+			Description: "Starts DNS or API server components.",
+			Usage:       "server start <dns|api>",
+			Category:    "Server",
+			Tags:        []string{"server", "start"},
+			Args:        []tui.ArgSpec{{Name: "component", Description: "Component to start", Required: true}},
+		}, legacyRunner(handleServerStart)),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "server",
+			Name:        "stop",
+			Summary:     "Stop server component",
+			Description: "Stops DNS or API server components.",
+			Usage:       "server stop <dns|api>",
+			Category:    "Server",
+			Tags:        []string{"server", "stop"},
+			Args:        []tui.ArgSpec{{Name: "component", Description: "Component to stop", Required: true}},
+		}, legacyRunner(handleServerStop)),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "server",
+			Name:        "status",
+			Summary:     "Show server status",
+			Description: "Displays status of DNS or API server components.",
+			Usage:       "server status <dns|api>",
+			Category:    "Server",
+			Tags:        []string{"server", "status"},
+			Args:        []tui.ArgSpec{{Name: "component", Description: "Component to inspect", Required: true}},
+		}, legacyRunner(handleServerStatus)),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "server",
+			Name:        "configure",
+			Summary:     "Configure server settings",
+			Description: "Updates resolver settings or displays current configuration.",
+			Usage:       "server configure [setting] [value]",
+			Category:    "Server",
+			Tags:        []string{"server", "configure"},
+			Args: []tui.ArgSpec{
+				{Name: "setting", Description: "Setting name", Required: false},
+				{Name: "value", Description: "Setting value", Required: false},
+			},
+		}, legacyRunner(handleServerConfigure)),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "server",
+			Name:        "load",
+			Summary:     "Load server settings",
+			Description: "Loads resolver settings from disk.",
+			Usage:       "server load",
+			Category:    "Server",
+			Tags:        []string{"server", "load"},
+		}, legacyRunner(handleServerLoad)),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "server",
+			Name:        "save",
+			Summary:     "Save server settings",
+			Description: "Persists resolver settings to disk.",
+			Usage:       "server save",
+			Category:    "Server",
+			Tags:        []string{"server", "save"},
+		}, legacyRunner(handleServerSave)),
+	}
 
-func recordUpdate(args []string) {
-	dnsData := data.GetInstance()
-	records := dnsData.DNSRecords
-	records = dnsrecords.Add(args, records, true)
-	dnsData.UpdateRecords(records)
-}
-
-func recordList(args []string) {
-	if cliutil.IsHelpRequest(args) {
-		printRecordListUsage()
-		return
+	for _, cmd := range commands {
+		tui.RegisterCommand(cmd)
 	}
-	dnsData := data.GetInstance()
-	records := dnsData.DNSRecords
-	if len(args) > 0 && args[0] != "d" && args[0] != "details" {
-		fmt.Println("Filtering records by:", args[0])
-	}
-	dnsrecords.List(records, args)
-}
-
-func recordClear(args []string) {
-	if cliutil.IsHelpRequest(args) {
-		printRecordClearUsage()
-		return
-	}
-	if len(args) > 0 {
-		fmt.Println("record clear does not accept arguments.")
-		printRecordClearUsage()
-		return
-	}
-	dnsData := data.GetInstance()
-	dnsData.UpdateRecordsInMemory([]dnsrecords.DNSRecord{})
-	fmt.Println("All DNS records have been cleared.")
-}
-
-func recordLoad(args []string) {
-	if cliutil.IsHelpRequest(args) {
-		printRecordLoadUsage()
-		return
-	}
-	if len(args) > 0 {
-		fmt.Println("record load does not accept arguments.")
-		printRecordLoadUsage()
-		return
-	}
-	dnsData := data.GetInstance()
-	records := data.LoadDNSRecords()
-	dnsData.UpdateRecords(records)
-	fmt.Println("DNS records loaded.")
-}
-
-func recordSave(args []string) {
-	if cliutil.IsHelpRequest(args) {
-		printRecordSaveUsage()
-		return
-	}
-	if len(args) > 0 {
-		fmt.Println("record save does not accept arguments.")
-		printRecordSaveUsage()
-		return
-	}
-	dnsData := data.GetInstance()
-	records := dnsData.DNSRecords
-	if err := data.SaveDNSRecords(records); err != nil {
-		fmt.Println("Error saving DNS records:", err)
-		return
-	}
-	fmt.Println("DNS records saved.")
-}
-
-// Cache commands
-func cacheList(args []string) {
-	if cliutil.IsHelpRequest(args) {
-		printCacheListUsage()
-		return
-	}
-	if len(args) > 0 {
-		fmt.Println("cache list does not accept arguments.")
-		printCacheListUsage()
-		return
-	}
-	dnsData := data.GetInstance()
-	cache := dnsData.CacheRecords
-	dnsrecordcache.List(cache)
-}
-
-func cacheRemove(args []string) {
-	dnsData := data.GetInstance()
-	cache := dnsData.GetCacheRecords()
-	cache = dnsrecordcache.Remove(args, cache)
-	dnsData.UpdateCacheRecordsInMemory(cache)
-}
-
-func cacheClear(args []string) {
-	if cliutil.IsHelpRequest(args) {
-		printCacheClearUsage()
-		return
-	}
-	if len(args) > 0 {
-		fmt.Println("cache clear does not accept arguments.")
-		printCacheClearUsage()
-		return
-	}
-	dnsData := data.GetInstance()
-	dnsData.UpdateCacheRecordsInMemory([]dnsrecordcache.CacheRecord{})
-	fmt.Println("Cache cleared.")
-}
-
-func cacheLoad(args []string) {
-	if cliutil.IsHelpRequest(args) {
-		printCacheLoadUsage()
-		return
-	}
-	if len(args) > 0 {
-		fmt.Println("cache load does not accept arguments.")
-		printCacheLoadUsage()
-		return
-	}
-	dnsData := data.GetInstance()
-	cache := data.LoadCacheRecords()
-	dnsData.UpdateCacheRecordsInMemory(cache)
-	fmt.Println("Cache records loaded.")
-}
-
-func cacheSave(args []string) {
-	if cliutil.IsHelpRequest(args) {
-		printCacheSaveUsage()
-		return
-	}
-	if len(args) > 0 {
-		fmt.Println("cache save does not accept arguments.")
-		printCacheSaveUsage()
-		return
-	}
-	dnsData := data.GetInstance()
-	cache := dnsData.CacheRecords
-	if err := data.SaveCacheRecords(cache); err != nil {
-		fmt.Println("Error saving cache records:", err)
-		return
-	}
-	fmt.Println("Cache records saved.")
-}
-
-// DNS server list commands
-func dnsAdd(args []string) {
-	dnsData := data.GetInstance()
-	servers := dnsData.DNSServers
-	servers = dnsservers.Add(args, servers)
-	dnsData.UpdateServers(servers)
-}
-
-func dnsRemove(args []string) {
-	dnsData := data.GetInstance()
-	servers := dnsData.DNSServers
-	servers = dnsservers.Remove(args, servers)
-	dnsData.UpdateServers(servers)
-}
-
-func dnsUpdate(args []string) {
-	dnsData := data.GetInstance()
-	servers := dnsData.DNSServers
-	servers = dnsservers.Update(args, servers)
-	dnsData.UpdateServers(servers)
-}
-
-func dnsList(args []string) {
-	if cliutil.IsHelpRequest(args) {
-		printDNSListUsage()
-		return
-	}
-	if len(args) > 0 {
-		fmt.Println("dns list does not accept arguments.")
-		printDNSListUsage()
-		return
-	}
-	dnsData := data.GetInstance()
-	servers := dnsData.DNSServers
-	dnsservers.List(servers)
-}
-
-func dnsClear(args []string) {
-	if cliutil.IsHelpRequest(args) {
-		printDNSClearUsage()
-		return
-	}
-	if len(args) > 0 {
-		fmt.Println("dns clear does not accept arguments.")
-		printDNSClearUsage()
-		return
-	}
-	dnsData := data.GetInstance()
-	dnsData.UpdateServers([]dnsservers.DNSServer{})
-	fmt.Println("All DNS servers have been cleared.")
-}
-
-func dnsLoad(args []string) {
-	if cliutil.IsHelpRequest(args) {
-		printDNSLoadUsage()
-		return
-	}
-	if len(args) > 0 {
-		fmt.Println("dns load does not accept arguments.")
-		printDNSLoadUsage()
-		return
-	}
-	dnsData := data.GetInstance()
-	servers := data.LoadDNSServers()
-	dnsData.UpdateServers(servers)
-	fmt.Println("DNS servers loaded.")
-}
-
-func dnsSave(args []string) {
-	if cliutil.IsHelpRequest(args) {
-		printDNSSaveUsage()
-		return
-	}
-	if len(args) > 0 {
-		fmt.Println("dns save does not accept arguments.")
-		printDNSSaveUsage()
-		return
-	}
-	dnsData := data.GetInstance()
-	servers := dnsData.DNSServers
-	if err := data.SaveDNSServers(servers); err != nil {
-		fmt.Println("Error saving DNS servers:", err)
-		return
-	}
-	fmt.Println("DNS servers saved.")
 }
 
 // Server commands rely on function variables.
@@ -537,78 +1202,6 @@ func serverUpTimeFormat(startTime time.Time) string {
 		return fmt.Sprintf("%d minutes, %d seconds", minutes, seconds)
 	}
 	return fmt.Sprintf("%d seconds", seconds)
-}
-
-func printRecordClearUsage() {
-	fmt.Println("Usage: record clear")
-	fmt.Println("Description: Remove all DNS records from memory.")
-	printHelpAliasesHint()
-}
-
-func printRecordLoadUsage() {
-	fmt.Println("Usage: record load")
-	fmt.Println("Description: Load DNS records from the default storage file.")
-	printHelpAliasesHint()
-}
-
-func printRecordSaveUsage() {
-	fmt.Println("Usage: record save")
-	fmt.Println("Description: Save current DNS records to the default storage file.")
-	printHelpAliasesHint()
-}
-
-func printRecordListUsage() {
-	fmt.Println("Usage: record list [details|d] [filter]")
-	fmt.Println("Description: List DNS records. Use 'details' to include timestamps, or provide a filter by name/type.")
-	printHelpAliasesHint()
-}
-
-func printCacheListUsage() {
-	fmt.Println("Usage: cache list")
-	fmt.Println("Description: List all cache entries in memory.")
-	printHelpAliasesHint()
-}
-
-func printCacheClearUsage() {
-	fmt.Println("Usage: cache clear")
-	fmt.Println("Description: Remove every cached DNS entry.")
-	printHelpAliasesHint()
-}
-
-func printCacheLoadUsage() {
-	fmt.Println("Usage: cache load")
-	fmt.Println("Description: Load cache records from the default storage file.")
-	printHelpAliasesHint()
-}
-
-func printCacheSaveUsage() {
-	fmt.Println("Usage: cache save")
-	fmt.Println("Description: Save cache records to the default storage file.")
-	printHelpAliasesHint()
-}
-
-func printDNSListUsage() {
-	fmt.Println("Usage: dns list")
-	fmt.Println("Description: Show all configured upstream DNS servers.")
-	printHelpAliasesHint()
-}
-
-func printDNSClearUsage() {
-	fmt.Println("Usage: dns clear")
-	fmt.Println("Description: Remove all configured upstream DNS servers.")
-	printHelpAliasesHint()
-}
-
-func printDNSLoadUsage() {
-	fmt.Println("Usage: dns load")
-	fmt.Println("Description: Load DNS server definitions from the default storage file.")
-	printHelpAliasesHint()
-}
-
-func printDNSSaveUsage() {
-	fmt.Println("Usage: dns save")
-	fmt.Println("Description: Save DNS server definitions to the default storage file.")
-	printHelpAliasesHint()
 }
 
 func printServerStartUsage() {

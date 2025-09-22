@@ -181,11 +181,23 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	}
 
 	if !tuiMode {
+		var unixListener net.Listener
+		var tcpListener net.Listener
 		if serverSocket != "" {
-			go setupUnixSocketListener(serverSocket)
+			listener, err := startUnixSocketListener(serverSocket)
+			if err != nil {
+				return fmt.Errorf("unix socket listener error: %w", err)
+			}
+			unixListener = listener
+			go acceptInteractiveSessions(listener)
 		}
 		if serverTCP != "" {
-			go setupTCPTerminalListener(serverTCP)
+			listener, err := startTCPTerminalListener(serverTCP)
+			if err != nil {
+				return fmt.Errorf("tcp listener error: %w", err)
+			}
+			tcpListener = listener
+			go acceptInteractiveSessions(listener)
 		}
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
@@ -194,6 +206,12 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		<-sigCh
 		fmt.Println("Shutting down.")
 		stopDNSServer()
+		if unixListener != nil {
+			_ = unixListener.Close()
+		}
+		if tcpListener != nil {
+			_ = tcpListener.Close()
+		}
 		if serverSocket != "" {
 			_ = syscall.Unlink(serverSocket)
 		}
@@ -539,50 +557,45 @@ func handleDNSServers(question dns.Question, dnsServers []string, fallbackServer
 	}
 }
 
-func setupUnixSocketListener(socketPath string) {
+func startUnixSocketListener(socketPath string) (net.Listener, error) {
 	if socketPath == "" {
-		return
+		return nil, nil
 	}
-	err := syscall.Unlink(socketPath)
-	if err != nil && !os.IsNotExist(err) {
-		log.Fatal("Error removing existing UNIX socket:", err)
+	if err := syscall.Unlink(socketPath); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("remove unix socket: %w", err)
 	}
-
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
-		log.Fatal("Error setting up UNIX socket listener:", err)
+		return nil, err
 	}
-	defer listener.Close()
-
 	log.Printf("Listening on UNIX socket at %s", socketPath)
-
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Printf("Error accepting connection: %v", err)
-			continue
-		}
-
-		go serveInteractiveSession(conn)
-	}
+	return listener, nil
 }
 
-func setupTCPTerminalListener(address string) {
+func startTCPTerminalListener(address string) (net.Listener, error) {
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
-		log.Fatal("Error setting up TCP listener:", err)
+		return nil, err
 	}
-	defer listener.Close()
-
 	log.Printf("Listening on TCP address %s for TUI clients", address)
+	return listener, nil
+}
 
+func acceptInteractiveSessions(listener net.Listener) {
+	defer listener.Close()
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Printf("Error accepting TCP connection: %v", err)
-			continue
+			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				log.Printf("Temporary accept error: %v", err)
+				continue
+			}
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			log.Printf("Error accepting connection: %v", err)
+			return
 		}
-
 		go serveInteractiveSession(conn)
 	}
 }
@@ -607,6 +620,7 @@ func serveInteractiveSession(conn net.Conn) {
 	oldStderr := os.Stderr
 	os.Stdout = writePipe
 	os.Stderr = writePipe
+	prevOutputWriter := tui.SetOutputWriter(writePipe)
 
 	copyDone := make(chan struct{})
 	go func() {
@@ -615,6 +629,7 @@ func serveInteractiveSession(conn net.Conn) {
 	}()
 
 	defer func() {
+		tui.SetOutputWriter(prevOutputWriter)
 		_ = writePipe.Close()
 		<-copyDone
 		_ = readPipe.Close()
@@ -795,23 +810,55 @@ func resolveInteractiveTarget(target string) (network, address string) {
 // Wrapper for existing addRecord function
 func addRecordGin(c *gin.Context) {
 	dnsData := data.GetInstance()
-	// Read command from JSON request body
 	var request []string
 	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(400, gin.H{"error": "Invalid input"})
+		c.JSON(400, gin.H{"error": "invalid input"})
 		return
 	}
 
-	dnsrecords.Add(request, dnsData.DNSRecords, false) // Call the existing addRecord function with parsed input
-	c.JSON(201, gin.H{"status": "Record added"})
+	updated, messages, err := dnsrecords.Add(request, dnsData.DNSRecords, false)
+	if errors.Is(err, dnsrecords.ErrHelpRequested) {
+		c.JSON(200, gin.H{"messages": extractRecordMessages(messages)})
+		return
+	}
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error(), "messages": extractRecordMessages(messages)})
+		return
+	}
+	dnsData.UpdateRecords(updated)
+	c.JSON(201, gin.H{"status": "record added", "messages": extractRecordMessages(messages)})
 }
 
 // Wrapper for existing listRecords function
 func listRecordsGin(c *gin.Context) {
 	dnsData := data.GetInstance()
-	// Call the existing listRecords function with no args
-	dnsrecords.List(dnsData.DNSRecords, []string{})
-	c.JSON(200, gin.H{"status": "Listed"})
+	result, err := dnsrecords.List(dnsData.DNSRecords, []string{})
+	if errors.Is(err, dnsrecords.ErrHelpRequested) {
+		c.JSON(200, gin.H{"messages": extractRecordMessages(result.Messages)})
+		return
+	}
+	resp := gin.H{
+		"records":  result.Records,
+		"detailed": result.Detailed,
+	}
+	if result.Filter != "" {
+		resp["filter"] = result.Filter
+	}
+	if len(result.Messages) > 0 {
+		resp["messages"] = extractRecordMessages(result.Messages)
+	}
+	c.JSON(200, resp)
+}
+
+func extractRecordMessages(msgs []dnsrecords.Message) []string {
+	if len(msgs) == 0 {
+		return nil
+	}
+	res := make([]string, 0, len(msgs))
+	for _, msg := range msgs {
+		res = append(res, msg.Text)
+	}
+	return res
 }
 
 func startGinAPI(apiport string) {

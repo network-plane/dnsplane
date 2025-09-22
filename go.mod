@@ -6,7 +6,7 @@ require (
 	github.com/chzyer/readline v1.5.1
 	github.com/gin-gonic/gin v1.11.0
 	github.com/miekg/dns v1.1.68
-	github.com/network-plane/planetui v0.0.0-20250922111346-a82cb09408bb
+	github.com/network-plane/planetui v1.0.1
 	github.com/spf13/cobra v1.10.1
 	golang.org/x/term v0.35.0
 )
