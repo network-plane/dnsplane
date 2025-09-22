@@ -1,14 +1,14 @@
 module dnsresolver
 
-go 1.24.0
-
-toolchain go1.24.1
+go 1.25.1
 
 require (
 	github.com/chzyer/readline v1.5.1
 	github.com/gin-gonic/gin v1.11.0
 	github.com/miekg/dns v1.1.68
+	github.com/network-plane/planetui v0.0.0-20250922111346-a82cb09408bb
 	github.com/spf13/cobra v1.10.1
+	golang.org/x/term v0.35.0
 )
 
 require (
@@ -43,7 +43,6 @@ require (
 	golang.org/x/net v0.44.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
-	golang.org/x/term v0.35.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 	golang.org/x/tools v0.37.0 // indirect
 	google.golang.org/protobuf v1.36.9 // indirect
