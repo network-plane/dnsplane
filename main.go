@@ -20,7 +20,6 @@ import (
 	"dnsresolver/dnsrecordcache"
 	"dnsresolver/dnsrecords"
 	"dnsresolver/dnsservers"
-	"dnsresolver/tui"
 
 	// "github.com/bettercap/readline"
 	// "github.com/reeflective/readline"
@@ -29,6 +28,8 @@ import (
 	"github.com/miekg/dns"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+
+	tui "github.com/network-plane/planetui"
 )
 
 const (
@@ -55,6 +56,12 @@ var (
 		RunE:          runRoot,
 	}
 )
+
+func resetTUIState() {
+	if mgr := tui.DefaultEngine().Contexts(); mgr != nil {
+		_ = mgr.PopToRoot()
+	}
+}
 
 func main() {
 	//Create JSON files if they don't exist
@@ -201,8 +208,10 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	rl.CaptureExitSignal()
 	defer rl.Close()
 
-	tui.ResetState()
-	tui.Run(rl)
+	resetTUIState()
+	if err := tui.Run(rl); err != nil {
+		fmt.Fprintf(os.Stderr, "tui error: %v\n", err)
+	}
 
 	return nil
 }
@@ -627,14 +636,13 @@ func serveInteractiveSession(conn net.Conn) {
 	defer rl.Close()
 	rl.CaptureExitSignal()
 
-	prevExit := tui.SetExitHandler(func() {
+	defer resetTUIState()
+	resetTUIState()
+	if err := tui.Run(rl); err != nil {
+		fmt.Fprintf(conn, "Session terminated: %v\r\n", err)
+	} else {
 		fmt.Fprintln(conn, "Shutting down session.")
-	})
-	defer tui.SetExitHandler(prevExit)
-	defer tui.ResetState()
-
-	tui.ResetState()
-	tui.Run(rl)
+	}
 }
 
 func formatConnAddr(conn net.Conn) string {

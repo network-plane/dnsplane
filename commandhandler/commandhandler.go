@@ -6,10 +6,11 @@ import (
 	"dnsresolver/dnsrecordcache"
 	"dnsresolver/dnsrecords"
 	"dnsresolver/dnsservers"
-	"dnsresolver/tui"
 	"fmt"
 	"strings"
 	"time"
+
+	tui "github.com/network-plane/planetui"
 )
 
 // Function variables for server control
@@ -32,40 +33,40 @@ func (c simpleCommand) Exec(args []string) { c.exec(args) }
 
 // RegisterCommands registers all DNS related contexts and commands with the TUI package.
 func RegisterCommands() {
-	tui.RegisterCommand("", simpleCommand{"stats", "- Display server statistics", handleStats})
+	tui.RegisterLegacyCommand("", simpleCommand{"stats", "- Display server statistics", handleStats})
 
 	tui.RegisterContext("record", "- Record Management")
-	tui.RegisterCommand("record", simpleCommand{"add", "- Add a new DNS record", recordAdd})
-	tui.RegisterCommand("record", simpleCommand{"remove", "- Remove a DNS record", recordRemove})
-	tui.RegisterCommand("record", simpleCommand{"update", "- Update a DNS record", recordUpdate})
-	tui.RegisterCommand("record", simpleCommand{"list", "- List all DNS records", recordList})
-	tui.RegisterCommand("record", simpleCommand{"clear", "- Clear all DNS records", recordClear})
-	tui.RegisterCommand("record", simpleCommand{"load", "- Load DNS records from a file", recordLoad})
-	tui.RegisterCommand("record", simpleCommand{"save", "- Save DNS records to a file", recordSave})
+	tui.RegisterLegacyCommand("record", simpleCommand{"add", "- Add a new DNS record", recordAdd})
+	tui.RegisterLegacyCommand("record", simpleCommand{"remove", "- Remove a DNS record", recordRemove})
+	tui.RegisterLegacyCommand("record", simpleCommand{"update", "- Update a DNS record", recordUpdate})
+	tui.RegisterLegacyCommand("record", simpleCommand{"list", "- List all DNS records", recordList})
+	tui.RegisterLegacyCommand("record", simpleCommand{"clear", "- Clear all DNS records", recordClear})
+	tui.RegisterLegacyCommand("record", simpleCommand{"load", "- Load DNS records from a file", recordLoad})
+	tui.RegisterLegacyCommand("record", simpleCommand{"save", "- Save DNS records to a file", recordSave})
 
 	tui.RegisterContext("cache", "- Cache Management")
-	tui.RegisterCommand("cache", simpleCommand{"list", "- List all cache entries", cacheList})
-	tui.RegisterCommand("cache", simpleCommand{"remove", "- Remove a cache entry", cacheRemove})
-	tui.RegisterCommand("cache", simpleCommand{"clear", "- Clear the cache", cacheClear})
-	tui.RegisterCommand("cache", simpleCommand{"load", "- Load cache records from a file", cacheLoad})
-	tui.RegisterCommand("cache", simpleCommand{"save", "- Save cache records to a file", cacheSave})
+	tui.RegisterLegacyCommand("cache", simpleCommand{"list", "- List all cache entries", cacheList})
+	tui.RegisterLegacyCommand("cache", simpleCommand{"remove", "- Remove a cache entry", cacheRemove})
+	tui.RegisterLegacyCommand("cache", simpleCommand{"clear", "- Clear the cache", cacheClear})
+	tui.RegisterLegacyCommand("cache", simpleCommand{"load", "- Load cache records from a file", cacheLoad})
+	tui.RegisterLegacyCommand("cache", simpleCommand{"save", "- Save cache records to a file", cacheSave})
 
 	tui.RegisterContext("dns", "- DNS Server Management")
-	tui.RegisterCommand("dns", simpleCommand{"add", "- Add a new DNS server", dnsAdd})
-	tui.RegisterCommand("dns", simpleCommand{"remove", "- Remove a DNS server", dnsRemove})
-	tui.RegisterCommand("dns", simpleCommand{"update", "- Update a DNS server", dnsUpdate})
-	tui.RegisterCommand("dns", simpleCommand{"list", "- List all DNS servers", dnsList})
-	tui.RegisterCommand("dns", simpleCommand{"clear", "- Clear all DNS servers", dnsClear})
-	tui.RegisterCommand("dns", simpleCommand{"load", "- Load DNS servers from a file", dnsLoad})
-	tui.RegisterCommand("dns", simpleCommand{"save", "- Save DNS servers to a file", dnsSave})
+	tui.RegisterLegacyCommand("dns", simpleCommand{"add", "- Add a new DNS server", dnsAdd})
+	tui.RegisterLegacyCommand("dns", simpleCommand{"remove", "- Remove a DNS server", dnsRemove})
+	tui.RegisterLegacyCommand("dns", simpleCommand{"update", "- Update a DNS server", dnsUpdate})
+	tui.RegisterLegacyCommand("dns", simpleCommand{"list", "- List all DNS servers", dnsList})
+	tui.RegisterLegacyCommand("dns", simpleCommand{"clear", "- Clear all DNS servers", dnsClear})
+	tui.RegisterLegacyCommand("dns", simpleCommand{"load", "- Load DNS servers from a file", dnsLoad})
+	tui.RegisterLegacyCommand("dns", simpleCommand{"save", "- Save DNS servers to a file", dnsSave})
 
 	tui.RegisterContext("server", "- Server Management")
-	tui.RegisterCommand("server", simpleCommand{"start", "- Start server components", handleServerStart})
-	tui.RegisterCommand("server", simpleCommand{"stop", "- Stop server components", handleServerStop})
-	tui.RegisterCommand("server", simpleCommand{"status", "- Show server component status", handleServerStatus})
-	tui.RegisterCommand("server", simpleCommand{"configure", "- Set or list server configuration", handleServerConfigure})
-	tui.RegisterCommand("server", simpleCommand{"load", "- Load server settings from a file", handleServerLoad})
-	tui.RegisterCommand("server", simpleCommand{"save", "- Save server settings to a file", handleServerSave})
+	tui.RegisterLegacyCommand("server", simpleCommand{"start", "- Start server components", handleServerStart})
+	tui.RegisterLegacyCommand("server", simpleCommand{"stop", "- Stop server components", handleServerStop})
+	tui.RegisterLegacyCommand("server", simpleCommand{"status", "- Show server component status", handleServerStatus})
+	tui.RegisterLegacyCommand("server", simpleCommand{"configure", "- Set or list server configuration", handleServerConfigure})
+	tui.RegisterLegacyCommand("server", simpleCommand{"load", "- Load server settings from a file", handleServerLoad})
+	tui.RegisterLegacyCommand("server", simpleCommand{"save", "- Save server settings to a file", handleServerSave})
 }
 
 // Record commands
