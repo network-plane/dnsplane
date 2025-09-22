@@ -210,16 +210,34 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) ([]DNSRecord, []Messag
 		return dnsRecords, usageRemove(), ErrHelpRequested
 	}
 
-	if len(fullCommand) < 2 || len(fullCommand) > 3 {
-		msgs := append([]Message{{Level: LevelError, Text: "invalid record format. Please use: remove <Name> [Type] <Value>"}}, usageRemove()...)
+	if len(fullCommand) == 0 {
+		msgs := append([]Message{{Level: LevelError, Text: "remove requires at least a record name."}}, usageRemove()...)
 		return dnsRecords, msgs, ErrInvalidArgs
 	}
 
 	name := strings.TrimSpace(fullCommand[0])
 	recordType := ""
 	value := ""
+	existingIndex := -1
 
 	switch len(fullCommand) {
+	case 1:
+		if name == "" {
+			msgs := append([]Message{{Level: LevelError, Text: "record name cannot be empty."}}, usageRemove()...)
+			return dnsRecords, msgs, ErrInvalidArgs
+		}
+		targetName := normalizeRecordNameKey(name)
+		for i, record := range dnsRecords {
+			if normalizeRecordNameKey(record.Name) == targetName {
+				if existingIndex != -1 {
+					msgs := append([]Message{{Level: LevelWarn, Text: fmt.Sprintf("Multiple records match %s. Please include type and value.", name)}}, usageRemove()...)
+					return dnsRecords, msgs, ErrInvalidArgs
+				}
+				existingIndex = i
+				recordType = record.Type
+				value = record.Value
+			}
+		}
 	case 2:
 		var detectedType string
 		name, value, detectedType = validateIPAndDomain(fullCommand[0], fullCommand[1])
@@ -231,6 +249,9 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) ([]DNSRecord, []Messag
 	case 3:
 		recordType = fullCommand[1]
 		value = fullCommand[2]
+	default:
+		msgs := append([]Message{{Level: LevelError, Text: "invalid record format. Please use: remove <Name> [Type] <Value>"}}, usageRemove()...)
+		return dnsRecords, msgs, ErrInvalidArgs
 	}
 
 	if name == "" || recordType == "" || value == "" {
@@ -242,13 +263,14 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) ([]DNSRecord, []Messag
 	targetName := normalizeRecordNameKey(name)
 	targetValue := normalizeRecordValueKey(normType, value)
 
-	existingIndex := -1
-	for i, record := range dnsRecords {
-		if normalizeRecordNameKey(record.Name) == targetName &&
-			normalizeRecordType(record.Type) == normType &&
-			normalizeRecordValueKey(record.Type, record.Value) == targetValue {
-			existingIndex = i
-			break
+	if existingIndex == -1 {
+		for i, record := range dnsRecords {
+			if normalizeRecordNameKey(record.Name) == targetName &&
+				normalizeRecordType(record.Type) == normType &&
+				normalizeRecordValueKey(record.Type, record.Value) == targetValue {
+				existingIndex = i
+				break
+			}
 		}
 	}
 
@@ -270,7 +292,7 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) ([]DNSRecord, []Messag
 
 // Helper function to check if the help command is invoked.
 func checkHelpCommand(fullCommand []string) bool {
-	return len(fullCommand) == 0 || cliutil.IsHelpRequest(fullCommand)
+	return cliutil.IsHelpRequest(fullCommand)
 }
 
 func usageAdd() []Message {

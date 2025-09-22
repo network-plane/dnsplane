@@ -6,10 +6,12 @@ require (
 	github.com/chzyer/readline v1.5.1
 	github.com/gin-gonic/gin v1.11.0
 	github.com/miekg/dns v1.1.68
-	github.com/network-plane/planetui v1.0.1
+	github.com/network-plane/planetui v1.0.2
 	github.com/spf13/cobra v1.10.1
 	golang.org/x/term v0.35.0
 )
+
+// replace github.com/network-plane/planetui v1.0.1 => ./planetui
 
 require (
 	github.com/bytedance/gopkg v0.1.3 // indirect

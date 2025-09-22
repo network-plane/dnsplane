@@ -751,7 +751,8 @@ func connectToInteractiveEndpoint(target string) {
 		}()
 	}
 
-	done := make(chan struct{})
+	readDone := make(chan struct{})
+	writeDone := make(chan struct{})
 
 	go func() {
 		_, _ = io.Copy(conn, os.Stdin)
@@ -760,16 +761,21 @@ func connectToInteractiveEndpoint(target string) {
 		} else {
 			_ = conn.Close()
 		}
-		done <- struct{}{}
+		close(writeDone)
 	}()
 
 	go func() {
 		_, _ = io.Copy(os.Stdout, conn)
-		done <- struct{}{}
+		close(readDone)
 	}()
 
-	<-done
-	<-done
+	select {
+	case <-readDone:
+		_ = conn.Close()
+	case <-writeDone:
+	}
+	<-readDone
+	<-writeDone
 
 	if oldState != nil && !restored {
 		restored = true
