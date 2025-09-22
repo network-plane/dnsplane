@@ -25,10 +25,14 @@ type context struct {
 }
 
 var (
-	contexts     = map[string]*context{"": {name: "", commands: map[string]Command{}}}
-	currentCtx   = ""
-	basePrompt   = "> "
-	helpHeader   = "Available commands:"
+	contexts    = map[string]*context{"": {name: "", commands: map[string]Command{}}}
+	currentCtx  = ""
+	basePrompt  = "> "
+	helpHeader  = "Available commands:"
+	exitHandler = func() {
+		fmt.Println("Shutting down.")
+		os.Exit(0)
+	}
 	excludedCmds = map[string]bool{"q": true, "quit": true, "exit": true, "h": true, "help": true, "ls": true, "l": true, "/": true}
 )
 
@@ -83,8 +87,10 @@ func Run(rl *readline.Instance) {
 			continue
 		}
 		if isExitCommand(args[0]) {
-			fmt.Println("Shutting down.")
-			os.Exit(0)
+			if exitHandler != nil {
+				exitHandler()
+			}
+			return
 		}
 		if !excludedCmds[args[0]] {
 			if err := rl.SaveHistory(line); err != nil {
@@ -154,6 +160,18 @@ func updatePrompt(rl *readline.Instance) {
 	} else {
 		rl.SetPrompt(fmt.Sprintf("%s%s> ", basePrompt, currentCtx))
 	}
+}
+
+// ResetState returns the TUI to the root context, clearing any session-specific state.
+func ResetState() {
+	currentCtx = ""
+}
+
+// SetExitHandler overrides the behaviour when an exit command is issued, returning the previous handler.
+func SetExitHandler(handler func()) func() {
+	prev := exitHandler
+	exitHandler = handler
+	return prev
 }
 
 func setupAutocomplete(rl *readline.Instance) {
