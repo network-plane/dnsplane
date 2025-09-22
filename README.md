@@ -33,6 +33,7 @@ help, h, ?      - Show help
 ```bash
 ./dnsresolver
 ```
+The daemon keeps the resolver running, exposes the UNIX control socket at `/tmp/dnsresolver.socket`, and listens for remote TUI clients on TCP port `8053` by default.
 
 ### start in client mode (connects to the default unix socket unless overridden)
 ```bash
@@ -41,9 +42,20 @@ help, h, ?      - Show help
 ./dnsresolver --client /tmp/dnsresolver.sock
 ```
 
+### connect to a remote resolver over TCP (default port 8053)
+```bash
+./dnsresolver --client 192.168.178.40
+./dnsresolver --client 192.168.178.40:8053
+```
+
 ### change the server socket path
 ```bash
 ./dnsresolver --server-socket /tmp/custom.sock
+```
+
+### change the TCP TUI listener
+```bash
+./dnsresolver --server-tcp 0.0.0.0:9000
 ```
 
 ### Recording of clearing and adding dns records

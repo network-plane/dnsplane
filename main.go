@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
 	"syscall"
@@ -26,9 +28,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/miekg/dns"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
-const defaultUnixSocketPath = "/tmp/dnsresolver.socket"
+const (
+	defaultUnixSocketPath  = "/tmp/dnsresolver.socket"
+	defaultTCPTerminalAddr = ":8053"
+	defaultClientTCPPort   = "8053"
+)
 
 var (
 	rlconfig     readline.Config
@@ -38,6 +45,7 @@ var (
 	isServerUp   bool
 	appversion   = "0.1.17"
 	daemonMode   bool
+	tuiSessionMu sync.Mutex
 
 	rootCmd = &cobra.Command{
 		Use:           "dnsresolver",
@@ -67,6 +75,7 @@ func init() {
 	flags := rootCmd.PersistentFlags()
 	flags.String("port", "53", "Port for DNS server")
 	flags.String("server-socket", defaultUnixSocketPath, "Path to UNIX domain socket for the daemon listener")
+	flags.String("server-tcp", defaultTCPTerminalAddr, "TCP address for remote TUI clients")
 	flags.Bool("tui", false, "Run with interactive TUI")
 	flags.Bool("api", false, "Enable the REST API")
 	flags.String("apiport", "8080", "Port for the REST API")
@@ -80,19 +89,19 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	remaining := append([]string(nil), args...)
 
 	clientRequested := cmd.Flags().Changed("client")
-	clientSocket, _ := cmd.Flags().GetString("client")
+	clientTarget, _ := cmd.Flags().GetString("client")
 	if clientRequested {
-		if clientSocket == "" {
-			clientSocket = defaultUnixSocketPath
+		if clientTarget == "" {
+			clientTarget = defaultUnixSocketPath
 		}
 		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
-			clientSocket = remaining[0]
+			clientTarget = remaining[0]
 			remaining = remaining[1:]
 		}
 		if len(remaining) > 0 {
 			return fmt.Errorf("unexpected arguments: %v", remaining)
 		}
-		connectToUnixSocket(clientSocket)
+		connectToInteractiveEndpoint(clientTarget)
 		return nil
 	}
 
@@ -102,12 +111,16 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 	port, _ := cmd.Flags().GetString("port")
 	serverSocket, _ := cmd.Flags().GetString("server-socket")
+	serverTCP, _ := cmd.Flags().GetString("server-tcp")
 	tuiMode, _ := cmd.Flags().GetBool("tui")
 	apiMode, _ := cmd.Flags().GetBool("api")
 	apiport, _ := cmd.Flags().GetString("apiport")
 
 	dnsData := data.GetInstance()
 	dnsServerSettings := dnsData.GetResolverSettings()
+
+	commandhandler.RegisterCommands()
+	tui.SetPrompt("dnsresolver> ")
 
 	daemonMode = !tuiMode
 
@@ -162,9 +175,20 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 	if !tuiMode {
 		if serverSocket != "" {
-			setupUnixSocketListener(serverSocket)
-		} else {
-			select {}
+			go setupUnixSocketListener(serverSocket)
+		}
+		if serverTCP != "" {
+			go setupTCPTerminalListener(serverTCP)
+		}
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(sigCh)
+		fmt.Println("Press Ctrl+C to exit daemon mode.")
+		<-sigCh
+		fmt.Println("Shutting down.")
+		stopDNSServer()
+		if serverSocket != "" {
+			_ = syscall.Unlink(serverSocket)
 		}
 		return nil
 	}
@@ -177,8 +201,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	rl.CaptureExitSignal()
 	defer rl.Close()
 
-	commandhandler.RegisterCommands()
-	tui.SetPrompt("dnsresolver> ")
+	tui.ResetState()
 	tui.Run(rl)
 
 	return nil
@@ -508,13 +531,14 @@ func handleDNSServers(question dns.Question, dnsServers []string, fallbackServer
 }
 
 func setupUnixSocketListener(socketPath string) {
-	// Ensure there's no existing UNIX socket with the same name
+	if socketPath == "" {
+		return
+	}
 	err := syscall.Unlink(socketPath)
 	if err != nil && !os.IsNotExist(err) {
 		log.Fatal("Error removing existing UNIX socket:", err)
 	}
 
-	// Create the UNIX domain socket and listen for incoming connections
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
 		log.Fatal("Error setting up UNIX socket listener:", err)
@@ -524,71 +548,239 @@ func setupUnixSocketListener(socketPath string) {
 	log.Printf("Listening on UNIX socket at %s", socketPath)
 
 	for {
-		// Accept incoming connections
 		conn, err := listener.Accept()
 		if err != nil {
 			log.Printf("Error accepting connection: %v", err)
 			continue
 		}
 
-		fmt.Printf("Socket client connected: %s\n", formatUnixAddr(conn.RemoteAddr()))
-
-		// Handle each connection in a separate goroutine
-		go func(c net.Conn) {
-			defer c.Close() // Ensure the connection is closed after processing
-
-			buf := make([]byte, 1024) // Buffer for reading data from the connection
-			n, err := c.Read(buf)     // Read the incoming data
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					fmt.Printf("Socket client disconnected: %s\n", formatUnixAddr(c.RemoteAddr()))
-					return
-				}
-				log.Printf("Error reading from connection: %v", err)
-				return
-			}
-
-			command := string(buf[:n]) // Convert buffer to a string for command processing
-			log.Printf("Received command: %s", command)
-			fmt.Printf("Socket client disconnected: %s\n", formatUnixAddr(c.RemoteAddr()))
-		}(conn) // Start the goroutine with the current connection
+		go serveInteractiveSession(conn)
 	}
 }
 
-func formatUnixAddr(addr net.Addr) string {
-	if addr == nil {
-		return "unix-local"
+func setupTCPTerminalListener(address string) {
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		log.Fatal("Error setting up TCP listener:", err)
 	}
+	defer listener.Close()
+
+	log.Printf("Listening on TCP address %s for TUI clients", address)
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Printf("Error accepting TCP connection: %v", err)
+			continue
+		}
+
+		go serveInteractiveSession(conn)
+	}
+}
+
+func serveInteractiveSession(conn net.Conn) {
+	defer conn.Close()
+
+	addr := formatConnAddr(conn)
+	log.Printf("TUI client connected: %s", addr)
+	defer log.Printf("TUI client disconnected: %s", addr)
+
+	tuiSessionMu.Lock()
+	defer tuiSessionMu.Unlock()
+
+	readPipe, writePipe, err := os.Pipe()
+	if err != nil {
+		fmt.Fprintf(conn, "Error initialising session: %v\r\n", err)
+		return
+	}
+
+	oldStdout := os.Stdout
+	oldStderr := os.Stderr
+	os.Stdout = writePipe
+	os.Stderr = writePipe
+
+	copyDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&crlfWriter{w: conn}, readPipe)
+		close(copyDone)
+	}()
+
+	defer func() {
+		_ = writePipe.Close()
+		<-copyDone
+		_ = readPipe.Close()
+		os.Stdout = oldStdout
+		os.Stderr = oldStderr
+	}()
+
+	cfg := rlconfig
+	cfg.Stdin = conn
+	cfg.Stdout = conn
+	cfg.Stderr = conn
+	cfg.HistoryFile = ""
+
+	rl, err := readline.NewEx(&cfg)
+	if err != nil {
+		fmt.Fprintf(conn, "Error initialising session: %v\r\n", err)
+		return
+	}
+	defer rl.Close()
+	rl.CaptureExitSignal()
+
+	prevExit := tui.SetExitHandler(func() {
+		fmt.Fprintln(conn, "Shutting down session.")
+	})
+	defer tui.SetExitHandler(prevExit)
+	defer tui.ResetState()
+
+	tui.ResetState()
+	tui.Run(rl)
+}
+
+func formatConnAddr(conn net.Conn) string {
+	if conn == nil {
+		return "unknown"
+	}
+	addr := conn.RemoteAddr()
+	if addr == nil {
+		return "unknown"
+	}
+	s := addr.String()
 	if addr.Network() == "unix" {
-		if addr.String() == "" {
+		if s == "" || s == "@" {
 			return "unix-local"
 		}
 	}
-	return addr.String()
+	return s
 }
 
-func connectToUnixSocket(socketPath string) {
-	conn, err := net.Dial("unix", socketPath) // Connect to the UNIX socket
+type crlfWriter struct {
+	w    io.Writer
+	last byte
+}
+
+func (cw *crlfWriter) Write(p []byte) (int, error) {
+	if cw == nil || cw.w == nil {
+		return len(p), nil
+	}
+	buf := make([]byte, 0, len(p)+bytes.Count(p, []byte{'\n'}))
+	prev := cw.last
+	for _, b := range p {
+		if b == '\n' {
+			if prev == '\r' {
+				buf = append(buf, '\n')
+			} else {
+				buf = append(buf, '\r', '\n')
+			}
+		} else {
+			buf = append(buf, b)
+		}
+		prev = b
+	}
+	_, err := cw.w.Write(buf)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error connecting to UNIX socket: %v\n", err)
+		return 0, err
+	}
+	cw.last = prev
+	return len(p), nil
+}
+
+func connectToInteractiveEndpoint(target string) {
+	network, address := resolveInteractiveTarget(target)
+	conn, err := net.Dial(network, address)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error connecting to %s: %v\n", address, err)
 		return
 	}
-	defer conn.Close() // Ensure connection closure
+	defer conn.Close()
 
-	fmt.Println("Connected to UNIX socket:", socketPath)
+	fmt.Printf("Connected to %s %s\n", network, address)
 
-	// Interactive mode setup
-	rl, err := readline.NewEx(&rlconfig)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "readline: %v\n", err)
-		return
+	stdinFD := int(os.Stdin.Fd())
+	var (
+		oldState *term.State
+		restored bool
+	)
+	if term.IsTerminal(stdinFD) {
+		if st, err := term.MakeRaw(stdinFD); err == nil {
+			oldState = st
+			defer func() {
+				if !restored {
+					term.Restore(stdinFD, oldState)
+				}
+			}()
+		}
 	}
-	rl.CaptureExitSignal()
-	defer rl.Close() // Close readline when done
 
-	commandhandler.RegisterCommands()
-	tui.SetPrompt("dnsresolver> ")
-	tui.Run(rl)
+	var sigCh chan os.Signal
+	if oldState != nil {
+		sigCh = make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		defer func() {
+			signal.Stop(sigCh)
+			close(sigCh)
+		}()
+		go func() {
+			<-sigCh
+			restored = true
+			_ = term.Restore(stdinFD, oldState)
+			os.Exit(0)
+		}()
+	}
+
+	done := make(chan struct{})
+
+	go func() {
+		_, _ = io.Copy(conn, os.Stdin)
+		if cw, ok := conn.(interface{ CloseWrite() error }); ok {
+			_ = cw.CloseWrite()
+		} else {
+			_ = conn.Close()
+		}
+		done <- struct{}{}
+	}()
+
+	go func() {
+		_, _ = io.Copy(os.Stdout, conn)
+		done <- struct{}{}
+	}()
+
+	<-done
+	<-done
+
+	if oldState != nil && !restored {
+		restored = true
+		_ = term.Restore(stdinFD, oldState)
+	}
+
+	fmt.Println("Connection closed.")
+}
+
+func resolveInteractiveTarget(target string) (network, address string) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return "unix", defaultUnixSocketPath
+	}
+	if strings.ContainsAny(target, "/\\") || strings.HasPrefix(target, "@") {
+		return "unix", target
+	}
+	if strings.HasPrefix(target, "tcp://") {
+		target = strings.TrimPrefix(target, "tcp://")
+	}
+	if strings.HasPrefix(target, "unix://") {
+		return "unix", strings.TrimPrefix(target, "unix://")
+	}
+	if host, port, err := net.SplitHostPort(target); err == nil {
+		if host == "" {
+			host = "127.0.0.1"
+		}
+		return "tcp", net.JoinHostPort(host, port)
+	}
+	host := target
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	return "tcp", net.JoinHostPort(host, defaultClientTCPPort)
 }
 
 // api
