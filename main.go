@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -47,6 +48,17 @@ var (
 	appversion   = "0.1.17"
 	daemonMode   bool
 	tuiSessionMu sync.Mutex
+
+	listenerInfoMu        sync.RWMutex
+	clientSocketPath      string
+	clientSocketEnabled   bool
+	clientTCPAddress      string
+	clientTCPEnabled      bool
+	currentDNSPort        string
+	configuredAPIPort     string
+	configuredAPIEndpoint string
+	apiConfigured         bool
+	apiServerRunning      atomic.Bool
 
 	rootCmd = &cobra.Command{
 		Use:           "dnsresolver",
@@ -92,6 +104,20 @@ func init() {
 	}
 }
 
+func normalizeTCPAddress(addr string) string {
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return ""
+	}
+	if strings.HasPrefix(addr, ":") {
+		return "0.0.0.0" + addr
+	}
+	if !strings.Contains(addr, ":") {
+		return "0.0.0.0:" + addr
+	}
+	return addr
+}
+
 func runRoot(cmd *cobra.Command, args []string) error {
 	remaining := append([]string(nil), args...)
 
@@ -123,16 +149,40 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	apiMode, _ := cmd.Flags().GetBool("api")
 	apiport, _ := cmd.Flags().GetString("apiport")
 
+	listenerInfoMu.Lock()
+	clientSocketPath = strings.TrimSpace(serverSocket)
+	clientSocketEnabled = clientSocketPath != "" && !tuiMode
+	clientTCPAddress = normalizeTCPAddress(serverTCP)
+	clientTCPEnabled = clientTCPAddress != "" && !tuiMode
+	currentDNSPort = strings.TrimSpace(port)
+	configuredAPIPort = strings.TrimSpace(apiport)
+	configuredAPIEndpoint = ""
+	if configuredAPIPort != "" {
+		configuredAPIEndpoint = normalizeTCPAddress(":" + configuredAPIPort)
+	}
+	apiConfigured = apiMode
+	listenerInfoMu.Unlock()
+	if !apiMode {
+		apiServerRunning.Store(false)
+	}
+
 	dnsData := data.GetInstance()
 	dnsServerSettings := dnsData.GetResolverSettings()
 
 	commandhandler.RegisterCommands()
+	commandhandler.RegisterServerControlHooks(
+		stopDNSServer,
+		restartDNSServer,
+		getServerStatus,
+		startAPIAsync,
+		currentServerListeners,
+	)
 	tui.SetPrompt("dnsresolver> ")
 
 	daemonMode = !tuiMode
 
 	if apiMode {
-		go startGinAPI(apiport)
+		startAPIAsync(apiport)
 	}
 
 	dns.HandleFunc(".", handleRequest)
@@ -234,7 +284,60 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func currentServerListeners() commandhandler.ServerListenerInfo {
+	listenerInfoMu.RLock()
+	socket := clientSocketPath
+	socketEnabled := clientSocketEnabled
+	tcp := clientTCPAddress
+	tcpEnabled := clientTCPEnabled
+	apiEndpoint := configuredAPIEndpoint
+	apiEnabled := apiConfigured
+	dnsPort := currentDNSPort
+	listenerInfoMu.RUnlock()
+
+	settings := data.GetInstance().GetResolverSettings()
+	if dnsPort == "" {
+		dnsPort = strings.TrimSpace(settings.DNSPort)
+	}
+
+	info := commandhandler.ServerListenerInfo{
+		DNSProtocol:         "udp",
+		DNSListeners:        []string{normalizeTCPAddress(":" + dnsPort)},
+		ClientSocket:        socket,
+		ClientSocketEnabled: socketEnabled,
+		ClientTCPEndpoint:   tcp,
+		ClientTCPEnabled:    tcpEnabled,
+		APIEndpoint:         apiEndpoint,
+		APIEnabled:          apiEnabled,
+		APIRunning:          apiServerRunning.Load(),
+	}
+	if info.APIEndpoint == "" && settings.RESTPort != "" {
+		info.APIEndpoint = normalizeTCPAddress(":" + strings.TrimSpace(settings.RESTPort))
+	}
+	return info
+}
+
+func startAPIAsync(port string) {
+	if port == "" {
+		port = data.GetInstance().GetResolverSettings().RESTPort
+	}
+	trimmed := strings.TrimSpace(port)
+	listenerInfoMu.Lock()
+	configuredAPIPort = trimmed
+	configuredAPIEndpoint = normalizeTCPAddress(":" + trimmed)
+	apiConfigured = true
+	listenerInfoMu.Unlock()
+	if apiServerRunning.Load() {
+		return
+	}
+	apiServerRunning.Store(true)
+	go startGinAPI(trimmed)
+}
+
 func startDNSServer(port string) (<-chan struct{}, <-chan error) {
+	listenerInfoMu.Lock()
+	currentDNSPort = strings.TrimSpace(port)
+	listenerInfoMu.Unlock()
 	dnsData := data.GetInstance()
 
 	server := &dns.Server{
@@ -642,6 +745,10 @@ func serveInteractiveSession(conn net.Conn) {
 	cfg.Stdout = conn
 	cfg.Stderr = conn
 	cfg.HistoryFile = ""
+	cfg.FuncMakeRaw = func() error { return nil }
+	cfg.FuncExitRaw = func() error { return nil }
+	cfg.FuncIsTerminal = func() bool { return true }
+	cfg.ForceUseInteractive = true
 
 	rl, err := readline.NewEx(&cfg)
 	if err != nil {
@@ -649,8 +756,6 @@ func serveInteractiveSession(conn net.Conn) {
 		return
 	}
 	defer rl.Close()
-	rl.CaptureExitSignal()
-
 	defer resetTUIState()
 	resetTUIState()
 	if err := tui.Run(rl); err != nil {
@@ -868,6 +973,7 @@ func extractRecordMessages(msgs []dnsrecords.Message) []string {
 }
 
 func startGinAPI(apiport string) {
+	defer apiServerRunning.Store(false)
 	// Create a Gin router
 	r := gin.Default()
 
