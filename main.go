@@ -759,9 +759,12 @@ func serveInteractiveSession(conn net.Conn) {
 	defer resetTUIState()
 	resetTUIState()
 	if err := tui.Run(rl); err != nil {
-		fmt.Fprintf(conn, "Session terminated: %v\r\n", err)
+		fmt.Fprintf(conn, "\r\nSession terminated: %v\r\n", err)
 	} else {
-		fmt.Fprintln(conn, "Shutting down session.")
+		fmt.Fprint(conn, "\rShutting down session.\r\n")
+	}
+	if cw, ok := conn.(interface{ CloseWrite() error }); ok {
+		_ = cw.CloseWrite()
 	}
 }
 
@@ -874,13 +877,21 @@ func connectToInteractiveEndpoint(target string) {
 		close(readDone)
 	}()
 
+	readClosed := false
+	writeClosed := false
 	select {
 	case <-readDone:
+		readClosed = true
 		_ = conn.Close()
 	case <-writeDone:
+		writeClosed = true
 	}
-	<-readDone
-	<-writeDone
+	if !readClosed {
+		<-readDone
+	}
+	if !writeClosed {
+		_ = conn.Close()
+	}
 
 	if oldState != nil && !restored {
 		restored = true
@@ -888,6 +899,7 @@ func connectToInteractiveEndpoint(target string) {
 	}
 
 	fmt.Println("Connection closed.")
+	return
 }
 
 func resolveInteractiveTarget(target string) (network, address string) {
