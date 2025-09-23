@@ -20,11 +20,34 @@ import (
 
 // Function variables for server control
 var (
-	stopDNSServerFunc    func()
-	restartDNSServerFunc func(string)
-	getServerStatusFunc  func() bool
-	startGinAPIFunc      func(string)
+	stopDNSServerFunc      func()
+	restartDNSServerFunc   func(string)
+	getServerStatusFunc    func() bool
+	startGinAPIFunc        func(string)
+	getServerListenersFunc func() ServerListenerInfo
 )
+
+// ServerListenerInfo describes runtime listener configuration for status output.
+type ServerListenerInfo struct {
+	DNSProtocol         string
+	DNSListeners        []string
+	APIEndpoint         string
+	APIEnabled          bool
+	APIRunning          bool
+	ClientSocket        string
+	ClientSocketEnabled bool
+	ClientTCPEndpoint   string
+	ClientTCPEnabled    bool
+}
+
+// RegisterServerControlHooks wires runtime control functions for server commands.
+func RegisterServerControlHooks(stop func(), restart func(string), status func() bool, startAPI func(string), listeners func() ServerListenerInfo) {
+	stopDNSServerFunc = stop
+	restartDNSServerFunc = restart
+	getServerStatusFunc = status
+	startGinAPIFunc = startAPI
+	getServerListenersFunc = listeners
+}
 
 var captureMu sync.Mutex
 
@@ -628,6 +651,7 @@ func renderRecordTable(out tui.OutputChannel, records []dnsrecords.DNSRecord) {
 		rows = append(rows, []string{record.Name, record.Type, record.Value, fmt.Sprintf("%d", record.TTL)})
 	}
 	out.WriteTable([]string{"Name", "Type", "Value", "TTL"}, rows)
+	tui.EnsureLineBreak(out)
 }
 
 func renderRecordDetails(out tui.OutputChannel, records []dnsrecords.DNSRecord) {
@@ -672,6 +696,7 @@ func renderCacheTable(out tui.OutputChannel, cache []dnsrecordcache.CacheRecord)
 		rows = append(rows, []string{record.DNSRecord.Name, record.DNSRecord.Type, record.DNSRecord.Value, fmt.Sprintf("%d", record.DNSRecord.TTL), expires})
 	}
 	out.WriteTable([]string{"Name", "Type", "Value", "TTL", "Expires"}, rows)
+	tui.EnsureLineBreak(out)
 }
 
 func renderDNSServerTable(out tui.OutputChannel, servers []dnsservers.DNSServer) {
@@ -689,12 +714,11 @@ func renderDNSServerTable(out tui.OutputChannel, servers []dnsservers.DNSServer)
 		})
 	}
 	out.WriteTable([]string{"Address", "Port", "Active", "Local", "AdBlocker"}, rows)
+	tui.EnsureLineBreak(out)
 }
 
 // RegisterCommands registers all DNS related contexts and commands with the TUI package.
 func RegisterCommands() {
-	tui.UseMiddleware(tui.TimingMiddleware)
-
 	registerContexts()
 
 	commands := []tui.CommandFactory{
@@ -920,7 +944,7 @@ func RegisterCommands() {
 			Usage:       "server start <dns|api>",
 			Category:    "Server",
 			Tags:        []string{"server", "start"},
-			Args:        []tui.ArgSpec{{Name: "component", Description: "Component to start", Required: true}},
+			Args:        []tui.ArgSpec{{Name: "component", Description: "Component to start", Required: false}},
 		}, legacyRunner(handleServerStart)),
 		newLegacyFactory(tui.CommandSpec{
 			Context:     "server",
@@ -930,17 +954,17 @@ func RegisterCommands() {
 			Usage:       "server stop <dns|api>",
 			Category:    "Server",
 			Tags:        []string{"server", "stop"},
-			Args:        []tui.ArgSpec{{Name: "component", Description: "Component to stop", Required: true}},
+			Args:        []tui.ArgSpec{{Name: "component", Description: "Component to stop", Required: false}},
 		}, legacyRunner(handleServerStop)),
 		newLegacyFactory(tui.CommandSpec{
 			Context:     "server",
 			Name:        "status",
 			Summary:     "Show server status",
-			Description: "Displays status of DNS or API server components.",
-			Usage:       "server status <dns|api>",
+			Description: "Displays listener details for DNS, API, and CLI clients.",
+			Usage:       "server status [dns|api|client]",
 			Category:    "Server",
 			Tags:        []string{"server", "status"},
-			Args:        []tui.ArgSpec{{Name: "component", Description: "Component to inspect", Required: true}},
+			Args:        []tui.ArgSpec{{Name: "component", Description: "Component to inspect", Required: false}},
 		}, legacyRunner(handleServerStatus)),
 		newLegacyFactory(tui.CommandSpec{
 			Context:     "server",
@@ -1015,11 +1039,12 @@ func handleServerSave(args []string) {
 func handleServerStart(args []string) {
 	if cliutil.IsHelpRequest(args) {
 		printServerStartUsage()
+		printServerComponentHint()
 		return
 	}
 	if len(args) == 0 {
-		fmt.Println("Server component to start required.")
 		printServerStartUsage()
+		printServerComponentHint()
 		return
 	}
 	dnsData := data.GetInstance()
@@ -1044,17 +1069,19 @@ func handleServerStart(args []string) {
 	} else {
 		fmt.Printf("Unknown component to start: %s\n", args[0])
 		printServerStartUsage()
+		printServerComponentHint()
 	}
 }
 
 func handleServerStop(args []string) {
 	if cliutil.IsHelpRequest(args) {
 		printServerStopUsage()
+		printServerComponentHint()
 		return
 	}
 	if len(args) == 0 {
-		fmt.Println("Server component to stop required.")
 		printServerStopUsage()
+		printServerComponentHint()
 		return
 	}
 	stopCommands := map[string]func(){
@@ -1074,6 +1101,7 @@ func handleServerStop(args []string) {
 	} else {
 		fmt.Printf("Unknown component to stop: %s\n", args[0])
 		printServerStopUsage()
+		printServerComponentHint()
 	}
 }
 
@@ -1082,28 +1110,103 @@ func handleServerStatus(args []string) {
 		printServerStatusUsage()
 		return
 	}
-	if len(args) == 0 {
-		fmt.Println("Server component required.")
+	if len(args) > 1 {
+		fmt.Println("server status accepts at most one argument.")
 		printServerStatusUsage()
 		return
 	}
-	statusCommands := map[string]func(){
-		"dns": func() {
-			status := "stopped"
-			if getServerStatusFunc != nil && getServerStatusFunc() {
-				status = "running"
-			}
-			fmt.Printf("DNS Server is %s.\n", status)
-		},
-		"api": func() {
-			fmt.Println("API server status not implemented yet.")
-		},
+	component := "all"
+	var original string
+	if len(args) == 1 {
+		original = strings.TrimSpace(args[0])
+		if original != "" {
+			component = strings.ToLower(original)
+		}
 	}
-	component := strings.ToLower(args[0])
-	if cmd, ok := statusCommands[component]; ok {
-		cmd()
-	} else {
-		fmt.Printf("Unknown component: %s\n", args[0])
+
+	info := ServerListenerInfo{DNSProtocol: "udp"}
+	if getServerListenersFunc != nil {
+		info = getServerListenersFunc()
+		if info.DNSProtocol == "" {
+			info.DNSProtocol = "udp"
+		}
+	}
+
+	settings := data.GetInstance().GetResolverSettings()
+	if len(info.DNSListeners) == 0 {
+		info.DNSListeners = []string{fmt.Sprintf("0.0.0.0:%s", settings.DNSPort)}
+	}
+	if info.APIEndpoint == "" {
+		info.APIEndpoint = fmt.Sprintf("0.0.0.0:%s", settings.RESTPort)
+	}
+	info.APIEnabled = info.APIEnabled || info.APIRunning
+
+	dnsStatus := "stopped"
+	if getServerStatusFunc != nil && getServerStatusFunc() {
+		dnsStatus = "running"
+	}
+
+	formatEndpoint := func(endpoint string, enabled bool) string {
+		value := strings.TrimSpace(endpoint)
+		if value == "" {
+			value = "not configured"
+		}
+		if !enabled {
+			if value == "not configured" {
+				return "disabled"
+			}
+			return fmt.Sprintf("%s (disabled)", value)
+		}
+		return value
+	}
+
+	printDNS := func() {
+		fmt.Println("DNS Listener:")
+		fmt.Printf("  Protocol: %s\n", strings.ToUpper(info.DNSProtocol))
+		fmt.Printf("  Address:  %s\n", strings.Join(info.DNSListeners, ", "))
+		fmt.Printf("  Status:   %s\n", dnsStatus)
+	}
+
+	printAPI := func() {
+		fmt.Println("API Listener:")
+		fmt.Printf("  Endpoint: %s\n", formatEndpoint(info.APIEndpoint, info.APIEnabled || info.APIRunning))
+		state := "disabled"
+		if info.APIEnabled || info.APIRunning {
+			if info.APIRunning {
+				state = "running"
+			} else {
+				state = "stopped"
+			}
+		}
+		fmt.Printf("  Status:   %s\n", state)
+	}
+
+	printClients := func() {
+		fmt.Println("Client Access:")
+		fmt.Printf("  UNIX Socket: %s\n", formatEndpoint(info.ClientSocket, info.ClientSocketEnabled))
+		fmt.Printf("  TCP:         %s\n", formatEndpoint(info.ClientTCPEndpoint, info.ClientTCPEnabled))
+	}
+
+	switch component {
+	case "", "all", "dns":
+		printDNS()
+		if component == "dns" {
+			return
+		}
+		fmt.Println()
+		printAPI()
+		fmt.Println()
+		printClients()
+	case "api":
+		printAPI()
+	case "client", "clients":
+		printClients()
+	default:
+		display := original
+		if display == "" {
+			display = component
+		}
+		fmt.Printf("Unknown component: %s\n", display)
 		printServerStatusUsage()
 	}
 }
@@ -1217,9 +1320,13 @@ func printServerStopUsage() {
 }
 
 func printServerStatusUsage() {
-	fmt.Println("Usage: server status <dns|api>")
-	fmt.Println("Description: Show the status of the specified server component.")
+	fmt.Println("Usage: server status [dns|api|client]")
+	fmt.Println("Description: Show listener details for DNS, API, and CLI clients. Defaults to all when omitted.")
 	printHelpAliasesHint()
+}
+
+func printServerComponentHint() {
+	fmt.Println("Available components: dns, api")
 }
 
 func printServerConfigureUsage() {
