@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"dnsresolver/cliutil"
-	"dnsresolver/converters"
-	"dnsresolver/ipvalidator"
+	"dnsplane/cliutil"
+	"dnsplane/converters"
+	"dnsplane/ipvalidator"
 
 	"github.com/miekg/dns"
 )

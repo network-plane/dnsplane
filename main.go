@@ -15,12 +15,12 @@ import (
 	"syscall"
 	"time"
 
-	"dnsresolver/commandhandler"
-	"dnsresolver/converters"
-	"dnsresolver/data"
-	"dnsresolver/dnsrecordcache"
-	"dnsresolver/dnsrecords"
-	"dnsresolver/dnsservers"
+	"dnsplane/commandhandler"
+	"dnsplane/converters"
+	"dnsplane/data"
+	"dnsplane/dnsrecordcache"
+	"dnsplane/dnsrecords"
+	"dnsplane/dnsservers"
 
 	// "github.com/bettercap/readline"
 	// "github.com/reeflective/readline"
@@ -34,7 +34,7 @@ import (
 )
 
 const (
-	defaultUnixSocketPath  = "/tmp/dnsresolver.socket"
+	defaultUnixSocketPath  = "/tmp/dnsplane.socket"
 	defaultTCPTerminalAddr = ":8053"
 	defaultClientTCPPort   = "8053"
 )
@@ -61,7 +61,7 @@ var (
 	apiServerRunning      atomic.Bool
 
 	rootCmd = &cobra.Command{
-		Use:           "dnsresolver",
+		Use:           "dnsplane",
 		Short:         "DNS Server with optional CLI mode",
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -175,7 +175,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		startAPIAsync,
 		currentServerListeners,
 	)
-	tui.SetPrompt("dnsresolver> ")
+	tui.SetPrompt("dnsplane> ")
 
 	daemonMode = true
 
@@ -221,7 +221,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 	rlconfig = readline.Config{
 		Prompt:                 "> ",
-		HistoryFile:            "/tmp/dnsresolver.history",
+		HistoryFile:            "/tmp/dnsplane.history",
 		DisableAutoSaveHistory: true,
 		InterruptPrompt:        "^C",
 		EOFPrompt:              "exit",

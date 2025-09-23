@@ -1,12 +1,13 @@
+// Package commandhandler implements the command handling logic for DNSPlane TUI.
 package commandhandler
 
 import (
 	"bytes"
-	"dnsresolver/cliutil"
-	"dnsresolver/data"
-	"dnsresolver/dnsrecordcache"
-	"dnsresolver/dnsrecords"
-	"dnsresolver/dnsservers"
+	"dnsplane/cliutil"
+	"dnsplane/data"
+	"dnsplane/dnsrecordcache"
+	"dnsplane/dnsrecords"
+	"dnsplane/dnsservers"
 	"errors"
 	"fmt"
 	"io"
