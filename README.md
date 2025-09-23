@@ -1,61 +1,41 @@
-# dnsresolver
+# dnsplane
 
 A non standard DNS Server with multiple management interfaces. Its main function is it will do the same dns request to multiple DNS servers, if any of the servers replies with an authoritative reply it chooses that, otherwise it provides the reply from the fallback dns server. This will help in case for example you have a local dns server and you connect to work over a VPN and use that DNS server at the same time.
 
 ## Diagram
-![image](https://github.com/earentir/dnsresolver/assets/97396839/79acfa3e-8b83-48ec-92be-ed99085b2cc5)
+![image](https://github.com/earentir/dnsplane/assets/97396839/79acfa3e-8b83-48ec-92be-ed99085b2cc5)
 
 
 
 ## Usage/Examples
 
-### start with interactive CLI
-```bash
-./dnsresolver --tui
-```
-It will look like this:
-```bash
-2024/05/06 02:15:15 Starting DNS server on :53
-> ?
-Available commands:
-stats           - Show server statistics
-record          - Record Management
-cache           - Cache Management
-dns             - DNS Server Management
-server          - Server Management
-/               - Go up one level
-exit, quit, q   - Shutdown the server
-help, h, ?      - Show help
->
-```
-
 ### start as daemon (default)
 ```bash
-./dnsresolver
+./dnsplane
 ```
-The daemon keeps the resolver running, exposes the UNIX control socket at `/tmp/dnsresolver.socket`, and listens for remote TUI clients on TCP port `8053` by default.
+The daemon keeps the resolver running, exposes the UNIX control socket at `/tmp/dnsplane.socket`, and listens for remote TUI clients on TCP port `8053` by default.
 
 ### start in client mode (connects to the default unix socket unless overridden)
 ```bash
-./dnsresolver --client
+./dnsplane --client
 # or specify a custom socket path
-./dnsresolver --client /tmp/dnsresolver.sock
+./dnsplane --client /tmp/dnsplane.sock
 ```
 
 ### connect to a remote resolver over TCP (default port 8053)
 ```bash
-./dnsresolver --client 192.168.178.40
-./dnsresolver --client 192.168.178.40:8053
+./dnsplane --client 192.168.178.40
+./dnsplane --client 192.168.178.40:8053
 ```
 
 ### change the server socket path
 ```bash
-./dnsresolver --server-socket /tmp/custom.sock
+./dnsplane --server-socket /tmp/custom.sock
 ```
 
 ### change the TCP TUI listener
 ```bash
-./dnsresolver --server-tcp 0.0.0.0:9000
+./dnsplane --server-tcp 0.0.0.0:9000
 ```
 
 ### Recording of clearing and adding dns records
@@ -69,7 +49,7 @@ https://github.com/user-attachments/assets/f5ca52cb-3874-499c-a594-ba3bf64b3ba9
 | dnsrecords.json | holds dns records |
 | dnsservers.json | holds the dns servers used for queries |
 | dnscache.json | holds queries already done if their ttl diff is still above 0 |
-| dnsresolver.json | the app config |
+| dnsplane.json | the app config |
 
 ## Roadmap
 
@@ -77,19 +57,19 @@ https://github.com/user-attachments/assets/f5ca52cb-3874-499c-a594-ba3bf64b3ba9
 - Remote Client (Over TCP)
 
 ## Dependancies & Documentation
-[![Go Mod](https://img.shields.io/github/go-mod/go-version/earentir/dnsresolver?style=for-the-badge)]()
+[![Go Mod](https://img.shields.io/github/go-mod/go-version/earentir/dnsplane?style=for-the-badge)]()
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/earentir/dnsresolver.svg)](https://pkg.go.dev/github.com/earentir/dnsresolver)
+[![Go Reference](https://pkg.go.dev/badge/github.com/earentir/dnsplane.svg)](https://pkg.go.dev/github.com/earentir/dnsplane)
 
-[![Dependancies](https://img.shields.io/librariesio/github/earentir/dnsresolver?style=for-the-badge)](https://libraries.io/github/earentir/dnsresolver)
+[![Dependancies](https://img.shields.io/librariesio/github/earentir/dnsplane?style=for-the-badge)](https://libraries.io/github/earentir/dnsplane)
 
 [![OpenSSF Best Practices](https://bestpractices.coreinfrastructure.org/projects/8887/badge)](https://www.bestpractices.dev/projects/8887)
 
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/earentir/dnsresolver/badge)](https://securityscorecards.dev/viewer/?uri=github.com/earentir/dnsresolver)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/earentir/dnsplane/badge)](https://securityscorecards.dev/viewer/?uri=github.com/earentir/dnsplane)
 
-![Code Climate issues](https://img.shields.io/codeclimate/tech-debt/earentir/dnsresolver?style=for-the-badge)
+![Code Climate issues](https://img.shields.io/codeclimate/tech-debt/earentir/dnsplane?style=for-the-badge)
 
-![GitHub commit activity](https://img.shields.io/github/commit-activity/m/earentir/dnsresolver?style=for-the-badge)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/m/earentir/dnsplane?style=for-the-badge)
 
 
 ## Contributing

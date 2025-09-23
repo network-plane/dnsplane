@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"dnsresolver/cliutil"
+	"dnsplane/cliutil"
 )
 
 // DNSServer holds the data for a DNS server

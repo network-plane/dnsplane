@@ -1,4 +1,4 @@
-module dnsresolver
+module dnsplane
 
 go 1.25.1
 

@@ -2,8 +2,8 @@
 package dnsrecordcache
 
 import (
-	"dnsresolver/cliutil"
-	"dnsresolver/dnsrecords"
+	"dnsplane/cliutil"
+	"dnsplane/dnsrecords"
 	"errors"
 	"fmt"
 	"strings"
