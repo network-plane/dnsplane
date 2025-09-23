@@ -95,7 +95,6 @@ func init() {
 	flags.String("port", "53", "Port for DNS server")
 	flags.String("server-socket", defaultUnixSocketPath, "Path to UNIX domain socket for the daemon listener")
 	flags.String("server-tcp", defaultTCPTerminalAddr, "TCP address for remote TUI clients")
-	flags.Bool("tui", false, "Run with interactive TUI")
 	flags.Bool("api", false, "Enable the REST API")
 	flags.String("apiport", "8080", "Port for the REST API")
 	flags.StringP("client", "c", "", "Run in client mode (optional UNIX socket path)")
@@ -145,15 +144,14 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	port, _ := cmd.Flags().GetString("port")
 	serverSocket, _ := cmd.Flags().GetString("server-socket")
 	serverTCP, _ := cmd.Flags().GetString("server-tcp")
-	tuiMode, _ := cmd.Flags().GetBool("tui")
 	apiMode, _ := cmd.Flags().GetBool("api")
 	apiport, _ := cmd.Flags().GetString("apiport")
 
 	listenerInfoMu.Lock()
 	clientSocketPath = strings.TrimSpace(serverSocket)
-	clientSocketEnabled = clientSocketPath != "" && !tuiMode
+	clientSocketEnabled = clientSocketPath != ""
 	clientTCPAddress = normalizeTCPAddress(serverTCP)
-	clientTCPEnabled = clientTCPAddress != "" && !tuiMode
+	clientTCPEnabled = clientTCPAddress != ""
 	currentDNSPort = strings.TrimSpace(port)
 	configuredAPIPort = strings.TrimSpace(apiport)
 	configuredAPIEndpoint = ""
@@ -179,7 +177,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	)
 	tui.SetPrompt("dnsresolver> ")
 
-	daemonMode = !tuiMode
+	daemonMode = true
 
 	if apiMode {
 		startAPIAsync(apiport)
@@ -230,57 +228,40 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		HistorySearchFold:      true,
 	}
 
-	if !tuiMode {
-		var unixListener net.Listener
-		var tcpListener net.Listener
-		if serverSocket != "" {
-			listener, err := startUnixSocketListener(serverSocket)
-			if err != nil {
-				return fmt.Errorf("unix socket listener error: %w", err)
-			}
-			unixListener = listener
-			go acceptInteractiveSessions(listener)
+	var unixListener net.Listener
+	var tcpListener net.Listener
+	if serverSocket != "" {
+		listener, err := startUnixSocketListener(serverSocket)
+		if err != nil {
+			return fmt.Errorf("unix socket listener error: %w", err)
 		}
-		if serverTCP != "" {
-			listener, err := startTCPTerminalListener(serverTCP)
-			if err != nil {
-				return fmt.Errorf("tcp listener error: %w", err)
-			}
-			tcpListener = listener
-			go acceptInteractiveSessions(listener)
-		}
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-		defer signal.Stop(sigCh)
-		fmt.Println("Press Ctrl+C to exit daemon mode.")
-		<-sigCh
-		fmt.Println("Shutting down.")
-		stopDNSServer()
-		if unixListener != nil {
-			_ = unixListener.Close()
-		}
-		if tcpListener != nil {
-			_ = tcpListener.Close()
-		}
-		if serverSocket != "" {
-			_ = syscall.Unlink(serverSocket)
-		}
-		return nil
+		unixListener = listener
+		go acceptInteractiveSessions(listener)
 	}
-
-	rl, err := readline.NewEx(&rlconfig)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "readline: %v\n", err)
-		return nil
+	if serverTCP != "" {
+		listener, err := startTCPTerminalListener(serverTCP)
+		if err != nil {
+			return fmt.Errorf("tcp listener error: %w", err)
+		}
+		tcpListener = listener
+		go acceptInteractiveSessions(listener)
 	}
-	rl.CaptureExitSignal()
-	defer rl.Close()
-
-	resetTUIState()
-	if err := tui.Run(rl); err != nil {
-		fmt.Fprintf(os.Stderr, "tui error: %v\n", err)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+	fmt.Println("Press Ctrl+C to exit daemon mode.")
+	<-sigCh
+	fmt.Println("Shutting down.")
+	stopDNSServer()
+	if unixListener != nil {
+		_ = unixListener.Close()
 	}
-
+	if tcpListener != nil {
+		_ = tcpListener.Close()
+	}
+	if serverSocket != "" {
+		_ = syscall.Unlink(serverSocket)
+	}
 	return nil
 }
 
