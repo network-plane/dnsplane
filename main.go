@@ -11,13 +11,13 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
 	"dnsplane/commandhandler"
 	"dnsplane/config"
 	"dnsplane/converters"
+	"dnsplane/daemon"
 	"dnsplane/data"
 	"dnsplane/dnsrecordcache"
 	"dnsplane/dnsrecords"
@@ -39,27 +39,9 @@ const (
 )
 
 var (
-	rlconfig     readline.Config
-	stopDNSCh    = make(chan struct{})
-	stoppedDNS   = make(chan struct{})
-	serverStatus sync.RWMutex
-	isServerUp   bool
-	appversion   = "0.1.17"
-	daemonMode   bool
-	tuiSessionMu sync.Mutex
-
-	listenerInfoMu        sync.RWMutex
-	clientSocketPath      string
-	clientSocketEnabled   bool
-	clientTCPAddress      string
-	clientTCPEnabled      bool
-	currentDNSPort        string
-	configuredAPIPort     string
-	configuredAPIEndpoint string
-	apiConfigured         bool
-	apiServerRunning      atomic.Bool
-
-	rootCmd = &cobra.Command{
+	appState   = daemon.NewState()
+	appversion = "0.1.17"
+	rootCmd    = &cobra.Command{
 		Use:           "dnsplane",
 		Short:         "DNS Server with optional CLI mode",
 		SilenceUsage:  true,
@@ -105,7 +87,10 @@ func init() {
 	flags.String("server-tcp", defaultTCPTerminalAddr, "TCP address for remote TUI clients")
 	flags.Bool("api", false, "Enable the REST API")
 	flags.String("apiport", "8080", "Port for the REST API")
-	flags.String("client", "", "Run in client mode socket or address (default: "+defaultUnixSocketPath+")")
+	flags.StringP("client", "", "", "Run in client mode socket or address (default: "+defaultUnixSocketPath+")")
+	if f := flags.Lookup("client"); f != nil {
+		f.NoOptDefVal = defaultUnixSocketPath
+	}
 }
 
 func normalizeTCPAddress(addr string) string {
@@ -193,49 +178,47 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	apiport = strings.TrimSpace(apiport)
 
 	normalisedTCP := normalizeTCPAddress(serverTCP)
-	listenerInfoMu.Lock()
-	clientSocketPath = serverSocket
-	clientSocketEnabled = clientSocketPath != ""
-	clientTCPAddress = normalisedTCP
-	clientTCPEnabled = clientTCPAddress != ""
-	currentDNSPort = port
-	configuredAPIPort = apiport
-	configuredAPIEndpoint = ""
-	if configuredAPIPort != "" {
-		configuredAPIEndpoint = normalizeTCPAddress(":" + configuredAPIPort)
-	}
-	apiConfigured = apiMode
-	listenerInfoMu.Unlock()
+	appState.UpdateListener(func(info *daemon.ListenerSettings) {
+		info.ClientSocketPath = serverSocket
+		info.ClientTCPAddress = normalisedTCP
+		info.DNSPort = port
+		info.APIPort = apiport
+		info.APIEndpoint = ""
+		if info.APIPort != "" {
+			info.APIEndpoint = normalizeTCPAddress(":" + info.APIPort)
+		}
+		info.APIEnabled = apiMode
+	})
 	if !apiMode {
-		apiServerRunning.Store(false)
+		appState.SetAPIRunning(false)
 	}
 
 	settings.DNSPort = port
-	settings.ClientSocketPath = clientSocketPath
-	settings.ClientTCPAddress = clientTCPAddress
+	settings.ClientSocketPath = serverSocket
+	settings.ClientTCPAddress = normalisedTCP
 	settings.APIEnabled = apiMode
 	settings.RESTPort = apiport
 	dnsData.UpdateSettingsInMemory(settings)
 
 	commandhandler.RegisterCommands()
 	commandhandler.RegisterServerControlHooks(
-		stopDNSServer,
-		restartDNSServer,
-		getServerStatus,
-		startAPIAsync,
-		currentServerListeners,
+		func() { stopDNSServer(appState) },
+		func(p string) { restartDNSServer(appState, p) },
+		func() bool { return getServerStatus(appState) },
+		func(p string) { startAPIAsync(appState, p) },
+		func() commandhandler.ServerListenerInfo { return currentServerListeners(appState) },
 	)
 	tui.SetPrompt("dnsplane> ")
 
-	daemonMode = true
+	appState.SetDaemonMode(true)
 
 	if apiMode {
-		startAPIAsync(apiport)
+		startAPIAsync(appState, apiport)
 	}
 
 	dns.HandleFunc(".", handleRequest)
 
-	startedCh, dnsErrCh := startDNSServer(port)
+	startedCh, dnsErrCh := startDNSServer(appState, port)
 
 	waitForServer := func() error {
 		select {
@@ -261,14 +244,14 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 	monitorDNSErrors()
 
-	rlconfig = readline.Config{
+	appState.SetReadlineConfig(readline.Config{
 		Prompt:                 "> ",
 		HistoryFile:            "/tmp/dnsplane.history",
 		DisableAutoSaveHistory: true,
 		InterruptPrompt:        "^C",
 		EOFPrompt:              "exit",
 		HistorySearchFold:      true,
-	}
+	})
 
 	var unixListener net.Listener
 	var tcpListener net.Listener
@@ -294,7 +277,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	fmt.Println("Press Ctrl+C to exit daemon mode.")
 	<-sigCh
 	fmt.Println("Shutting down.")
-	stopDNSServer()
+	stopDNSServer(appState)
 	if unixListener != nil {
 		_ = unixListener.Close()
 	}
@@ -307,64 +290,62 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func currentServerListeners() commandhandler.ServerListenerInfo {
-	listenerInfoMu.RLock()
-	socket := clientSocketPath
-	socketEnabled := clientSocketEnabled
-	tcp := clientTCPAddress
-	tcpEnabled := clientTCPEnabled
-	apiEndpoint := configuredAPIEndpoint
-	apiEnabled := apiConfigured
-	dnsPort := currentDNSPort
-	listenerInfoMu.RUnlock()
-
+func currentServerListeners(state *daemon.State) commandhandler.ServerListenerInfo {
+	listener := state.ListenerSnapshot()
+	dnsPort := strings.TrimSpace(listener.DNSPort)
 	settings := data.GetInstance().GetResolverSettings()
 	if dnsPort == "" {
 		dnsPort = strings.TrimSpace(settings.DNSPort)
+	}
+
+	socket := strings.TrimSpace(listener.ClientSocketPath)
+	tcp := strings.TrimSpace(listener.ClientTCPAddress)
+	apiEndpoint := strings.TrimSpace(listener.APIEndpoint)
+	if apiEndpoint == "" && settings.RESTPort != "" {
+		apiEndpoint = normalizeTCPAddress(":" + strings.TrimSpace(settings.RESTPort))
 	}
 
 	info := commandhandler.ServerListenerInfo{
 		DNSProtocol:         "udp",
 		DNSListeners:        []string{normalizeTCPAddress(":" + dnsPort)},
 		ClientSocket:        socket,
-		ClientSocketEnabled: socketEnabled,
+		ClientSocketEnabled: socket != "",
 		ClientTCPEndpoint:   tcp,
-		ClientTCPEnabled:    tcpEnabled,
+		ClientTCPEnabled:    tcp != "",
 		APIEndpoint:         apiEndpoint,
-		APIEnabled:          apiEnabled,
-		APIRunning:          apiServerRunning.Load(),
-	}
-	if info.APIEndpoint == "" && settings.RESTPort != "" {
-		info.APIEndpoint = normalizeTCPAddress(":" + strings.TrimSpace(settings.RESTPort))
+		APIEnabled:          listener.APIEnabled,
+		APIRunning:          state.APIRunning(),
 	}
 	return info
 }
 
-func startAPIAsync(port string) {
+func startAPIAsync(state *daemon.State, port string) {
 	if port == "" {
 		port = data.GetInstance().GetResolverSettings().RESTPort
 	}
 	trimmed := strings.TrimSpace(port)
-	listenerInfoMu.Lock()
-	configuredAPIPort = trimmed
-	configuredAPIEndpoint = normalizeTCPAddress(":" + trimmed)
-	apiConfigured = true
-	listenerInfoMu.Unlock()
-	if apiServerRunning.Load() {
+	apiEndpoint := normalizeTCPAddress(":" + trimmed)
+	state.UpdateListener(func(info *daemon.ListenerSettings) {
+		info.APIPort = trimmed
+		info.APIEndpoint = apiEndpoint
+		info.APIEnabled = true
+	})
+	if state.APIRunning() {
 		return
 	}
-	apiServerRunning.Store(true)
-	go startGinAPI(trimmed)
+	state.SetAPIRunning(true)
+	go startGinAPI(state, trimmed)
 }
 
-func startDNSServer(port string) (<-chan struct{}, <-chan error) {
-	listenerInfoMu.Lock()
-	currentDNSPort = strings.TrimSpace(port)
-	listenerInfoMu.Unlock()
+func startDNSServer(state *daemon.State, port string) (<-chan struct{}, <-chan error) {
+	trimmedPort := strings.TrimSpace(port)
+	state.UpdateListener(func(info *daemon.ListenerSettings) {
+		info.DNSPort = trimmedPort
+	})
 	dnsData := data.GetInstance()
 
 	server := &dns.Server{
-		Addr: fmt.Sprintf(":%s", port),
+		Addr: fmt.Sprintf(":%s", trimmedPort),
 		Net:  "udp",
 	}
 
@@ -376,7 +357,7 @@ func startDNSServer(port string) (<-chan struct{}, <-chan error) {
 
 	server.NotifyStartedFunc = func() {
 		once.Do(func() {
-			updateServerStatus(true)
+			state.SetServerStatus(true)
 			stats := dnsData.GetStats()
 			stats.ServerStartTime = time.Now()
 			dnsData.UpdateStats(stats)
@@ -385,20 +366,21 @@ func startDNSServer(port string) (<-chan struct{}, <-chan error) {
 	}
 
 	go func() {
-		defer close(stoppedDNS)
+		defer state.NotifyStopped()
 		if err := server.ListenAndServe(); err != nil {
-			updateServerStatus(false)
+			state.SetServerStatus(false)
 			select {
 			case errCh <- err:
 			default:
 			}
 			return
 		}
-		updateServerStatus(false)
+		state.SetServerStatus(false)
 	}()
 
+	stopCh := state.StopChannel()
 	go func() {
-		<-stopDNSCh
+		<-stopCh
 		if err := server.Shutdown(); err != nil {
 			select {
 			case errCh <- err:
@@ -410,14 +392,12 @@ func startDNSServer(port string) (<-chan struct{}, <-chan error) {
 	return startedCh, errCh
 }
 
-func restartDNSServer(port string) {
-	if getServerStatus() {
-		stopDNSServer()
+func restartDNSServer(state *daemon.State, port string) {
+	if state.ServerStatus() {
+		stopDNSServer(state)
 	}
-	stopDNSCh = make(chan struct{})
-	stoppedDNS = make(chan struct{})
-
-	startedCh, errCh := startDNSServer(port)
+	state.ResetDNSChannels()
+	startedCh, errCh := startDNSServer(state, port)
 	select {
 	case <-startedCh:
 	case err := <-errCh:
@@ -425,26 +405,21 @@ func restartDNSServer(port string) {
 	}
 }
 
-func stopDNSServer() {
-	close(stopDNSCh)
-	<-stoppedDNS
-	updateServerStatus(false)
+func stopDNSServer(state *daemon.State) {
+	if !state.ServerStatus() {
+		return
+	}
+	stoppedCh := state.SignalStop()
+	<-stoppedCh
+	state.SetServerStatus(false)
 }
 
-func updateServerStatus(status bool) {
-	serverStatus.Lock()
-	defer serverStatus.Unlock()
-	isServerUp = status
-}
-
-func getServerStatus() bool {
-	serverStatus.RLock()
-	defer serverStatus.RUnlock()
-	return isServerUp
+func getServerStatus(state *daemon.State) bool {
+	return state.ServerStatus()
 }
 
 func logQuery(format string, args ...interface{}) {
-	if !daemonMode {
+	if !appState.DaemonMode() {
 		return
 	}
 	fmt.Printf(format, args...)
@@ -733,8 +708,9 @@ func serveInteractiveSession(conn net.Conn) {
 	log.Printf("TUI client connected: %s", addr)
 	defer log.Printf("TUI client disconnected: %s", addr)
 
-	tuiSessionMu.Lock()
-	defer tuiSessionMu.Unlock()
+	tuiLock := appState.TUISessionMutex()
+	tuiLock.Lock()
+	defer tuiLock.Unlock()
 
 	readPipe, writePipe, err := os.Pipe()
 	if err != nil {
@@ -763,7 +739,7 @@ func serveInteractiveSession(conn net.Conn) {
 		os.Stderr = oldStderr
 	}()
 
-	cfg := rlconfig
+	cfg := appState.ReadlineConfig()
 	cfg.Stdin = conn
 	cfg.Stdout = conn
 	cfg.Stderr = conn
@@ -1004,8 +980,8 @@ func extractRecordMessages(msgs []dnsrecords.Message) []string {
 	return res
 }
 
-func startGinAPI(apiport string) {
-	defer apiServerRunning.Store(false)
+func startGinAPI(state *daemon.State, apiport string) {
+	defer state.SetAPIRunning(false)
 	// Create a Gin router
 	r := gin.Default()
 
