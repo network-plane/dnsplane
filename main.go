@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"dnsplane/api"
 	"dnsplane/commandhandler"
 	"dnsplane/config"
 	"dnsplane/converters"
@@ -24,7 +25,6 @@ import (
 	"dnsplane/dnsservers"
 
 	"github.com/chzyer/readline"
-	"github.com/gin-gonic/gin"
 	"github.com/miekg/dns"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -333,8 +333,7 @@ func startAPIAsync(state *daemon.State, port string) {
 	if state.APIRunning() {
 		return
 	}
-	state.SetAPIRunning(true)
-	go startGinAPI(state, trimmed)
+	api.Start(state, trimmed, nil)
 }
 
 func startDNSServer(state *daemon.State, port string) (<-chan struct{}, <-chan error) {
@@ -923,74 +922,4 @@ func resolveInteractiveTarget(target string) (network, address string) {
 		host = "127.0.0.1"
 	}
 	return "tcp", net.JoinHostPort(host, defaultClientTCPPort)
-}
-
-// api
-// Wrapper for existing addRecord function
-func addRecordGin(c *gin.Context) {
-	dnsData := data.GetInstance()
-	var request []string
-	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(400, gin.H{"error": "invalid input"})
-		return
-	}
-
-	updated, messages, err := dnsrecords.Add(request, dnsData.DNSRecords, false)
-	if errors.Is(err, dnsrecords.ErrHelpRequested) {
-		c.JSON(200, gin.H{"messages": extractRecordMessages(messages)})
-		return
-	}
-	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error(), "messages": extractRecordMessages(messages)})
-		return
-	}
-	dnsData.UpdateRecords(updated)
-	c.JSON(201, gin.H{"status": "record added", "messages": extractRecordMessages(messages)})
-}
-
-// Wrapper for existing listRecords function
-func listRecordsGin(c *gin.Context) {
-	dnsData := data.GetInstance()
-	result, err := dnsrecords.List(dnsData.DNSRecords, []string{})
-	if errors.Is(err, dnsrecords.ErrHelpRequested) {
-		c.JSON(200, gin.H{"messages": extractRecordMessages(result.Messages)})
-		return
-	}
-	resp := gin.H{
-		"records":  result.Records,
-		"detailed": result.Detailed,
-	}
-	if result.Filter != "" {
-		resp["filter"] = result.Filter
-	}
-	if len(result.Messages) > 0 {
-		resp["messages"] = extractRecordMessages(result.Messages)
-	}
-	c.JSON(200, resp)
-}
-
-func extractRecordMessages(msgs []dnsrecords.Message) []string {
-	if len(msgs) == 0 {
-		return nil
-	}
-	res := make([]string, 0, len(msgs))
-	for _, msg := range msgs {
-		res = append(res, msg.Text)
-	}
-	return res
-}
-
-func startGinAPI(state *daemon.State, apiport string) {
-	defer state.SetAPIRunning(false)
-	// Create a Gin router
-	r := gin.Default()
-
-	// Add routes for the API
-	r.GET("/dns/records", listRecordsGin) // List all DNS records
-	r.POST("/dns/records", addRecordGin)  // Add a new DNS record
-
-	// Start the server
-	if err := r.Run(fmt.Sprintf(":%s", apiport)); err != nil {
-		log.Fatal("Error starting API:", err)
-	}
 }
