@@ -2,13 +2,16 @@
 package data
 
 import (
+	"dnsplane/config"
 	"dnsplane/dnsrecordcache"
 	"dnsplane/dnsrecords"
 	"dnsplane/dnsservers"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -49,33 +52,50 @@ type DNSStats struct {
 	ServerStartTime       time.Time `json:"server_start_time"`
 }
 
-// DNSResolverSettings holds DNS server settings
-type DNSResolverSettings struct {
-	FallbackServerIP   string        `json:"fallback_server_ip"`
-	FallbackServerPort string        `json:"fallback_server_port"`
-	Timeout            int           `json:"timeout"`
-	DNSPort            string        `json:"dns_port"`
-	RESTPort           string        `json:"rest_port"`
-	CacheRecords       bool          `json:"cache_records"`
-	FileLocations      FileLocations `json:"file_locations"`
-	DNSRecordSettings  DNSRecordSettings
+// DNSResolverSettings is an alias to the configuration structure.
+type DNSResolverSettings = config.Config
+
+// DNSRecordSettings is an alias to the record settings persisted in config.
+type DNSRecordSettings = config.DNSRecordSettings
+
+// FileLocations is an alias to config-defined file locations.
+type FileLocations = config.FileLocations
+
+var (
+	instance      *DNSResolverData
+	configStateMu sync.RWMutex
+	configState   *config.Loaded
+)
+
+// SetConfig stores the loaded configuration for subsequent data operations.
+func SetConfig(loaded *config.Loaded) {
+	if loaded == nil {
+		log.Fatalf("data: configuration not provided")
+	}
+	configStateMu.Lock()
+	defer configStateMu.Unlock()
+	clone := *loaded
+	configState = &clone
 }
 
-// DNSRecordSettings holds the settings for DNS records
-type DNSRecordSettings struct {
-	AutoBuildPTRFromA bool `json:"auto_build_ptr_from_a"`
-	ForwardPTRQueries bool `json:"forward_ptr_queries"`
-	AddUpdatesRecords bool `json:"add_updates_records,omitempty"`
+func currentConfig() config.Loaded {
+	configStateMu.RLock()
+	defer configStateMu.RUnlock()
+	if configState == nil {
+		log.Fatalf("data: configuration not initialised; call data.SetConfig before use")
+	}
+	return *configState
 }
 
-// FileLocations holds the file locations for the DNS server
-type FileLocations struct {
-	DNSServerFile  string `json:"dnsserver_file"`
-	DNSRecordsFile string `json:"dnsrecords_file"`
-	CacheFile      string `json:"cache_file"`
+func updateStoredConfig(cfgPath string, cfg config.Config) {
+	configStateMu.Lock()
+	defer configStateMu.Unlock()
+	if configState == nil {
+		configState = &config.Loaded{}
+	}
+	configState.Path = cfgPath
+	configState.Config = cfg
 }
-
-var instance *DNSResolverData
 
 // For Removal in the future
 
@@ -101,7 +121,8 @@ func (d *DNSResolverData) Initialize() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	d.Settings = LoadSettings()
+	cfg := currentConfig()
+	d.Settings = cfg.Config
 	d.DNSServers = LoadDNSServers()
 	d.DNSRecords = LoadDNSRecords()
 	d.CacheRecords = LoadCacheRecords()
@@ -121,6 +142,13 @@ func (d *DNSResolverData) UpdateSettings(settings DNSResolverSettings) {
 	defer d.mu.Unlock()
 	d.Settings = settings
 	SaveSettings(settings)
+}
+
+// UpdateSettingsInMemory replaces the settings without persisting them to disk.
+func (d *DNSResolverData) UpdateSettingsInMemory(settings DNSResolverSettings) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.Settings = settings
 }
 
 // GetStats returns the current DNS statistics
@@ -242,6 +270,9 @@ func LoadFromJSON[T any](filePath string) T {
 
 // SaveToJSON marshals data and saves it to a JSON file
 func SaveToJSON[T any](filePath string, data T) error {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+		return err
+	}
 	file, err := os.Create(filePath)
 	if err != nil {
 		return err
@@ -259,7 +290,8 @@ func LoadDNSServers() []dnsservers.DNSServer {
 		Servers []dnsservers.DNSServer `json:"dnsservers"`
 	}
 
-	servers := LoadFromJSON[serversType]("dnsservers.json")
+	paths := currentConfig().Config.FileLocations
+	servers := LoadFromJSON[serversType](paths.DNSServerFile)
 	return servers.Servers
 }
 
@@ -270,7 +302,8 @@ func SaveDNSServers(dnsServers []dnsservers.DNSServer) error {
 	}
 
 	data := serversType{Servers: dnsServers}
-	return SaveToJSON("dnsservers.json", data)
+	paths := currentConfig().Config.FileLocations
+	return SaveToJSON(paths.DNSServerFile, data)
 }
 
 // LoadDNSRecords reads the dnsrecords.json file and returns the list of DNS records
@@ -278,7 +311,8 @@ func LoadDNSRecords() []dnsrecords.DNSRecord {
 	type recordsType struct {
 		Records []dnsrecords.DNSRecord `json:"records"`
 	}
-	records := LoadFromJSON[recordsType]("dnsrecords.json")
+	paths := currentConfig().Config.FileLocations
+	records := LoadFromJSON[recordsType](paths.DNSRecordsFile)
 	return records.Records
 }
 
@@ -289,7 +323,8 @@ func SaveDNSRecords(gDNSRecords []dnsrecords.DNSRecord) error {
 	}
 
 	data := recordsType{Records: gDNSRecords}
-	return SaveToJSON("dnsrecords.json", data)
+	paths := currentConfig().Config.FileLocations
+	return SaveToJSON(paths.DNSRecordsFile, data)
 }
 
 // LoadCacheRecords reads the dnscache.json file and returns the list of cache records
@@ -297,7 +332,8 @@ func LoadCacheRecords() []dnsrecordcache.CacheRecord {
 	type cacheType struct {
 		Cache []dnsrecordcache.CacheRecord `json:"cache"`
 	}
-	cache := LoadFromJSON[cacheType]("dnscache.json")
+	paths := currentConfig().Config.FileLocations
+	cache := LoadFromJSON[cacheType](paths.CacheFile)
 	return cache.Cache
 }
 
@@ -309,7 +345,8 @@ func SaveCacheRecords(cacheRecords []dnsrecordcache.CacheRecord) error {
 
 	data := cacheType{Cache: cacheRecords}
 	_ = data
-	return SaveToJSON("dnscache.json", data)
+	paths := currentConfig().Config.FileLocations
+	return SaveToJSON(paths.CacheFile, data)
 }
 
 func (d *DNSResolverData) storeRecords(records []dnsrecords.DNSRecord, persist bool) {
@@ -336,30 +373,43 @@ func (d *DNSResolverData) storeCacheRecords(records []dnsrecordcache.CacheRecord
 
 // InitializeJSONFiles creates the JSON files if they don't exist
 func InitializeJSONFiles() {
-	CreateFileIfNotExists("dnsservers.json", `{"dnsservers":[{"address": "1.1.1.1","port": "53","active": false,"local_resolver": false,"adblocker": false }]}`)
-	CreateFileIfNotExists("dnsrecords.json", `{"records": [{"name": "example.com.", "type": "A", "value": "93.184.216.34", "ttl": 3600, "last_query": "0001-01-01T00:00:00Z"}]}`)
-	CreateFileIfNotExists("dnscache.json", `{"cache": [{"dns_record": {"name": "example.com","type": "A","value": "192.168.1.1","ttl": 3600,"added_on": "2024-05-01T12:00:00Z","updated_on": "2024-05-05T18:30:00Z","mac": "00:1A:2B:3C:4D:5E","last_query": "2024-05-07T15:45:00Z"},"expiry": "2024-05-10T12:00:00Z","timestamp": "2024-05-07T12:30:00Z","last_query": "2024-05-07T14:00:00Z"}]}`)
-	CreateFileIfNotExists("dnsplane.json", `{"fallback_server_ip": "192.168.178.21","fallback_server_port": "53","timeout": 2,"dns_port": "53","cache_records": true,"auto_build_ptr_from_a": true,"forward_ptr_queries": false,"file_locations": {"dnsserver_file": "dnsservers.json","dnsrecords_file": "dnsrecords.json","cache_file": "dnscache.json"}}`)
+	paths := currentConfig().Config.FileLocations
+	CreateFileIfNotExists(paths.DNSServerFile, `{"dnsservers":[{"address": "1.1.1.1","port": "53","active": false,"local_resolver": false,"adblocker": false }]}`)
+	CreateFileIfNotExists(paths.DNSRecordsFile, `{"records": [{"name": "example.com.", "type": "A", "value": "93.184.216.34", "ttl": 3600, "last_query": "0001-01-01T00:00:00Z"}]}`)
+	CreateFileIfNotExists(paths.CacheFile, `{"cache": [{"dns_record": {"name": "example.com","type": "A","value": "192.168.1.1","ttl": 3600,"added_on": "2024-05-01T12:00:00Z","updated_on": "2024-05-05T18:30:00Z","mac": "00:1A:2B:3C:4D:5E","last_query": "2024-05-07T15:45:00Z"},"expiry": "2024-05-10T12:00:00Z","timestamp": "2024-05-07T12:30:00Z","last_query": "2024-05-07T14:00:00Z"}]}`)
 }
 
 // CreateFileIfNotExists creates a file with the given filename and content if it does not exist
 func CreateFileIfNotExists(filename, content string) {
-	if _, err := os.Stat(filename); os.IsNotExist(err) {
-		err = os.WriteFile(filename, []byte(content), 0644)
-		if err != nil {
-			log.Fatalf("Error creating %s: %s", filename, err)
-		}
+	if _, err := os.Stat(filename); err == nil {
+		return
+	} else if !errors.Is(err, os.ErrNotExist) {
+		log.Fatalf("Error checking %s: %s", filename, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(filename), 0o755); err != nil {
+		log.Fatalf("Error creating directory for %s: %s", filename, err)
+	}
+	if err := os.WriteFile(filename, []byte(content), 0o644); err != nil {
+		log.Fatalf("Error creating %s: %s", filename, err)
 	}
 }
 
 // LoadSettings reads the dnsplane.json file and returns the DNS server settings
 func LoadSettings() DNSResolverSettings {
-	return LoadFromJSON[DNSResolverSettings]("dnsplane.json")
+	info := currentConfig()
+	cfg, err := config.Read(info.Path)
+	if err != nil {
+		log.Fatalf("Failed to read settings: %v", err)
+	}
+	updateStoredConfig(info.Path, *cfg)
+	return *cfg
 }
 
 // SaveSettings saves the DNS server settings to the dnsplane.json file
 func SaveSettings(settings DNSResolverSettings) {
-	if err := SaveToJSON("dnsplane.json", settings); err != nil {
+	info := currentConfig()
+	if err := config.Save(info.Path, settings); err != nil {
 		log.Fatalf("Failed to save settings: %v", err)
 	}
+	updateStoredConfig(info.Path, settings)
 }
