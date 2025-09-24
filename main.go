@@ -16,14 +16,13 @@ import (
 	"time"
 
 	"dnsplane/commandhandler"
+	"dnsplane/config"
 	"dnsplane/converters"
 	"dnsplane/data"
 	"dnsplane/dnsrecordcache"
 	"dnsplane/dnsrecords"
 	"dnsplane/dnsservers"
 
-	// "github.com/bettercap/readline"
-	// "github.com/reeflective/readline"
 	"github.com/chzyer/readline"
 	"github.com/gin-gonic/gin"
 	"github.com/miekg/dns"
@@ -76,7 +75,16 @@ func resetTUIState() {
 }
 
 func main() {
-	//Create JSON files if they don't exist
+	loadedCfg, err := config.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
+	data.SetConfig(loadedCfg)
+	if loadedCfg.Created {
+		fmt.Printf("Created default config at %s\n", loadedCfg.Path)
+	}
+
+	// Create JSON files if they don't exist using configured locations.
 	data.InitializeJSONFiles()
 
 	// Ensure resolver settings are initialised before running commands
@@ -97,10 +105,7 @@ func init() {
 	flags.String("server-tcp", defaultTCPTerminalAddr, "TCP address for remote TUI clients")
 	flags.Bool("api", false, "Enable the REST API")
 	flags.String("apiport", "8080", "Port for the REST API")
-	flags.StringP("client", "c", "", "Run in client mode (optional UNIX socket path)")
-	if f := flags.Lookup("client"); f != nil {
-		f.NoOptDefVal = defaultUnixSocketPath
-	}
+	flags.String("client", "", "Run in client mode socket or address (default: "+defaultUnixSocketPath+")")
 }
 
 func normalizeTCPAddress(addr string) string {
@@ -120,11 +125,17 @@ func normalizeTCPAddress(addr string) string {
 func runRoot(cmd *cobra.Command, args []string) error {
 	remaining := append([]string(nil), args...)
 
+	dnsData := data.GetInstance()
+	settings := dnsData.GetResolverSettings()
+
 	clientRequested := cmd.Flags().Changed("client")
 	clientTarget, _ := cmd.Flags().GetString("client")
 	if clientRequested {
 		if clientTarget == "" {
-			clientTarget = defaultUnixSocketPath
+			clientTarget = strings.TrimSpace(settings.ClientSocketPath)
+			if clientTarget == "" {
+				clientTarget = defaultUnixSocketPath
+			}
 		}
 		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
 			clientTarget = remaining[0]
@@ -141,19 +152,54 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unexpected arguments: %v", remaining)
 	}
 
-	port, _ := cmd.Flags().GetString("port")
-	serverSocket, _ := cmd.Flags().GetString("server-socket")
-	serverTCP, _ := cmd.Flags().GetString("server-tcp")
-	apiMode, _ := cmd.Flags().GetBool("api")
-	apiport, _ := cmd.Flags().GetString("apiport")
+	port := settings.DNSPort
+	if cmd.Flags().Changed("port") {
+		if v, err := cmd.Flags().GetString("port"); err == nil {
+			port = v
+		}
+	}
 
+	serverSocket := settings.ClientSocketPath
+	if cmd.Flags().Changed("server-socket") {
+		if v, err := cmd.Flags().GetString("server-socket"); err == nil {
+			serverSocket = v
+		}
+	}
+
+	serverTCP := settings.ClientTCPAddress
+	if cmd.Flags().Changed("server-tcp") {
+		if v, err := cmd.Flags().GetString("server-tcp"); err == nil {
+			serverTCP = v
+		}
+	}
+
+	apiMode := settings.APIEnabled
+	if cmd.Flags().Changed("api") {
+		if v, err := cmd.Flags().GetBool("api"); err == nil {
+			apiMode = v
+		}
+	}
+
+	apiport := settings.RESTPort
+	if cmd.Flags().Changed("apiport") {
+		if v, err := cmd.Flags().GetString("apiport"); err == nil {
+			apiport = v
+		}
+	}
+
+	port = strings.TrimSpace(port)
+	serverSocket = strings.TrimSpace(serverSocket)
+	serverTCP = strings.TrimSpace(serverTCP)
+	apiport = strings.TrimSpace(apiport)
+
+	normalisedTCP := normalizeTCPAddress(serverTCP)
 	listenerInfoMu.Lock()
-	clientSocketPath = strings.TrimSpace(serverSocket)
+	clientSocketPath = serverSocket
 	clientSocketEnabled = clientSocketPath != ""
-	clientTCPAddress = normalizeTCPAddress(serverTCP)
+	clientTCPAddress = normalisedTCP
 	clientTCPEnabled = clientTCPAddress != ""
-	currentDNSPort = strings.TrimSpace(port)
-	configuredAPIPort = strings.TrimSpace(apiport)
+	currentDNSPort = port
+	configuredAPIPort = apiport
 	configuredAPIEndpoint = ""
 	if configuredAPIPort != "" {
 		configuredAPIEndpoint = normalizeTCPAddress(":" + configuredAPIPort)
@@ -164,8 +210,12 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		apiServerRunning.Store(false)
 	}
 
-	dnsData := data.GetInstance()
-	dnsServerSettings := dnsData.GetResolverSettings()
+	settings.DNSPort = port
+	settings.ClientSocketPath = clientSocketPath
+	settings.ClientTCPAddress = clientTCPAddress
+	settings.APIEnabled = apiMode
+	settings.RESTPort = apiport
+	dnsData.UpdateSettingsInMemory(settings)
 
 	commandhandler.RegisterCommands()
 	commandhandler.RegisterServerControlHooks(
@@ -184,14 +234,6 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	}
 
 	dns.HandleFunc(".", handleRequest)
-
-	if port != dnsServerSettings.DNSPort {
-		dnsServerSettings.DNSPort = port
-	}
-
-	if apiport != dnsServerSettings.RESTPort {
-		dnsServerSettings.RESTPort = apiport
-	}
 
 	startedCh, dnsErrCh := startDNSServer(port)
 
@@ -880,7 +922,6 @@ func connectToInteractiveEndpoint(target string) {
 	}
 
 	fmt.Println("Connection closed.")
-	return
 }
 
 func resolveInteractiveTarget(target string) (network, address string) {
@@ -891,9 +932,7 @@ func resolveInteractiveTarget(target string) (network, address string) {
 	if strings.ContainsAny(target, "/\\") || strings.HasPrefix(target, "@") {
 		return "unix", target
 	}
-	if strings.HasPrefix(target, "tcp://") {
-		target = strings.TrimPrefix(target, "tcp://")
-	}
+	target = strings.TrimPrefix(target, "tcp://")
 	if strings.HasPrefix(target, "unix://") {
 		return "unix", strings.TrimPrefix(target, "unix://")
 	}
