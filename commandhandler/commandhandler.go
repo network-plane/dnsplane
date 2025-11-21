@@ -3,19 +3,23 @@ package commandhandler
 
 import (
 	"bytes"
+	"context"
 	"dnsplane/cliutil"
 	"dnsplane/data"
 	"dnsplane/dnsrecordcache"
 	"dnsplane/dnsrecords"
 	"dnsplane/dnsservers"
+	"dnsplane/resolver"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/miekg/dns"
 	tui "github.com/network-plane/planetui"
 )
 
@@ -267,6 +271,7 @@ func registerContexts() {
 		{name: "cache", description: "- Cache Management", tags: []string{"cache"}},
 		{name: "dns", description: "- DNS Server Management", tags: []string{"dns", "servers"}},
 		{name: "server", description: "- Server Management", tags: []string{"server"}},
+		{name: "tools", description: "- Diagnostic Tools", tags: []string{"tools", "diagnostics"}},
 	}
 	for _, ctx := range contexts {
 		var opts []tui.ContextOption
@@ -754,6 +759,303 @@ func renderDNSServerTable(out tui.OutputChannel, servers []dnsservers.DNSServer)
 	tui.EnsureLineBreak(out)
 }
 
+func runToolsDig() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.IsHelpRequest(input.Raw) {
+			msgs := infoMessages(
+				"Usage: tools dig [type] <domain|ip> [type] [@server] [port]",
+				"Description: Query all configured DNS servers (or a specific server) for the provided name/IP.",
+				"Examples:",
+				"  tools dig example.com",
+				"  tools dig example.com AAAA",
+				"  tools dig AAAA example.com",
+				"  tools dig 8.8.8.8",
+				"  tools dig PTR 8.8.8.8",
+				"  tools dig example.com @8.8.8.8",
+				"  tools dig A example.com @8.8.8.8 5353",
+				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
+			)
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
+		}
+
+		if len(input.Raw) == 0 {
+			msgs := append(warnMessages("tools dig requires a domain or IP address."), infoMessages("Usage: tools dig [type] <domain|ip> [type] [@server] [port]")...)
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "missing argument", Severity: tui.SeverityWarning}}
+		}
+
+		typeToken, queryTarget, serverHost, serverPort, parseErr := parseDigArguments(input.Raw)
+		if parseErr != nil {
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: warnMessages(parseErr.Error()), Error: &tui.CommandError{Message: parseErr.Error(), Severity: tui.SeverityWarning}}
+		}
+
+		if queryTarget == "" {
+			msgs := append(warnMessages("tools dig requires a domain or IP address."), infoMessages("Usage: tools dig [type] <domain|ip> [type] [@server] [port]")...)
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "missing argument", Severity: tui.SeverityWarning}}
+		}
+
+		queryType, typeErr := resolveRecordType(typeToken, queryTarget)
+		if typeErr != nil {
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: warnMessages(typeErr.Error()), Error: &tui.CommandError{Message: typeErr.Error(), Severity: tui.SeverityWarning}}
+		}
+
+		queryName, nameErr := normalizeQueryName(queryTarget, queryType)
+		if nameErr != nil {
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: warnMessages(nameErr.Error()), Error: &tui.CommandError{Message: nameErr.Error(), Severity: tui.SeverityWarning}}
+		}
+
+		// Determine DNS servers to query
+		servers := make([]string, 0)
+		if serverHost != "" {
+			if serverPort == "" {
+				serverPort = "53"
+			}
+			servers = []string{net.JoinHostPort(serverHost, serverPort)}
+		} else {
+			dnsData := data.GetInstance()
+			settings := dnsData.GetResolverSettings()
+			servers = dnsservers.GetDNSArray(dnsData.GetServers(), true)
+			if len(servers) == 0 {
+				fallbackIP := strings.TrimSpace(settings.FallbackServerIP)
+				fallbackPort := strings.TrimSpace(settings.FallbackServerPort)
+				if fallbackIP != "" {
+					if fallbackPort == "" {
+						fallbackPort = "53"
+					}
+					servers = append(servers, fmt.Sprintf("%s:%s", fallbackIP, fallbackPort))
+				}
+			}
+			if len(servers) == 0 {
+				msgs := infoMessages("No DNS servers configured. Add servers using 'dns add' or set a fallback server.")
+				return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "no DNS servers configured", Severity: tui.SeverityWarning}}
+			}
+		}
+
+		// Create DNS client
+		client := resolver.NewDNSClient(5 * time.Second)
+		question := dns.Question{
+			Name:   queryName,
+			Qtype:  queryType,
+			Qclass: dns.ClassINET,
+		}
+
+		// Query all servers in parallel
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		type serverResult struct {
+			server   string
+			response *dns.Msg
+			err      error
+			duration time.Duration
+		}
+
+		results := make(chan serverResult, len(servers))
+		var wg sync.WaitGroup
+
+		for _, server := range servers {
+			wg.Add(1)
+			go func(srv string) {
+				defer wg.Done()
+				start := time.Now()
+				resp, err := client.Query(ctx, question, srv)
+				duration := time.Since(start)
+				results <- serverResult{
+					server:   srv,
+					response: resp,
+					err:      err,
+					duration: duration,
+				}
+			}(server)
+		}
+
+		go func() {
+			wg.Wait()
+			close(results)
+		}()
+
+		// Collect results
+		var allResults []serverResult
+		for res := range results {
+			allResults = append(allResults, res)
+		}
+
+		// Display results
+		out := rt.Output()
+		out.Info(fmt.Sprintf("Querying %d DNS server(s) for %s %s...\n", len(servers), queryName, dns.TypeToString[queryType]))
+		out.Info("")
+
+		rows := make([][]string, 0, len(allResults))
+		for _, res := range allResults {
+			status := "OK"
+			answer := ""
+			if res.err != nil {
+				status = "ERROR"
+				answer = res.err.Error()
+			} else if res.response == nil {
+				status = "NO RESPONSE"
+				answer = "No response received"
+			} else if len(res.response.Answer) == 0 {
+				status = "NO ANSWER"
+				answer = "No answer section"
+			} else {
+				var answers []string
+				for _, rr := range res.response.Answer {
+					answers = append(answers, rr.String())
+				}
+				answer = strings.Join(answers, "; ")
+				if res.response.MsgHdr.Authoritative {
+					status = "AUTH"
+				}
+			}
+
+			rows = append(rows, []string{
+				res.server,
+				status,
+				fmt.Sprintf("%.2fms", float64(res.duration.Nanoseconds())/1e6),
+				answer,
+			})
+		}
+
+		if len(rows) > 0 {
+			out.WriteTable([]string{"Server", "Status", "Time", "Answer"}, rows)
+			tui.EnsureLineBreak(out)
+		}
+
+		return tui.CommandResult{Status: tui.StatusSuccess, Payload: allResults}
+	}
+}
+
+func parseDigArguments(args []string) (typeToken, target, serverHost, serverPort string, err error) {
+	if len(args) == 0 {
+		err = fmt.Errorf("missing arguments")
+		return
+	}
+	idx := 0
+	if t, ok := lookupRecordTypeToken(args[idx]); ok {
+		typeToken = strings.ToUpper(strings.TrimSpace(args[idx]))
+		if t == 0 {
+			err = fmt.Errorf("invalid record type: %s", args[idx])
+			return
+		}
+		idx++
+	}
+	if idx >= len(args) {
+		return
+	}
+	target = strings.TrimSpace(args[idx])
+	idx++
+	if typeToken == "" && idx < len(args) {
+		if _, ok := lookupRecordTypeToken(args[idx]); ok {
+			typeToken = strings.ToUpper(strings.TrimSpace(args[idx]))
+			idx++
+		}
+	}
+
+	for idx < len(args) {
+		token := strings.TrimSpace(args[idx])
+		switch {
+		case token == "":
+			// skip
+		case token == "@":
+			idx++
+			if idx < len(args) {
+				token = strings.TrimSpace(args[idx])
+				if strings.HasPrefix(token, "@") {
+					token = strings.TrimPrefix(token, "@")
+				}
+				if token != "" && serverHost == "" {
+					if host, port, ok := strings.Cut(token, ":"); ok {
+						serverHost = host
+						serverPort = port
+					} else {
+						serverHost = token
+					}
+				}
+			}
+		case strings.HasPrefix(token, "@"):
+			token = strings.TrimPrefix(token, "@")
+			if token != "" {
+				if host, port, ok := strings.Cut(token, ":"); ok {
+					if serverHost == "" {
+						serverHost = host
+					}
+					if serverPort == "" {
+						serverPort = port
+					}
+				} else if serverHost == "" {
+					serverHost = token
+				}
+			}
+		case serverHost != "" && serverPort == "" && isAllDigits(token):
+			serverPort = token
+		default:
+			// ignore additional tokens
+		}
+		idx++
+	}
+
+	return
+}
+
+func lookupRecordTypeToken(token string) (uint16, bool) {
+	upper := strings.ToUpper(strings.TrimSpace(token))
+	if upper == "" {
+		return 0, false
+	}
+	t, ok := dns.StringToType[upper]
+	return t, ok
+}
+
+func resolveRecordType(typeToken, target string) (uint16, error) {
+	if typeToken != "" {
+		upper := strings.ToUpper(strings.TrimSpace(typeToken))
+		if t, ok := dns.StringToType[upper]; ok {
+			return t, nil
+		}
+		return 0, fmt.Errorf("invalid record type: %s", typeToken)
+	}
+	clean := strings.TrimSuffix(strings.TrimSpace(target), ".")
+	if ip := net.ParseIP(clean); ip != nil {
+		return dns.TypePTR, nil
+	}
+	return dns.TypeA, nil
+}
+
+func normalizeQueryName(target string, queryType uint16) (string, error) {
+	name := strings.TrimSpace(target)
+	if name == "" {
+		return "", fmt.Errorf("empty query target")
+	}
+
+	clean := strings.TrimSuffix(name, ".")
+	if queryType == dns.TypePTR {
+		if net.ParseIP(clean) != nil {
+			reverse, err := dns.ReverseAddr(clean)
+			if err != nil {
+				return "", fmt.Errorf("unable to construct PTR query for %s: %w", target, err)
+			}
+			name = reverse
+		}
+	}
+
+	if !strings.HasSuffix(name, ".") {
+		name += "."
+	}
+	return name, nil
+}
+
+func isAllDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // RegisterCommands registers all DNS related contexts and commands with the TUI package.
 func RegisterCommands() {
 	registerContexts()
@@ -1034,6 +1336,26 @@ func RegisterCommands() {
 			Category:    "Server",
 			Tags:        []string{"server", "save"},
 		}, legacyRunner(handleServerSave)),
+
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "tools",
+			Name:        "dig",
+			Summary:     "Query DNS servers",
+			Description: "Queries all configured DNS servers for a domain or IP address and displays responses from each server.",
+			Usage:       "tools dig [type] <domain|ip> [type] [@server] [port]",
+			Category:    "Tools",
+			Tags:        []string{"tools", "dig", "query", "diagnostics"},
+			Args: []tui.ArgSpec{
+				{Name: "args", Description: "Query arguments (domain/IP, type, @server, port)", Repeatable: true},
+			},
+			Examples: []tui.Example{
+				{Description: "Query A record", Command: "tools dig example.com"},
+				{Description: "Query AAAA record", Command: "tools dig example.com AAAA"},
+				{Description: "Query PTR record", Command: "tools dig 8.8.8.8 PTR"},
+				{Description: "Query specific server", Command: "tools dig example.com @8.8.8.8"},
+				{Description: "Query with custom port", Command: "tools dig example.com @8.8.8.8 5353"},
+			},
+		}, runToolsDig()),
 	}
 
 	for _, cmd := range commands {

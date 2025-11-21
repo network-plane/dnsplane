@@ -39,6 +39,8 @@ type Config struct {
 	RESTPort           string            `json:"rest_port"`
 	APIEnabled         bool              `json:"api_enabled"`
 	CacheRecords       bool              `json:"cache_records"`
+	FullStats          bool              `json:"full_stats"`
+	FullStatsDir       string            `json:"full_stats_dir"`
 	ClientSocketPath   string            `json:"client_socket_path"`
 	ClientTCPAddress   string            `json:"client_tcp_address"`
 	FileLocations      FileLocations     `json:"file_locations"`
@@ -189,6 +191,8 @@ func defaultConfig(baseDir string) *Config {
 		RESTPort:           "8080",
 		APIEnabled:         false,
 		CacheRecords:       true,
+		FullStats:          false,
+		FullStatsDir:       filepath.Join(baseDir, "fullstats"),
 		ClientSocketPath:   defaultSocketPath(),
 		ClientTCPAddress:   "0.0.0.0:8053",
 		FileLocations: FileLocations{
@@ -221,6 +225,11 @@ func (c *Config) applyDefaults(configDir string) {
 	}
 	if c.ClientTCPAddress == "" {
 		c.ClientTCPAddress = "0.0.0.0:8053"
+	}
+	if c.FullStatsDir == "" {
+		c.FullStatsDir = filepath.Join(configDir, "fullstats")
+	} else {
+		c.FullStatsDir = ensureAbsolutePath(configDir, c.FullStatsDir, "fullstats")
 	}
 
 	c.FileLocations.DNSServerFile = ensureAbsolutePath(configDir, c.FileLocations.DNSServerFile, "dnsservers.json")

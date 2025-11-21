@@ -20,6 +20,7 @@ import (
 	"dnsplane/config"
 	"dnsplane/daemon"
 	"dnsplane/data"
+	"dnsplane/fullstats"
 	"dnsplane/resolver"
 
 	"github.com/chzyer/readline"
@@ -37,10 +38,11 @@ const (
 )
 
 var (
-	appState    = daemon.NewState()
-	appversion  = "0.1.17"
-	dnsResolver *resolver.Resolver
-	rootCmd     = &cobra.Command{
+	appState         = daemon.NewState()
+	appversion       = "0.1.17"
+	dnsResolver      *resolver.Resolver
+	fullStatsTracker *fullstats.Tracker
+	rootCmd          = &cobra.Command{
 		Use:           "dnsplane",
 		Short:         "DNS Server with optional CLI mode",
 		SilenceUsage:  true,
@@ -199,6 +201,17 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	settings.RESTPort = apiport
 	dnsData.UpdateSettingsInMemory(settings)
 
+	// Initialize full stats tracker if enabled
+	if settings.FullStats {
+		tracker, err := fullstats.New(settings.FullStatsDir, true)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize full stats tracker: %v", err)
+		} else {
+			fullStatsTracker = tracker
+			log.Printf("Full statistics tracking enabled, storing data in: %s", settings.FullStatsDir)
+		}
+	}
+
 	commandhandler.RegisterCommands()
 	commandhandler.RegisterServerControlHooks(
 		func() { stopDNSServer(appState) },
@@ -255,7 +268,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	appState.SetReadlineConfig(readline.Config{
 		Prompt:                 "> ",
 		HistoryFile:            "/tmp/dnsplane.history",
-		DisableAutoSaveHistory: true,
+		DisableAutoSaveHistory: false, // Enable auto-save so history persists
 		InterruptPrompt:        "^C",
 		EOFPrompt:              "exit",
 		HistorySearchFold:      true,
@@ -286,6 +299,11 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	<-sigCh
 	fmt.Println("Shutting down.")
 	stopDNSServer(appState)
+	if fullStatsTracker != nil {
+		if err := fullStatsTracker.Close(); err != nil {
+			log.Printf("Error closing full stats tracker: %v", err)
+		}
+	}
 	if unixListener != nil {
 		_ = unixListener.Close()
 	}
@@ -441,9 +459,28 @@ func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
 	dnsData := data.GetInstance()
 	dnsData.IncrementTotalQueries()
 
+	// Extract requester IP
+	requesterIP := "unknown"
+	if addr := writer.RemoteAddr(); addr != nil {
+		if host, _, err := net.SplitHostPort(addr.String()); err == nil {
+			requesterIP = host
+		} else {
+			requesterIP = addr.String()
+		}
+	}
+
 	ctx := context.Background()
 	if dnsResolver != nil {
 		for _, question := range request.Question {
+			// Record full stats if enabled
+			if fullStatsTracker != nil {
+				recordType := dns.TypeToString[question.Qtype]
+				key := fmt.Sprintf("%s:%s", question.Name, recordType)
+				if err := fullStatsTracker.RecordRequest(key, requesterIP, recordType); err != nil {
+					log.Printf("Error recording full stats: %v", err)
+				}
+			}
+
 			dnsResolver.HandleQuestion(ctx, question, response)
 		}
 	}
@@ -539,7 +576,11 @@ func serveInteractiveSession(conn net.Conn) {
 	cfg.Stdin = conn
 	cfg.Stdout = conn
 	cfg.Stderr = conn
-	cfg.HistoryFile = ""
+	// Use the configured history file, or default if empty
+	if cfg.HistoryFile == "" {
+		cfg.HistoryFile = "/tmp/dnsplane.history"
+	}
+	cfg.DisableAutoSaveHistory = false // Enable auto-save for client sessions
 	cfg.FuncMakeRaw = func() error { return nil }
 	cfg.FuncExitRaw = func() error { return nil }
 	cfg.FuncIsTerminal = func() bool { return true }
