@@ -119,7 +119,6 @@ func NormalizeRecordValueKey(recordType, value string) string {
 // Add inserts a DNS record or updates an existing one when allowed. It returns the
 // updated slice alongside informational messages.
 func Add(fullCommand []string, dnsRecords []DNSRecord, allowUpdate bool) ([]DNSRecord, []Message, error) {
-	messages := make([]Message, 0)
 	if checkHelpCommand(fullCommand) {
 		return dnsRecords, usageAdd(), ErrHelpRequested
 	}
@@ -129,8 +128,44 @@ func Add(fullCommand []string, dnsRecords []DNSRecord, allowUpdate bool) ([]DNSR
 		msgs := append([]Message{{Level: LevelError, Text: err.Error()}}, usageAdd()...)
 		return dnsRecords, msgs, ErrInvalidArgs
 	}
+	return addRecordInternal(dnsRecord, dnsRecords, allowUpdate)
+}
+
+// AddRecord appends a DNSRecord to the collection, performing duplicate checks.
+func AddRecord(record DNSRecord, dnsRecords []DNSRecord, allowUpdate bool) ([]DNSRecord, []Message, error) {
+	record.Name = strings.TrimSpace(record.Name)
+	record.Value = strings.TrimSpace(record.Value)
+	record.Type = normalizeRecordType(record.Type)
+
+	if record.Name == "" || record.Type == "" || record.Value == "" {
+		msg := Message{Level: LevelError, Text: "name, type, and value are required"}
+		return dnsRecords, []Message{msg}, ErrInvalidArgs
+	}
+
+	if _, ok := dns.StringToType[record.Type]; !ok {
+		msg := Message{Level: LevelError, Text: fmt.Sprintf("invalid DNS record type: %s", record.Type)}
+		return dnsRecords, []Message{msg}, ErrInvalidArgs
+	}
+
+	if record.TTL == 0 {
+		record.TTL = 3600
+	}
+
+	if err := validateRecordValue(record.Type, record.Value); err != nil {
+		msg := Message{Level: LevelError, Text: err.Error()}
+		return dnsRecords, []Message{msg}, ErrInvalidArgs
+	}
+
+	record.AddedOn = time.Now()
+	return addRecordInternal(record, dnsRecords, allowUpdate)
+}
+
+func addRecordInternal(dnsRecord DNSRecord, dnsRecords []DNSRecord, allowUpdate bool) ([]DNSRecord, []Message, error) {
+	messages := make([]Message, 0)
 	dnsRecord.Type = normalizeRecordType(dnsRecord.Type)
-	dnsRecord.AddedOn = time.Now()
+	if dnsRecord.AddedOn.IsZero() {
+		dnsRecord.AddedOn = time.Now()
+	}
 
 	existingIndex := findDNSRecordIndex(dnsRecords, dnsRecord.Name, dnsRecord.Type, dnsRecord.Value)
 	if existingIndex != -1 {
@@ -403,20 +438,8 @@ func parseDNSRecordArgs(args []string) (DNSRecord, error) {
 		return DNSRecord{}, fmt.Errorf("invalid DNS record type: %s", recordType)
 	}
 
-	// Use a switch to handle record-specific validations
-	switch recordType {
-	case "A", "AAAA":
-		// For A/AAAA, ensure value is a valid IP
-		if !ipvalidator.IsValidIP(value) {
-			return DNSRecord{}, fmt.Errorf("invalid IP address: %s", value)
-		}
-	case "CNAME", "NS", "PTR", "TXT", "SRV", "SOA", "MX", "NAPTR", "CAA", "TLSA", "DS", "DNSKEY", "RRSIG", "NSEC", "NSEC3", "NSEC3PARAM":
-		// For these types, ensure value is a valid domain name
-		if _, ok := dns.IsDomainName(value); !ok {
-			return DNSRecord{}, fmt.Errorf("invalid domain name: %s", value)
-		}
-	default:
-		// For all other types, we don't need to validate the value for now
+	if err := validateRecordValue(recordType, value); err != nil {
+		return DNSRecord{}, err
 	}
 
 	// Finally, parse the TTL
@@ -436,33 +459,91 @@ func parseDNSRecordArgs(args []string) (DNSRecord, error) {
 	return dnsRecord, nil
 }
 
-// FindRecord searches for a DNS record in the list of DNS records.
-func FindRecord(dnsRecords []DNSRecord, lookupRecord, recordType string, autoBuildPTRFromA bool) *dns.RR {
-	for _, record := range dnsRecords {
-		if record.Type == "PTR" || (recordType == "PTR" && autoBuildPTRFromA) {
-			if record.Value == lookupRecord {
-				recordString := fmt.Sprintf("%s %d IN PTR %s.", converters.ConvertIPToReverseDNS(lookupRecord), record.TTL, strings.TrimRight(record.Name, "."))
-				fmt.Println("recordstring", recordString)
-
-				rr := recordString
-				dnsRecord, err := dns.NewRR(rr)
-				if err != nil {
-					fmt.Println("Error creating PTR record", err)
-					return nil // Error handling if the PTR record can't be created
-				}
-				// fmt.Println(dnsRecord.String())
-				return &dnsRecord
-			}
+func validateRecordValue(recordType, value string) error {
+	switch recordType {
+	case "A", "AAAA":
+		if !ipvalidator.IsValidIP(value) {
+			return fmt.Errorf("invalid IP address: %s", value)
 		}
-
-		if record.Name == lookupRecord && record.Type == recordType {
-			rr := fmt.Sprintf("%s %d IN %s %s", record.Name, record.TTL, record.Type, record.Value)
-			dnsRecord, err := dns.NewRR(rr)
-			if err != nil {
-				return nil
-			}
-			return &dnsRecord
+	case "CNAME", "NS", "PTR", "TXT", "SRV", "SOA", "MX", "NAPTR", "CAA", "TLSA", "DS", "DNSKEY", "RRSIG", "NSEC", "NSEC3", "NSEC3PARAM":
+		if _, ok := dns.IsDomainName(value); !ok {
+			return fmt.Errorf("invalid domain name: %s", value)
 		}
 	}
 	return nil
+}
+
+// FindRecord searches for a DNS record in the list of DNS records.
+// Returns the first matching record (for backward compatibility).
+func FindRecord(dnsRecords []DNSRecord, lookupRecord, recordType string, autoBuildPTRFromA bool) *dns.RR {
+	all := FindAllRecords(dnsRecords, lookupRecord, recordType, autoBuildPTRFromA)
+	if len(all) == 0 {
+		return nil
+	}
+	return &all[0]
+}
+
+// FindAllRecords searches for all DNS records matching the given name and type.
+// This is the correct behavior for DNS servers - multiple A/AAAA records for the same domain are legal.
+func FindAllRecords(dnsRecords []DNSRecord, lookupRecord, recordType string, autoBuildPTRFromA bool) []dns.RR {
+	var results []dns.RR
+	normalizedLookup := normalizeRecordNameKey(lookupRecord)
+	normalizedType := normalizeRecordType(recordType)
+
+	// For PTR queries, convert reverse DNS format to IP address
+	var lookupIP string
+	if recordType == "PTR" {
+		lookupIP = converters.ConvertReverseDNSToIP(lookupRecord)
+	}
+
+	for _, record := range dnsRecords {
+		if recordType == "PTR" {
+			// Handle auto-build PTR from A records
+			if autoBuildPTRFromA && (record.Type == "A" || record.Type == "AAAA") {
+				recordIP := normalizeRecordValueKey(record.Type, record.Value)
+				if lookupIP != "" && recordIP == strings.ToLower(lookupIP) {
+					// Build PTR record from A/AAAA record
+					ptrDomain := strings.TrimRight(record.Name, ".")
+					if !strings.HasSuffix(ptrDomain, ".") {
+						ptrDomain += "."
+					}
+					recordString := fmt.Sprintf("%s %d IN PTR %s", lookupRecord, record.TTL, ptrDomain)
+					rr, err := dns.NewRR(recordString)
+					if err == nil {
+						results = append(results, rr)
+					}
+				}
+			}
+
+			// Handle explicit PTR records
+			if record.Type == "PTR" && lookupIP != "" {
+				recordIP := normalizeRecordNameKey(record.Name)
+				if recordIP == strings.ToLower(lookupIP) {
+					// Found PTR record matching the IP
+					ptrDomain := strings.TrimRight(record.Value, ".")
+					if !strings.HasSuffix(ptrDomain, ".") {
+						ptrDomain += "."
+					}
+					recordString := fmt.Sprintf("%s %d IN PTR %s", lookupRecord, record.TTL, ptrDomain)
+					rr, err := dns.NewRR(recordString)
+					if err == nil {
+						results = append(results, rr)
+					}
+				}
+			}
+			continue
+		}
+
+		// Match by name and type (normalized) for non-PTR queries
+		normalizedRecordName := normalizeRecordNameKey(record.Name)
+		normalizedRecordType := normalizeRecordType(record.Type)
+		if normalizedRecordName == normalizedLookup && normalizedRecordType == normalizedType {
+			rrString := fmt.Sprintf("%s %d IN %s %s", record.Name, record.TTL, record.Type, record.Value)
+			rr, err := dns.NewRR(rrString)
+			if err == nil {
+				results = append(results, rr)
+			}
+		}
+	}
+	return results
 }
