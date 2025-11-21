@@ -2,6 +2,7 @@
 package data
 
 import (
+	"dnsplane/adblock"
 	"dnsplane/config"
 	"dnsplane/dnsrecordcache"
 	"dnsplane/dnsrecords"
@@ -39,6 +40,7 @@ type DNSResolverData struct {
 	DNSServers   []dnsservers.DNSServer
 	DNSRecords   []dnsrecords.DNSRecord
 	CacheRecords []dnsrecordcache.CacheRecord
+	BlockList    *adblock.BlockList
 	mu           sync.RWMutex
 }
 
@@ -142,6 +144,7 @@ func (d *DNSResolverData) Initialize() error {
 	d.DNSServers = servers
 	d.DNSRecords = records
 	d.CacheRecords = cache
+	d.BlockList = adblock.NewBlockList()
 	d.Stats = DNSStats{ServerStartTime: time.Now()}
 	return nil
 }
@@ -267,6 +270,13 @@ func (d *DNSResolverData) IncrementQueriesAnswered() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.Stats.TotalQueriesAnswered++
+}
+
+// GetBlockList returns the adblock list
+func (d *DNSResolverData) GetBlockList() *adblock.BlockList {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.BlockList
 }
 
 // LoadFromJSON reads a JSON file and unmarshals it into a struct

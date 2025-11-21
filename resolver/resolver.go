@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
+	"dnsplane/adblock"
 	"dnsplane/data"
 	"dnsplane/dnsrecordcache"
 	"dnsplane/dnsrecords"
@@ -22,8 +24,10 @@ type Store interface {
 	GetCacheRecords() []dnsrecordcache.CacheRecord
 	UpdateCacheRecords([]dnsrecordcache.CacheRecord)
 	GetServers() []dnsservers.DNSServer
+	GetBlockList() *adblock.BlockList
 	IncrementCacheHits()
 	IncrementQueriesAnswered()
+	IncrementTotalBlocks()
 }
 
 // UpstreamClient issues DNS queries to upstream resolvers.
@@ -82,6 +86,12 @@ func (r *Resolver) HandleQuestion(ctx context.Context, question dns.Question, re
 }
 
 func (r *Resolver) handleAQuestion(ctx context.Context, question dns.Question, response *dns.Msg) {
+	// Check if domain is blocked by adblock
+	if r.checkBlocked(question) {
+		r.processBlockedDomain(question, response)
+		return
+	}
+
 	settings := r.store.GetResolverSettings()
 	records := r.store.GetRecords()
 	recordType := dns.TypeToString[question.Qtype]
@@ -117,6 +127,12 @@ func (r *Resolver) handlePTRQuestion(ctx context.Context, question dns.Question,
 }
 
 func (r *Resolver) handleDNSServers(ctx context.Context, question dns.Question, response *dns.Msg) {
+	// Check if domain is blocked by adblock before querying upstream
+	if r.checkBlocked(question) {
+		r.processBlockedDomain(question, response)
+		return
+	}
+
 	settings := r.store.GetResolverSettings()
 	dnsServers := dnsservers.GetDNSArray(r.store.GetServers(), true)
 	fallback := ""
@@ -290,4 +306,57 @@ func (r *Resolver) log(format string, args ...interface{}) {
 		return
 	}
 	r.logger(format, args...)
+}
+
+// checkBlocked checks if a domain is blocked by the adblock list.
+func (r *Resolver) checkBlocked(question dns.Question) bool {
+	if r == nil || r.store == nil {
+		return false
+	}
+	blockList := r.store.GetBlockList()
+	if blockList == nil {
+		return false
+	}
+	
+	// Normalize domain name (remove trailing dot)
+	domain := strings.TrimSuffix(question.Name, ".")
+	return blockList.IsBlocked(domain)
+}
+
+// processBlockedDomain returns a blocked response (0.0.0.0 for A, :: for AAAA).
+func (r *Resolver) processBlockedDomain(question dns.Question, response *dns.Msg) {
+	if r == nil || r.store == nil {
+		return
+	}
+	
+	r.store.IncrementTotalBlocks()
+	response.Authoritative = true
+	
+	var blockedIP string
+	var recordType uint16
+	
+	switch question.Qtype {
+	case dns.TypeA:
+		blockedIP = "0.0.0.0"
+		recordType = dns.TypeA
+	case dns.TypeAAAA:
+		blockedIP = "::"
+		recordType = dns.TypeAAAA
+	default:
+		// For other types, return NXDOMAIN or empty response
+		response.Rcode = dns.RcodeNameError
+		r.log("Query: %s, Blocked (adblock), Type: %s\n", question.Name, dns.TypeToString[question.Qtype])
+		return
+	}
+	
+	// Create a blocked response record
+	recordString := fmt.Sprintf("%s 300 IN %s %s", question.Name, dns.TypeToString[recordType], blockedIP)
+	rr, err := dns.NewRR(recordString)
+	if err != nil {
+		r.log("Query: %s, Error creating blocked response: %v\n", question.Name, err)
+		return
+	}
+	
+	response.Answer = append(response.Answer, rr)
+	r.log("Query: %s, Blocked (adblock), Reply: %s\n", question.Name, rr.String())
 }
