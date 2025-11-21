@@ -111,22 +111,39 @@ type CacheRecord struct {
 func GetInstance() *DNSResolverData {
 	if instance == nil {
 		instance = &DNSResolverData{}
-		instance.Initialize()
+		if err := instance.Initialize(); err != nil {
+			log.Fatalf("data: failed to initialise resolver data: %v", err)
+		}
 	}
 	return instance
 }
 
 // Initialize loads all data from JSON files
-func (d *DNSResolverData) Initialize() {
+func (d *DNSResolverData) Initialize() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	cfg := currentConfig()
 	d.Settings = cfg.Config
-	d.DNSServers = LoadDNSServers()
-	d.DNSRecords = LoadDNSRecords()
-	d.CacheRecords = LoadCacheRecords()
+
+	servers, err := LoadDNSServers()
+	if err != nil {
+		return fmt.Errorf("load dns servers: %w", err)
+	}
+	records, err := LoadDNSRecords()
+	if err != nil {
+		return fmt.Errorf("load dns records: %w", err)
+	}
+	cache, err := LoadCacheRecords()
+	if err != nil {
+		return fmt.Errorf("load cache records: %w", err)
+	}
+
+	d.DNSServers = servers
+	d.DNSRecords = records
+	d.CacheRecords = cache
 	d.Stats = DNSStats{ServerStartTime: time.Now()}
+	return nil
 }
 
 // GetResolverSettings returns the current DNS server settings
@@ -169,7 +186,7 @@ func (d *DNSResolverData) UpdateStats(stats DNSStats) {
 func (d *DNSResolverData) GetServers() []dnsservers.DNSServer {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	return d.DNSServers
+	return copyDNSServers(d.DNSServers)
 }
 
 // UpdateServers updates the DNS servers
@@ -187,7 +204,7 @@ func (d *DNSResolverData) UpdateServers(servers []dnsservers.DNSServer) {
 func (d *DNSResolverData) GetRecords() []dnsrecords.DNSRecord {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	return d.DNSRecords
+	return copyDNSRecords(d.DNSRecords)
 }
 
 // UpdateRecords updates the DNS records
@@ -204,7 +221,7 @@ func (d *DNSResolverData) UpdateRecordsInMemory(records []dnsrecords.DNSRecord) 
 func (d *DNSResolverData) GetCacheRecords() []dnsrecordcache.CacheRecord {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	return d.CacheRecords
+	return copyCacheRecords(d.CacheRecords)
 }
 
 // UpdateCacheRecords updates the cache records
@@ -253,19 +270,18 @@ func (d *DNSResolverData) IncrementQueriesAnswered() {
 }
 
 // LoadFromJSON reads a JSON file and unmarshals it into a struct
-func LoadFromJSON[T any](filePath string) T {
+func LoadFromJSON[T any](filePath string) (T, error) {
 	var result T
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		log.Fatalf("Failed to read file: %v", err)
+		return result, err
 	}
 
-	err = json.Unmarshal(data, &result)
-	if err != nil {
-		log.Fatalf("Failed to unmarshal JSON: %v", err)
+	if err := json.Unmarshal(data, &result); err != nil {
+		return result, err
 	}
 
-	return result
+	return result, nil
 }
 
 // SaveToJSON marshals data and saves it to a JSON file
@@ -285,14 +301,17 @@ func SaveToJSON[T any](filePath string, data T) error {
 }
 
 // LoadDNSServers reads the dnsservers.json file and returns the list of DNS servers
-func LoadDNSServers() []dnsservers.DNSServer {
+func LoadDNSServers() ([]dnsservers.DNSServer, error) {
 	type serversType struct {
 		Servers []dnsservers.DNSServer `json:"dnsservers"`
 	}
 
 	paths := currentConfig().Config.FileLocations
-	servers := LoadFromJSON[serversType](paths.DNSServerFile)
-	return servers.Servers
+	servers, err := LoadFromJSON[serversType](paths.DNSServerFile)
+	if err != nil {
+		return nil, err
+	}
+	return servers.Servers, nil
 }
 
 // SaveDNSServers saves the DNS servers to the dnsservers.json file
@@ -307,13 +326,16 @@ func SaveDNSServers(dnsServers []dnsservers.DNSServer) error {
 }
 
 // LoadDNSRecords reads the dnsrecords.json file and returns the list of DNS records
-func LoadDNSRecords() []dnsrecords.DNSRecord {
+func LoadDNSRecords() ([]dnsrecords.DNSRecord, error) {
 	type recordsType struct {
 		Records []dnsrecords.DNSRecord `json:"records"`
 	}
 	paths := currentConfig().Config.FileLocations
-	records := LoadFromJSON[recordsType](paths.DNSRecordsFile)
-	return records.Records
+	records, err := LoadFromJSON[recordsType](paths.DNSRecordsFile)
+	if err != nil {
+		return nil, err
+	}
+	return records.Records, nil
 }
 
 // SaveDNSRecords saves the DNS records to the dnsrecords.json file
@@ -328,13 +350,16 @@ func SaveDNSRecords(gDNSRecords []dnsrecords.DNSRecord) error {
 }
 
 // LoadCacheRecords reads the dnscache.json file and returns the list of cache records
-func LoadCacheRecords() []dnsrecordcache.CacheRecord {
+func LoadCacheRecords() ([]dnsrecordcache.CacheRecord, error) {
 	type cacheType struct {
 		Cache []dnsrecordcache.CacheRecord `json:"cache"`
 	}
 	paths := currentConfig().Config.FileLocations
-	cache := LoadFromJSON[cacheType](paths.CacheFile)
-	return cache.Cache
+	cache, err := LoadFromJSON[cacheType](paths.CacheFile)
+	if err != nil {
+		return nil, err
+	}
+	return cache.Cache, nil
 }
 
 // SaveCacheRecords saves the cache records to the dnscache.json file
@@ -369,6 +394,33 @@ func (d *DNSResolverData) storeCacheRecords(records []dnsrecordcache.CacheRecord
 			fmt.Println("Failed to save cache records:", err)
 		}
 	}
+}
+
+func copyDNSRecords(src []dnsrecords.DNSRecord) []dnsrecords.DNSRecord {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make([]dnsrecords.DNSRecord, len(src))
+	copy(dst, src)
+	return dst
+}
+
+func copyDNSServers(src []dnsservers.DNSServer) []dnsservers.DNSServer {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make([]dnsservers.DNSServer, len(src))
+	copy(dst, src)
+	return dst
+}
+
+func copyCacheRecords(src []dnsrecordcache.CacheRecord) []dnsrecordcache.CacheRecord {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make([]dnsrecordcache.CacheRecord, len(src))
+	copy(dst, src)
+	return dst
 }
 
 // InitializeJSONFiles creates the JSON files if they don't exist

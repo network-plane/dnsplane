@@ -280,7 +280,8 @@ func registerContexts() {
 func runRecordList() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
 		dnsData := data.GetInstance()
-		listResult, err := dnsrecords.List(dnsData.DNSRecords, input.Raw)
+		records := dnsData.GetRecords()
+		listResult, err := dnsrecords.List(records, input.Raw)
 		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertRecordMessages(listResult.Messages)}
 		if errors.Is(err, dnsrecords.ErrHelpRequested) {
 			return result
@@ -303,8 +304,14 @@ func runRecordList() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResul
 func runRecordAdd(allowUpdate bool) func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
 		dnsData := data.GetInstance()
-		dnsData.Initialize()
-		updated, msgs, err := dnsrecords.Add(input.Raw, dnsData.DNSRecords, allowUpdate)
+		if err := dnsData.Initialize(); err != nil {
+			return tui.CommandResult{
+				Status: tui.StatusFailed,
+				Error:  &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError},
+			}
+		}
+		records := dnsData.GetRecords()
+		updated, msgs, err := dnsrecords.Add(input.Raw, records, allowUpdate)
 		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertRecordMessages(msgs)}
 		if errors.Is(err, dnsrecords.ErrHelpRequested) {
 			return result
@@ -323,7 +330,8 @@ func runRecordAdd(allowUpdate bool) func(tui.CommandRuntime, tui.CommandInput) t
 func runRecordRemove() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
 		dnsData := data.GetInstance()
-		updated, msgs, err := dnsrecords.Remove(input.Raw, dnsData.DNSRecords)
+		records := dnsData.GetRecords()
+		updated, msgs, err := dnsrecords.Remove(input.Raw, records)
 		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertRecordMessages(msgs)}
 		if errors.Is(err, dnsrecords.ErrHelpRequested) {
 			return result
@@ -374,7 +382,13 @@ func runRecordLoad() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResul
 			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
 		}
 		dnsData := data.GetInstance()
-		records := data.LoadDNSRecords()
+		records, err := data.LoadDNSRecords()
+		if err != nil {
+			return tui.CommandResult{
+				Status: tui.StatusFailed,
+				Error:  &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError},
+			}
+		}
 		dnsData.UpdateRecords(records)
 		return tui.CommandResult{Status: tui.StatusSuccess, Payload: records, Messages: infoMessages("DNS records loaded.")}
 	}
@@ -395,7 +409,8 @@ func runRecordSave() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResul
 			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
 		}
 		dnsData := data.GetInstance()
-		if err := data.SaveDNSRecords(dnsData.DNSRecords); err != nil {
+		records := dnsData.GetRecords()
+		if err := data.SaveDNSRecords(records); err != nil {
 			return tui.CommandResult{Status: tui.StatusFailed, Error: &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError}}
 		}
 		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("DNS records saved.")}
@@ -412,7 +427,8 @@ func runCacheList() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult
 			)
 			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
 		}
-		cache := dnsrecordcache.List(data.GetInstance().CacheRecords)
+		dnsData := data.GetInstance()
+		cache := dnsrecordcache.List(dnsData.GetCacheRecords())
 		result := tui.CommandResult{Status: tui.StatusSuccess, Payload: cache}
 		rt.Session().Set("cache:last_count", len(cache))
 		renderCacheTable(rt.Output(), cache)
@@ -426,7 +442,8 @@ func runCacheList() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult
 func runCacheRemove() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
 		dnsData := data.GetInstance()
-		updated, msgs, err := dnsrecordcache.Remove(input.Raw, dnsData.CacheRecords)
+		cacheRecords := dnsData.GetCacheRecords()
+		updated, msgs, err := dnsrecordcache.Remove(input.Raw, cacheRecords)
 		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertRecordMessages(msgs)}
 		if errors.Is(err, dnsrecordcache.ErrHelpRequested) {
 			return result
@@ -477,7 +494,13 @@ func runCacheLoad() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult
 			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
 		}
 		dnsData := data.GetInstance()
-		cache := data.LoadCacheRecords()
+		cache, err := data.LoadCacheRecords()
+		if err != nil {
+			return tui.CommandResult{
+				Status: tui.StatusFailed,
+				Error:  &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError},
+			}
+		}
 		dnsData.UpdateCacheRecordsInMemory(cache)
 		return tui.CommandResult{Status: tui.StatusSuccess, Payload: cache, Messages: infoMessages("Cache records loaded.")}
 	}
@@ -498,7 +521,8 @@ func runCacheSave() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult
 			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
 		}
 		dnsData := data.GetInstance()
-		if err := data.SaveCacheRecords(dnsData.CacheRecords); err != nil {
+		cache := dnsData.GetCacheRecords()
+		if err := data.SaveCacheRecords(cache); err != nil {
 			return tui.CommandResult{Status: tui.StatusFailed, Error: &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError}}
 		}
 		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("Cache records saved.")}
@@ -515,7 +539,9 @@ func runDNSList() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 			)
 			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
 		}
-		listResult := dnsservers.List(data.GetInstance().DNSServers)
+		dnsData := data.GetInstance()
+		servers := dnsData.GetServers()
+		listResult := dnsservers.List(servers)
 		result := tui.CommandResult{Status: tui.StatusSuccess, Payload: listResult.Servers, Messages: convertServerMessages(listResult.Messages)}
 		rt.Session().Set("dns:last_count", len(listResult.Servers))
 		renderDNSServerTable(rt.Output(), listResult.Servers)
@@ -526,7 +552,8 @@ func runDNSList() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 func runDNSAdd() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
 		dnsData := data.GetInstance()
-		updated, msgs, err := dnsservers.Add(input.Raw, dnsData.DNSServers)
+		servers := dnsData.GetServers()
+		updated, msgs, err := dnsservers.Add(input.Raw, servers)
 		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertServerMessages(msgs)}
 		if errors.Is(err, dnsservers.ErrHelpRequested) {
 			return result
@@ -545,7 +572,8 @@ func runDNSAdd() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 func runDNSRemove() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
 		dnsData := data.GetInstance()
-		updated, msgs, err := dnsservers.Remove(input.Raw, dnsData.DNSServers)
+		servers := dnsData.GetServers()
+		updated, msgs, err := dnsservers.Remove(input.Raw, servers)
 		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertServerMessages(msgs)}
 		if errors.Is(err, dnsservers.ErrHelpRequested) {
 			return result
@@ -564,7 +592,8 @@ func runDNSRemove() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult
 func runDNSUpdate() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
 		dnsData := data.GetInstance()
-		updated, msgs, err := dnsservers.Update(input.Raw, dnsData.DNSServers)
+		servers := dnsData.GetServers()
+		updated, msgs, err := dnsservers.Update(input.Raw, servers)
 		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertServerMessages(msgs)}
 		if errors.Is(err, dnsservers.ErrHelpRequested) {
 			return result
@@ -615,7 +644,13 @@ func runDNSLoad() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
 		}
 		dnsData := data.GetInstance()
-		servers := data.LoadDNSServers()
+		servers, err := data.LoadDNSServers()
+		if err != nil {
+			return tui.CommandResult{
+				Status: tui.StatusFailed,
+				Error:  &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError},
+			}
+		}
 		dnsData.UpdateServers(servers)
 		return tui.CommandResult{Status: tui.StatusSuccess, Payload: servers, Messages: infoMessages("DNS servers loaded.")}
 	}
@@ -636,7 +671,8 @@ func runDNSSave() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
 		}
 		dnsData := data.GetInstance()
-		if err := data.SaveDNSServers(dnsData.DNSServers); err != nil {
+		servers := dnsData.GetServers()
+		if err := data.SaveDNSServers(servers); err != nil {
 			return tui.CommandResult{Status: tui.StatusFailed, Error: &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError}}
 		}
 		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("DNS servers saved.")}
@@ -1276,9 +1312,9 @@ func handleStats(args []string) {
 	fmt.Println("Server start time:", dnsData.Stats.ServerStartTime)
 	fmt.Println("Server Up Time:", serverUpTimeFormat(dnsData.Stats.ServerStartTime))
 	fmt.Println()
-	fmt.Println("Total Records:", len(dnsData.DNSRecords))
-	fmt.Println("Total DNS Servers:", len(dnsData.DNSServers))
-	fmt.Println("Total Cache Records:", len(dnsData.CacheRecords))
+	fmt.Println("Total Records:", len(dnsData.GetRecords()))
+	fmt.Println("Total DNS Servers:", len(dnsData.GetServers()))
+	fmt.Println("Total Cache Records:", len(dnsData.GetCacheRecords()))
 	fmt.Println()
 	fmt.Println("Total queries received:", dnsData.Stats.TotalQueries)
 	fmt.Println("Total queries answered:", dnsData.Stats.TotalQueriesAnswered)
