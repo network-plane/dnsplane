@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"strings"
 
 	"dnsplane/daemon"
@@ -59,30 +60,53 @@ func RegisterDNSRoutes(router *gin.Engine) {
 	router.POST("/dns/records", addRecordHandler)
 }
 
+type AddRecordRequest struct {
+	Name  string  `json:"name" binding:"required"`
+	Type  string  `json:"type" binding:"required"`
+	Value string  `json:"value" binding:"required"`
+	TTL   *uint32 `json:"ttl,omitempty"`
+}
+
+func (r AddRecordRequest) toDNSRecord() dnsrecords.DNSRecord {
+	ttl := uint32(3600)
+	if r.TTL != nil && *r.TTL > 0 {
+		ttl = *r.TTL
+	}
+	return dnsrecords.DNSRecord{
+		Name:  strings.TrimSpace(r.Name),
+		Type:  strings.TrimSpace(r.Type),
+		Value: strings.TrimSpace(r.Value),
+		TTL:   ttl,
+	}
+}
+
 func addRecordHandler(c *gin.Context) {
 	dnsData := data.GetInstance()
-	var request []string
+	var request AddRecordRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(400, gin.H{"error": "invalid input"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
 		return
 	}
 
-	updated, messages, err := dnsrecords.Add(request, dnsData.DNSRecords, false)
-	if errors.Is(err, dnsrecords.ErrHelpRequested) {
-		c.JSON(200, gin.H{"messages": extractRecordMessages(messages)})
-		return
-	}
+	record := request.toDNSRecord()
+	records := dnsData.GetRecords()
+	updated, messages, err := dnsrecords.AddRecord(record, records, false)
 	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error(), "messages": extractRecordMessages(messages)})
+		status := http.StatusBadRequest
+		if !errors.Is(err, dnsrecords.ErrInvalidArgs) {
+			status = http.StatusInternalServerError
+		}
+		c.JSON(status, gin.H{"error": err.Error(), "messages": extractRecordMessages(messages)})
 		return
 	}
 	dnsData.UpdateRecords(updated)
-	c.JSON(201, gin.H{"status": "record added", "messages": extractRecordMessages(messages)})
+	c.JSON(http.StatusCreated, gin.H{"status": "record added", "messages": extractRecordMessages(messages)})
 }
 
 func listRecordsHandler(c *gin.Context) {
 	dnsData := data.GetInstance()
-	result, err := dnsrecords.List(dnsData.DNSRecords, []string{})
+	records := dnsData.GetRecords()
+	result, err := dnsrecords.List(records, []string{})
 	if errors.Is(err, dnsrecords.ErrHelpRequested) {
 		c.JSON(200, gin.H{"messages": extractRecordMessages(result.Messages)})
 		return
