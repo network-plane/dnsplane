@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -17,12 +18,9 @@ import (
 	"dnsplane/api"
 	"dnsplane/commandhandler"
 	"dnsplane/config"
-	"dnsplane/converters"
 	"dnsplane/daemon"
 	"dnsplane/data"
-	"dnsplane/dnsrecordcache"
-	"dnsplane/dnsrecords"
-	"dnsplane/dnsservers"
+	"dnsplane/resolver"
 
 	"github.com/chzyer/readline"
 	"github.com/miekg/dns"
@@ -39,9 +37,10 @@ const (
 )
 
 var (
-	appState   = daemon.NewState()
-	appversion = "0.1.17"
-	rootCmd    = &cobra.Command{
+	appState    = daemon.NewState()
+	appversion  = "0.1.17"
+	dnsResolver *resolver.Resolver
+	rootCmd     = &cobra.Command{
 		Use:           "dnsplane",
 		Short:         "DNS Server with optional CLI mode",
 		SilenceUsage:  true,
@@ -214,6 +213,15 @@ func runRoot(cmd *cobra.Command, args []string) error {
 
 	if apiMode {
 		startAPIAsync(appState, apiport)
+	}
+
+	if dnsResolver == nil {
+		dnsResolver = resolver.New(resolver.Config{
+			Store:           dnsData,
+			Upstream:        resolver.NewDNSClient(2 * time.Second),
+			Logger:          logQuery,
+			UpstreamTimeout: 2 * time.Second,
+		})
 	}
 
 	dns.HandleFunc(".", handleRequest)
@@ -433,227 +441,16 @@ func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
 	dnsData := data.GetInstance()
 	dnsData.IncrementTotalQueries()
 
-	for _, question := range request.Question {
-		handleQuestion(question, response)
+	ctx := context.Background()
+	if dnsResolver != nil {
+		for _, question := range request.Question {
+			dnsResolver.HandleQuestion(ctx, question, response)
+		}
 	}
 
 	err := writer.WriteMsg(response)
 	if err != nil {
 		log.Println("Error writing response:", err)
-	}
-}
-
-func handleQuestion(question dns.Question, response *dns.Msg) {
-	dnsdata := data.GetInstance()
-	dnsServerSettings := dnsdata.GetResolverSettings()
-	dnsRecords := dnsdata.GetRecords()
-
-	switch question.Qtype {
-	case dns.TypePTR:
-		handlePTRQuestion(question, response)
-		return
-
-	case dns.TypeA:
-		recordType := dns.TypeToString[question.Qtype]
-		cachedRecord := dnsrecords.FindRecord(dnsRecords, question.Name, recordType, dnsServerSettings.DNSRecordSettings.AutoBuildPTRFromA)
-
-		if cachedRecord != nil {
-			processCachedRecord(question, cachedRecord, response)
-		} else {
-			cachedRecord = findCacheRecord(dnsdata.GetCacheRecords(), question.Name, recordType)
-			if cachedRecord != nil {
-				dnsdata.IncrementCacheHits()
-				processCacheRecord(question, cachedRecord, response)
-			} else {
-
-				handleDNSServers(question, dnsservers.GetDNSArray(dnsdata.DNSServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
-			}
-		}
-
-	default:
-		handleDNSServers(question, dnsservers.GetDNSArray(dnsdata.DNSServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
-	}
-	dnsdata.IncrementQueriesAnswered()
-}
-
-func handlePTRQuestion(question dns.Question, response *dns.Msg) {
-	dnsdata := data.GetInstance()
-	dnsServerSettings := dnsdata.GetResolverSettings()
-
-	ipAddr := converters.ConvertReverseDNSToIP(question.Name)
-	dnsRecords := dnsdata.GetRecords()
-	recordType := dns.TypeToString[question.Qtype]
-
-	rrPointer := dnsrecords.FindRecord(dnsRecords, ipAddr, recordType, dnsServerSettings.DNSRecordSettings.AutoBuildPTRFromA)
-	if rrPointer != nil {
-		ptrRecord, ok := (*rrPointer).(*dns.PTR)
-		if !ok {
-			// Handle the case where the record is not a PTR record or cannot be cast
-			log.Println("Found record is not a PTR record or cannot be cast to *dns.PTR")
-			return
-		}
-
-		ptrDomain := ptrRecord.Ptr
-		if !strings.HasSuffix(ptrDomain, ".") {
-			ptrDomain += "."
-		}
-
-		// Now use ptrDomain in the sprintf, ensuring only one trailing dot is present
-		rrString := fmt.Sprintf("%s PTR %s", question.Name, ptrDomain)
-		rr, err := dns.NewRR(rrString)
-		if err == nil {
-			response.Answer = append(response.Answer, rr)
-		} else {
-			// Log the error
-			log.Printf("Error creating PTR record: %s\n", err)
-		}
-
-	} else {
-		logQuery("PTR record not found in dnsrecords.json\n")
-		handleDNSServers(question, dnsservers.GetDNSArray(dnsdata.DNSServers, true), fmt.Sprintf("%s:%s", dnsServerSettings.FallbackServerIP, dnsServerSettings.FallbackServerPort), response)
-	}
-}
-
-func dnsRecordToRR(dnsRecord *dnsrecords.DNSRecord, ttl uint32) *dns.RR {
-	recordString := fmt.Sprintf("%s %d IN %s %s", dnsRecord.Name, ttl, dnsRecord.Type, dnsRecord.Value)
-	rr, err := dns.NewRR(recordString)
-	if err != nil {
-		log.Printf("Error converting DnsRecord to dns.RR: %s\n", err)
-		return nil
-	}
-	return &rr
-}
-
-func processAuthoritativeAnswer(question dns.Question, answer *dns.Msg, response *dns.Msg) {
-	response.Answer = append(response.Answer, answer.Answer...)
-	response.Authoritative = true
-	logQuery("Query: %s, Reply: %s, Method: DNS server: %s\n", question.Name, answer.Answer[0].String(), answer.Answer[0].Header().Name[:len(answer.Answer[0].Header().Name)-1])
-
-	cacheDNSResponse(answer)
-}
-
-func handleFallbackServer(question dns.Question, fallbackServer string, response *dns.Msg) {
-	fallbackResponse, _ := queryAuthoritative(question.Name, fallbackServer)
-	if fallbackResponse != nil {
-		response.Answer = append(response.Answer, fallbackResponse.Answer...)
-		logQuery("Query: %s, Reply: %s, Method: Fallback DNS server: %s\n", question.Name, fallbackResponse.Answer[0].String(), fallbackServer)
-
-		cacheDNSResponse(fallbackResponse)
-	} else {
-		logQuery("Query: %s, No response\n", question.Name)
-	}
-}
-
-func cacheDNSResponse(answer *dns.Msg) {
-	if answer == nil || len(answer.Answer) == 0 {
-		return
-	}
-	cacheRRs(answer.Answer)
-}
-
-func cacheRRs(rrs []dns.RR) {
-	if len(rrs) == 0 {
-		return
-	}
-
-	dnsdata := data.GetInstance()
-	settings := dnsdata.GetResolverSettings()
-	if !settings.CacheRecords {
-		return
-	}
-
-	cache := dnsdata.GetCacheRecords()
-	for i := range rrs {
-		rr := rrs[i]
-		cache = dnsrecordcache.Add(cache, &rr)
-	}
-	dnsdata.UpdateCacheRecords(cache)
-}
-
-func processCachedRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
-	response.Answer = append(response.Answer, *cachedRecord)
-	response.Authoritative = true
-	logQuery("Query: %s, Reply: %s, Method: dnsrecords.json\n", question.Name, (*cachedRecord).String())
-	cacheRRs([]dns.RR{*cachedRecord})
-}
-
-func processCacheRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
-	response.Answer = append(response.Answer, *cachedRecord)
-	logQuery("Query: %s, Reply: %s, Method: dnscache.json\n", question.Name, (*cachedRecord).String())
-}
-
-func findCacheRecord(cacheRecords []dnsrecordcache.CacheRecord, name string, recordType string) *dns.RR {
-	now := time.Now()
-	for _, record := range cacheRecords {
-		if dnsrecords.NormalizeRecordNameKey(record.DNSRecord.Name) == dnsrecords.NormalizeRecordNameKey(name) &&
-			dnsrecords.NormalizeRecordType(record.DNSRecord.Type) == dnsrecords.NormalizeRecordType(recordType) {
-			if now.Before(record.Expiry) {
-				remainingTTL := uint32(record.Expiry.Sub(now).Seconds())
-				return dnsRecordToRR(&record.DNSRecord, remainingTTL)
-			}
-		}
-	}
-	return nil
-}
-
-func queryAuthoritative(questionName string, server string) (*dns.Msg, error) {
-	client := new(dns.Client)
-	client.Timeout = 2 * time.Second // Set the desired timeout duration
-	message := new(dns.Msg)
-	message.SetQuestion(questionName, dns.TypeA)
-	response, _, err := client.Exchange(message, server)
-	if err != nil {
-		log.Printf("Error querying DNS server (%s) for %s: %s\n", server, questionName, err)
-		return nil, err
-	}
-
-	if len(response.Answer) == 0 {
-		log.Printf("No answer received from DNS server (%s) for %s\n", server, questionName)
-		return nil, errors.New("no answer received")
-	}
-
-	logQuery("response %s\n", response.Answer[0].String())
-
-	return response, nil
-}
-
-func queryAllDNSServers(question dns.Question, dnsServers []string) <-chan *dns.Msg {
-	answers := make(chan *dns.Msg, len(dnsServers))
-	var wg sync.WaitGroup
-
-	for _, server := range dnsServers {
-		wg.Add(1)
-		go func(server string) {
-			defer wg.Done()
-			authResponse, _ := queryAuthoritative(question.Name, server)
-			if authResponse != nil {
-				answers <- authResponse
-			}
-		}(server)
-	}
-
-	go func() {
-		wg.Wait()
-		close(answers)
-	}()
-
-	return answers
-}
-
-func handleDNSServers(question dns.Question, dnsServers []string, fallbackServer string, response *dns.Msg) {
-	answers := queryAllDNSServers(question, dnsServers)
-
-	found := false
-	for answer := range answers {
-		if answer.MsgHdr.Authoritative {
-			processAuthoritativeAnswer(question, answer, response)
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		handleFallbackServer(question, fallbackServer, response)
 	}
 }
 
