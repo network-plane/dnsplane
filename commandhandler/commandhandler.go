@@ -804,7 +804,7 @@ func runToolsDig() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult 
 		}
 
 		// Determine DNS servers to query
-		servers := make([]string, 0)
+		var servers []string
 		if serverHost != "" {
 			if serverPort == "" {
 				serverPort = "53"
@@ -960,9 +960,7 @@ func parseDigArguments(args []string) (typeToken, target, serverHost, serverPort
 			idx++
 			if idx < len(args) {
 				token = strings.TrimSpace(args[idx])
-				if strings.HasPrefix(token, "@") {
-					token = strings.TrimPrefix(token, "@")
-				}
+				token = strings.TrimPrefix(token, "@")
 				if token != "" && serverHost == "" {
 					if host, port, ok := strings.Cut(token, ":"); ok {
 						serverHost = host
