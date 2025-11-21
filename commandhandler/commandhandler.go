@@ -917,7 +917,7 @@ func runToolsDig() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult 
 		}
 
 		if len(rows) > 0 {
-			out.WriteTable([]string{"Server", "Status", "Time", "Answer"}, rows)
+			writeSimpleTable(out, []string{"Server", "Status", "Time", "Answer"}, rows)
 			tui.EnsureLineBreak(out)
 		}
 
@@ -1054,6 +1054,57 @@ func isAllDigits(value string) bool {
 		}
 	}
 	return true
+}
+
+func writeSimpleTable(out tui.OutputChannel, headers []string, rows [][]string) {
+	if len(headers) == 0 {
+		return
+	}
+	cols := len(headers)
+	widths := make([]int, cols)
+	for i, header := range headers {
+		widths[i] = len(header)
+	}
+	for _, row := range rows {
+		for i := 0; i < cols && i < len(row); i++ {
+			if len(row[i]) > widths[i] {
+				widths[i] = len(row[i])
+			}
+		}
+	}
+	formatParts := make([]string, cols)
+	separatorParts := make([]string, cols)
+	for i, width := range widths {
+		formatParts[i] = fmt.Sprintf("%%-%ds", width)
+		sepWidth := width
+		if sepWidth > 40 {
+			sepWidth = sepWidth / 2
+			if sepWidth < len(headers[i]) {
+				sepWidth = len(headers[i])
+			}
+		}
+		separatorParts[i] = strings.Repeat("-", sepWidth)
+	}
+	format := strings.Join(formatParts, "  ")
+	separator := strings.Join(separatorParts, "  ")
+
+	out.Info(fmt.Sprintf(format, toInterface(headers, cols)...))
+	out.Info(separator)
+	for _, row := range rows {
+		out.Info(fmt.Sprintf(format, toInterface(row, cols)...))
+	}
+}
+
+func toInterface(values []string, count int) []interface{} {
+	result := make([]interface{}, count)
+	for i := 0; i < count; i++ {
+		if i < len(values) {
+			result[i] = values[i]
+		} else {
+			result[i] = ""
+		}
+	}
+	return result
 }
 
 // RegisterCommands registers all DNS related contexts and commands with the TUI package.
