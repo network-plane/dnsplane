@@ -7,7 +7,7 @@ require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/miekg/dns v1.1.68
 	github.com/network-plane/planetui v1.0.3
-	github.com/spf13/cobra v1.10.1
+	github.com/spf13/cobra v1.10.2
 	go.etcd.io/bbolt v1.4.3
 	golang.org/x/sync v0.18.0
 	golang.org/x/term v0.37.0
