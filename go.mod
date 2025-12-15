@@ -5,7 +5,7 @@ go 1.25.1
 require (
 	github.com/chzyer/readline v1.5.1
 	github.com/gin-gonic/gin v1.11.0
-	github.com/miekg/dns v1.1.68
+	github.com/miekg/dns v1.1.69
 	github.com/network-plane/planetui v1.0.3
 	github.com/spf13/cobra v1.10.2
 	go.etcd.io/bbolt v1.4.3
@@ -41,10 +41,10 @@ require (
 	go.uber.org/mock v0.6.0 // indirect
 	golang.org/x/arch v0.21.0 // indirect
 	golang.org/x/crypto v0.45.0 // indirect
-	golang.org/x/mod v0.29.0 // indirect
+	golang.org/x/mod v0.30.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
-	golang.org/x/tools v0.38.0 // indirect
+	golang.org/x/tools v0.39.0 // indirect
 	google.golang.org/protobuf v1.36.9 // indirect
 )
