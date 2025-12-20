@@ -9,7 +9,7 @@ require (
 	github.com/network-plane/planetui v1.0.3
 	github.com/spf13/cobra v1.10.2
 	go.etcd.io/bbolt v1.4.3
-	golang.org/x/sync v0.18.0
+	golang.org/x/sync v0.19.0
 	golang.org/x/term v0.37.0
 )
 
