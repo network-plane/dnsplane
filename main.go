@@ -15,6 +15,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chzyer/readline"
+	"github.com/miekg/dns"
+	tui "github.com/network-plane/planetui"
+	"github.com/spf13/cobra"
+	"golang.org/x/term"
+
 	"dnsplane/api"
 	"dnsplane/commandhandler"
 	"dnsplane/config"
@@ -22,13 +28,6 @@ import (
 	"dnsplane/data"
 	"dnsplane/fullstats"
 	"dnsplane/resolver"
-
-	"github.com/chzyer/readline"
-	"github.com/miekg/dns"
-	"github.com/spf13/cobra"
-	"golang.org/x/term"
-
-	tui "github.com/network-plane/planetui"
 )
 
 const (
@@ -117,6 +116,13 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	clientRequested := cmd.Flags().Changed("client")
 	clientTarget, _ := cmd.Flags().GetString("client")
 	if clientRequested {
+		// If --server-tcp is set in client mode, use it as the connection target
+		// This takes precedence over the default value from NoOptDefVal
+		if cmd.Flags().Changed("server-tcp") {
+			if serverTCP, err := cmd.Flags().GetString("server-tcp"); err == nil && serverTCP != "" {
+				clientTarget = strings.TrimSpace(serverTCP)
+			}
+		}
 		if clientTarget == "" {
 			clientTarget = strings.TrimSpace(settings.ClientSocketPath)
 			if clientTarget == "" {
