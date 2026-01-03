@@ -38,7 +38,7 @@ const (
 
 var (
 	appState         = daemon.NewState()
-	appversion       = "0.1.17"
+	appversion       = "0.1.59"
 	dnsResolver      *resolver.Resolver
 	fullStatsTracker *fullstats.Tracker
 	rootCmd          = &cobra.Command{
