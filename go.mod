@@ -5,7 +5,7 @@ go 1.25.1
 require (
 	github.com/chzyer/readline v1.5.1
 	github.com/gin-gonic/gin v1.11.0
-	github.com/miekg/dns v1.1.69
+	github.com/miekg/dns v1.1.70
 	github.com/network-plane/planetui v1.0.3
 	github.com/spf13/cobra v1.10.2
 	go.etcd.io/bbolt v1.4.3
