@@ -73,14 +73,11 @@ func Load() (*Loaded, error) {
 		}
 	}
 
-	defaultDir, err := defaultConfigDir()
+	defaultDir, err := os.Getwd()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("config: determine working directory: %w", err)
 	}
 
-	if err := os.MkdirAll(defaultDir, 0o755); err != nil {
-		return nil, fmt.Errorf("config: ensure config directory %s: %w", defaultDir, err)
-	}
 	defaultPath := filepath.Join(defaultDir, FileName)
 	cfg := defaultConfig(defaultDir)
 	if err := writeConfig(defaultPath, cfg); err != nil {
@@ -90,31 +87,59 @@ func Load() (*Loaded, error) {
 	return &Loaded{Path: defaultPath, Created: true, Config: *cfg}, nil
 }
 
+// resolveConfigPath returns the config file path. If path is a directory (ends
+// with /, exists as dir, or path has no extension), returns path/FileName;
+// otherwise returns path as the config file path.
+func resolveConfigPath(path string) (string, error) {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "" || path == "." {
+		return "", fmt.Errorf("config: path is empty")
+	}
+	isDir := strings.HasSuffix(path, string(filepath.Separator))
+	if !isDir {
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			isDir = true
+		} else if !strings.Contains(filepath.Base(path), ".") {
+			isDir = true
+		}
+	}
+	if isDir {
+		path = strings.TrimSuffix(path, string(filepath.Separator))
+		return filepath.Join(path, FileName), nil
+	}
+	return path, nil
+}
+
 // LoadFromPath loads configuration from the given path, or creates a default
-// config at that path if the file does not exist.
+// config at that path if the file does not exist. Path may be a directory
+// (then config is path/dnsplane.json) or a file path (then that file is used).
 func LoadFromPath(path string) (*Loaded, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil, fmt.Errorf("config: path is empty")
 	}
-	cfg, err := readConfig(path)
+	configPath, err := resolveConfigPath(path)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := readConfig(configPath)
 	if err == nil {
-		cfg.applyDefaults(filepath.Dir(path))
-		return &Loaded{Path: path, Config: *cfg}, nil
+		cfg.applyDefaults(filepath.Dir(configPath))
+		return &Loaded{Path: configPath, Config: *cfg}, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("config: failed to read %s: %w", path, err)
+		return nil, fmt.Errorf("config: failed to read %s: %w", configPath, err)
 	}
-	dir := filepath.Dir(path)
+	dir := filepath.Dir(configPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("config: ensure config directory %s: %w", dir, err)
 	}
 	defaultCfg := defaultConfig(dir)
-	if err := writeConfig(path, defaultCfg); err != nil {
+	if err := writeConfig(configPath, defaultCfg); err != nil {
 		return nil, err
 	}
 	defaultCfg.applyDefaults(dir)
-	return &Loaded{Path: path, Created: true, Config: *defaultCfg}, nil
+	return &Loaded{Path: configPath, Created: true, Config: *defaultCfg}, nil
 }
 
 // Read loads and normalises configuration from the specified path without
@@ -168,14 +193,6 @@ func userConfigPath() (string, error) {
 		return "", fmt.Errorf("config: determine user config dir: %w", err)
 	}
 	return filepath.Join(dir, "dnsplane", FileName), nil
-}
-
-func defaultConfigDir() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("config: determine user config dir: %w", err)
-	}
-	return filepath.Join(dir, "dnsplane"), nil
 }
 
 func readConfig(path string) (*Config, error) {
