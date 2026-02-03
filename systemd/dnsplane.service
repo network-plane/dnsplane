@@ -1,0 +1,27 @@
+# Install: copy to /etc/systemd/system/dnsplane.service
+# Prepare: mkdir -p /etc/dnsplane; first run creates default config and JSON files there if missing
+# Binary: install dnsplane to /usr/local/dnsplane/dnsplane
+# Then: systemctl daemon-reload && systemctl enable --now dnsplane.service
+
+[Unit]
+Description=DNS Resolver (dnsplane)
+Documentation=https://github.com/network-plane/dnsplane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/dnsplane/dnsplane \
+    --config /etc/dnsplane/dnsplane.json \
+    --dnsservers /etc/dnsplane/dnsservers.json \
+    --dnsrecords /etc/dnsplane/dnsrecords.json \
+    --cache /etc/dnsplane/dnscache.json
+Restart=on-failure
+RestartSec=5
+
+# Optional: run as unprivileged user (create dnsplane user and set NoNewPrivileges=yes if desired)
+# User=dnsplane
+# Group=dnsplane
+
+[Install]
+WantedBy=multi-user.target
