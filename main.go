@@ -81,46 +81,8 @@ func resolveDataPath(value, defaultFileName, cwd string) string {
 }
 
 func main() {
-	// Parse flags early so we can use --config and file paths before loading.
-	_ = rootCmd.ParseFlags(os.Args[1:])
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	var loadedCfg *config.Loaded
-	if configPath, _ := rootCmd.Flags().GetString("config"); configPath != "" {
-		loadedCfg, err = config.LoadFromPath(configPath)
-	} else {
-		loadedCfg, err = config.Load()
-	}
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Set data file locations: from flags (dir → dir/defaultname, file → path) or cwd when not set.
-	dnsservers, _ := rootCmd.Flags().GetString("dnsservers")
-	dnsrecords, _ := rootCmd.Flags().GetString("dnsrecords")
-	cache, _ := rootCmd.Flags().GetString("cache")
-	loadedCfg.Config.FileLocations.DNSServerFile = resolveDataPath(dnsservers, "dnsservers.json", cwd)
-	loadedCfg.Config.FileLocations.DNSRecordsFile = resolveDataPath(dnsrecords, "dnsrecords.json", cwd)
-	loadedCfg.Config.FileLocations.CacheFile = resolveDataPath(cache, "dnscache.json", cwd)
-
-	data.SetConfig(loadedCfg)
-	if loadedCfg.Created {
-		fmt.Printf("Created default config at %s\n", loadedCfg.Path)
-	}
-
-	// Create JSON files if they don't exist using configured locations.
-	data.InitializeJSONFiles()
-
-	// Ensure resolver settings are initialised before running commands
-	data.GetInstance().GetResolverSettings()
-
 	rootCmd.Version = fmt.Sprintf("DNS Resolver %s", appversion)
 	rootCmd.SetVersionTemplate("{{.Version}}\n")
-
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal(err)
 	}
@@ -160,24 +122,16 @@ func normalizeTCPAddress(addr string) string {
 func runRoot(cmd *cobra.Command, args []string) error {
 	remaining := append([]string(nil), args...)
 
-	dnsData := data.GetInstance()
-	settings := dnsData.GetResolverSettings()
-
-	clientRequested := cmd.Flags().Changed("client")
-	clientTarget, _ := cmd.Flags().GetString("client")
-	if clientRequested {
-		// If --server-tcp is set in client mode, use it as the connection target
-		// This takes precedence over the default value from NoOptDefVal
+	// Client mode: no config or file creation, just connect.
+	if cmd.Flags().Changed("client") {
+		clientTarget, _ := cmd.Flags().GetString("client")
 		if cmd.Flags().Changed("server-tcp") {
 			if serverTCP, err := cmd.Flags().GetString("server-tcp"); err == nil && serverTCP != "" {
 				clientTarget = strings.TrimSpace(serverTCP)
 			}
 		}
 		if clientTarget == "" {
-			clientTarget = strings.TrimSpace(settings.ClientSocketPath)
-			if clientTarget == "" {
-				clientTarget = defaultUnixSocketPath
-			}
+			clientTarget = defaultUnixSocketPath
 		}
 		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
 			clientTarget = remaining[0]
@@ -189,6 +143,34 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		connectToInteractiveEndpoint(clientTarget)
 		return nil
 	}
+
+	// Server mode: load config and create data files only when we are about to serve DNS.
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	var loadedCfg *config.Loaded
+	if configPath, _ := cmd.Flags().GetString("config"); configPath != "" {
+		loadedCfg, err = config.LoadFromPath(configPath)
+	} else {
+		loadedCfg, err = config.Load()
+	}
+	if err != nil {
+		return err
+	}
+	dnsservers, _ := cmd.Flags().GetString("dnsservers")
+	dnsrecords, _ := cmd.Flags().GetString("dnsrecords")
+	cache, _ := cmd.Flags().GetString("cache")
+	loadedCfg.Config.FileLocations.DNSServerFile = resolveDataPath(dnsservers, "dnsservers.json", cwd)
+	loadedCfg.Config.FileLocations.DNSRecordsFile = resolveDataPath(dnsrecords, "dnsrecords.json", cwd)
+	loadedCfg.Config.FileLocations.CacheFile = resolveDataPath(cache, "dnscache.json", cwd)
+	data.SetConfig(loadedCfg)
+	if loadedCfg.Created {
+		fmt.Printf("Created default config at %s\n", loadedCfg.Path)
+	}
+	data.InitializeJSONFiles()
+	dnsData := data.GetInstance()
+	settings := dnsData.GetResolverSettings()
 
 	if len(remaining) > 0 {
 		return fmt.Errorf("unexpected arguments: %v", remaining)
