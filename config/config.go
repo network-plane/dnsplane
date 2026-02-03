@@ -90,6 +90,33 @@ func Load() (*Loaded, error) {
 	return &Loaded{Path: defaultPath, Created: true, Config: *cfg}, nil
 }
 
+// LoadFromPath loads configuration from the given path, or creates a default
+// config at that path if the file does not exist.
+func LoadFromPath(path string) (*Loaded, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, fmt.Errorf("config: path is empty")
+	}
+	cfg, err := readConfig(path)
+	if err == nil {
+		cfg.applyDefaults(filepath.Dir(path))
+		return &Loaded{Path: path, Config: *cfg}, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("config: failed to read %s: %w", path, err)
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("config: ensure config directory %s: %w", dir, err)
+	}
+	defaultCfg := defaultConfig(dir)
+	if err := writeConfig(path, defaultCfg); err != nil {
+		return nil, err
+	}
+	defaultCfg.applyDefaults(dir)
+	return &Loaded{Path: path, Created: true, Config: *defaultCfg}, nil
+}
+
 // Read loads and normalises configuration from the specified path without
 // searching other locations.
 func Read(path string) (*Config, error) {
