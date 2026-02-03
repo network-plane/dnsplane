@@ -17,6 +17,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -55,12 +56,40 @@ func resetTUIState() {
 	}
 }
 
+// resolveDataPath returns the file path for a data file. If value is empty,
+// returns cwd/defaultFileName. If value is a directory (ends with /, exists as
+// dir, or base has no extension), returns value/defaultFileName; else returns value.
+func resolveDataPath(value, defaultFileName, cwd string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return filepath.Join(cwd, defaultFileName)
+	}
+	value = filepath.Clean(value)
+	isDir := strings.HasSuffix(value, string(filepath.Separator))
+	if !isDir {
+		if info, err := os.Stat(value); err == nil && info.IsDir() {
+			isDir = true
+		} else if !strings.Contains(filepath.Base(value), ".") {
+			isDir = true
+		}
+	}
+	if isDir {
+		value = strings.TrimSuffix(value, string(filepath.Separator))
+		return filepath.Join(value, defaultFileName)
+	}
+	return value
+}
+
 func main() {
 	// Parse flags early so we can use --config and file paths before loading.
 	_ = rootCmd.ParseFlags(os.Args[1:])
 
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	var loadedCfg *config.Loaded
-	var err error
 	if configPath, _ := rootCmd.Flags().GetString("config"); configPath != "" {
 		loadedCfg, err = config.LoadFromPath(configPath)
 	} else {
@@ -70,16 +99,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Override file locations from flags when provided.
-	if v, _ := rootCmd.Flags().GetString("dnsservers"); v != "" {
-		loadedCfg.Config.FileLocations.DNSServerFile = v
-	}
-	if v, _ := rootCmd.Flags().GetString("dnsrecords"); v != "" {
-		loadedCfg.Config.FileLocations.DNSRecordsFile = v
-	}
-	if v, _ := rootCmd.Flags().GetString("cache"); v != "" {
-		loadedCfg.Config.FileLocations.CacheFile = v
-	}
+	// Set data file locations: from flags (dir → dir/defaultname, file → path) or cwd when not set.
+	dnsservers, _ := rootCmd.Flags().GetString("dnsservers")
+	dnsrecords, _ := rootCmd.Flags().GetString("dnsrecords")
+	cache, _ := rootCmd.Flags().GetString("cache")
+	loadedCfg.Config.FileLocations.DNSServerFile = resolveDataPath(dnsservers, "dnsservers.json", cwd)
+	loadedCfg.Config.FileLocations.DNSRecordsFile = resolveDataPath(dnsrecords, "dnsrecords.json", cwd)
+	loadedCfg.Config.FileLocations.CacheFile = resolveDataPath(cache, "dnscache.json", cwd)
 
 	data.SetConfig(loadedCfg)
 	if loadedCfg.Created {
