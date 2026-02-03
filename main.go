@@ -3,6 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"dnsplane/api"
+	"dnsplane/commandhandler"
+	"dnsplane/config"
+	"dnsplane/daemon"
+	"dnsplane/data"
+	"dnsplane/fullstats"
+	"dnsplane/resolver"
 	"errors"
 	"fmt"
 	"io"
@@ -20,14 +27,6 @@ import (
 	tui "github.com/network-plane/planetui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
-
-	"dnsplane/api"
-	"dnsplane/commandhandler"
-	"dnsplane/config"
-	"dnsplane/daemon"
-	"dnsplane/data"
-	"dnsplane/fullstats"
-	"dnsplane/resolver"
 )
 
 const (
@@ -57,10 +56,31 @@ func resetTUIState() {
 }
 
 func main() {
-	loadedCfg, err := config.Load()
+	// Parse flags early so we can use --config and file paths before loading.
+	_ = rootCmd.ParseFlags(os.Args[1:])
+
+	var loadedCfg *config.Loaded
+	var err error
+	if configPath, _ := rootCmd.Flags().GetString("config"); configPath != "" {
+		loadedCfg, err = config.LoadFromPath(configPath)
+	} else {
+		loadedCfg, err = config.Load()
+	}
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// Override file locations from flags when provided.
+	if v, _ := rootCmd.Flags().GetString("dnsservers"); v != "" {
+		loadedCfg.Config.FileLocations.DNSServerFile = v
+	}
+	if v, _ := rootCmd.Flags().GetString("dnsrecords"); v != "" {
+		loadedCfg.Config.FileLocations.DNSRecordsFile = v
+	}
+	if v, _ := rootCmd.Flags().GetString("cache"); v != "" {
+		loadedCfg.Config.FileLocations.CacheFile = v
+	}
+
 	data.SetConfig(loadedCfg)
 	if loadedCfg.Created {
 		fmt.Printf("Created default config at %s\n", loadedCfg.Path)
@@ -82,12 +102,16 @@ func main() {
 
 func init() {
 	flags := rootCmd.PersistentFlags()
+	flags.String("config", "", "Path to config file (default: standard search order)")
+	flags.String("dnsservers", "", "Path to dnsservers.json file (overrides config)")
+	flags.String("dnsrecords", "", "Path to dnsrecords.json file (overrides config)")
+	flags.String("cache", "", "Path to dnscache.json file (overrides config)")
 	flags.String("port", "53", "Port for DNS server")
 	flags.String("server-socket", defaultUnixSocketPath, "Path to UNIX domain socket for the daemon listener")
 	flags.String("server-tcp", defaultTCPTerminalAddr, "TCP address for remote TUI clients")
 	flags.Bool("api", false, "Enable the REST API")
 	flags.String("apiport", "8080", "Port for the REST API")
-	flags.StringP("client", "", "", "Run in client mode socket or address (default: "+defaultUnixSocketPath+")")
+	flags.String("client", "", "Run in client mode socket or address (default: "+defaultUnixSocketPath+")")
 	if f := flags.Lookup("client"); f != nil {
 		f.NoOptDefVal = defaultUnixSocketPath
 	}
