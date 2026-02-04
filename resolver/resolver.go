@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/miekg/dns"
+	"golang.org/x/sync/errgroup"
+
 	"dnsplane/adblock"
 	"dnsplane/data"
 	"dnsplane/dnsrecordcache"
 	"dnsplane/dnsrecords"
 	"dnsplane/dnsservers"
-
-	"github.com/miekg/dns"
-	"golang.org/x/sync/errgroup"
 )
 
 // Store abstracts access to resolver data.
@@ -175,11 +175,15 @@ type upstreamResult struct {
 }
 
 func (r *Resolver) queryAllDNSServers(ctx context.Context, question dns.Question, servers []string) <-chan upstreamResult {
-	results := make(chan upstreamResult)
 	if len(servers) == 0 || r.upstream == nil {
+		results := make(chan upstreamResult)
 		close(results)
 		return results
 	}
+	// Buffered channel so workers can send without blocking when the consumer
+	// breaks out early (e.g. after first authoritative answer). Prevents
+	// goroutine leak that would otherwise exhaust resources over time.
+	results := make(chan upstreamResult, len(servers))
 
 	g, ctx := errgroup.WithContext(ctx)
 	for _, server := range servers {
