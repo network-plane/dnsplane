@@ -1768,11 +1768,21 @@ func handleStats(args []string) {
 	printRuntimeStats()
 }
 
+// Goroutine state metric names (Go 1.26+, not yet in 1.25.x). If absent, breakdown is skipped.
+var goroutineStateMetrics = []string{
+	"/sched/goroutines/running:goroutines",
+	"/sched/goroutines/runnable:goroutines",
+	"/sched/goroutines/waiting:goroutines",
+	"/sched/goroutines/not-in-go:goroutines",
+}
+
 // printRuntimeStats prints current process runtime stats (goroutines, memory, threads).
 // Values are read at call time and are not stored.
 func printRuntimeStats() {
 	fmt.Println("--- Runtime (live, not stored) ---")
-	fmt.Println("Goroutines:", runtime.NumGoroutine())
+	total := runtime.NumGoroutine()
+	fmt.Println("Goroutines:", total)
+	printGoroutineStateBreakdown()
 	fmt.Println("OS threads (GOMAXPROCS):", runtime.GOMAXPROCS(0))
 	fmt.Println("NumCPU:", runtime.NumCPU())
 
@@ -1784,15 +1794,63 @@ func printRuntimeStats() {
 	fmt.Println("Sys (MB):", m.Sys/1024/1024)
 	fmt.Println("GC cycles:", m.NumGC)
 
-	// Optional: goroutine/thread breakdown from runtime/metrics
 	printRuntimeMetrics()
+}
+
+// printGoroutineStateBreakdown prints running/runnable/waiting/not-in-go when available (Go 1.26+).
+func printGoroutineStateBreakdown() {
+	samples := make([]metrics.Sample, len(goroutineStateMetrics))
+	for i := range goroutineStateMetrics {
+		samples[i].Name = goroutineStateMetrics[i]
+	}
+	metrics.Read(samples)
+	var running, runnable, waiting, notInGo *uint64
+	for i := range samples {
+		if samples[i].Value.Kind() != metrics.KindUint64 {
+			continue
+		}
+		v := samples[i].Value.Uint64()
+		switch samples[i].Name {
+		case "/sched/goroutines/running:goroutines":
+			running = &v
+		case "/sched/goroutines/runnable:goroutines":
+			runnable = &v
+		case "/sched/goroutines/waiting:goroutines":
+			waiting = &v
+		case "/sched/goroutines/not-in-go:goroutines":
+			notInGo = &v
+		}
+	}
+	if running == nil && runnable == nil && waiting == nil && notInGo == nil {
+		fmt.Println("  (running / runnable / waiting breakdown: available from Go 1.26+)")
+		return
+	}
+	fmt.Print("  ")
+	var parts []string
+	if running != nil {
+		parts = append(parts, fmt.Sprintf("running: %d", *running))
+	}
+	if runnable != nil {
+		parts = append(parts, fmt.Sprintf("runnable: %d", *runnable))
+	}
+	if waiting != nil {
+		parts = append(parts, fmt.Sprintf("waiting: %d", *waiting))
+	}
+	if notInGo != nil {
+		parts = append(parts, fmt.Sprintf("not-in-go: %d", *notInGo))
+	}
+	fmt.Println(strings.Join(parts, ", "))
 }
 
 func printRuntimeMetrics() {
 	descs := metrics.All()
 	var schedNames []string
+	seen := make(map[string]bool)
+	for _, n := range goroutineStateMetrics {
+		seen[n] = true
+	}
 	for _, d := range descs {
-		if strings.HasPrefix(d.Name, "/sched/") {
+		if strings.HasPrefix(d.Name, "/sched/") && !seen[d.Name] {
 			schedNames = append(schedNames, d.Name)
 		}
 	}
