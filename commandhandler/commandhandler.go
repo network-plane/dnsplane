@@ -16,6 +16,8 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime"
+	"runtime/metrics"
 	"strings"
 	"sync"
 	"time"
@@ -1747,6 +1749,60 @@ func handleStats(args []string) {
 	fmt.Println("Total queries answered:", dnsData.Stats.TotalQueriesAnswered)
 	fmt.Println("Total cache hits:", dnsData.Stats.TotalCacheHits)
 	fmt.Println("Total queries forwarded:", dnsData.Stats.TotalQueriesForwarded)
+	fmt.Println()
+	printRuntimeStats()
+}
+
+// printRuntimeStats prints current process runtime stats (goroutines, memory, threads).
+// Values are read at call time and are not stored.
+func printRuntimeStats() {
+	fmt.Println("--- Runtime (live, not stored) ---")
+	fmt.Println("Goroutines:", runtime.NumGoroutine())
+	fmt.Println("OS threads (GOMAXPROCS):", runtime.GOMAXPROCS(0))
+	fmt.Println("NumCPU:", runtime.NumCPU())
+
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	fmt.Println("Heap alloc (MB):", m.Alloc/1024/1024)
+	fmt.Println("Heap sys (MB):", m.HeapSys/1024/1024)
+	fmt.Println("Stack in use (MB):", m.StackInuse/1024/1024)
+	fmt.Println("Sys (MB):", m.Sys/1024/1024)
+	fmt.Println("GC cycles:", m.NumGC)
+
+	// Optional: goroutine/thread breakdown from runtime/metrics
+	printRuntimeMetrics()
+}
+
+func printRuntimeMetrics() {
+	descs := metrics.All()
+	var schedNames []string
+	for _, d := range descs {
+		if strings.HasPrefix(d.Name, "/sched/") {
+			schedNames = append(schedNames, d.Name)
+		}
+	}
+	if len(schedNames) == 0 {
+		return
+	}
+	samples := make([]metrics.Sample, len(schedNames))
+	for i := range schedNames {
+		samples[i].Name = schedNames[i]
+	}
+	metrics.Read(samples)
+	for _, s := range samples {
+		var v uint64
+		switch s.Value.Kind() {
+		case metrics.KindUint64:
+			v = s.Value.Uint64()
+		case metrics.KindFloat64:
+			fmt.Println("  ", strings.TrimPrefix(s.Name, "/sched/")+":", s.Value.Float64())
+			continue
+		default:
+			continue
+		}
+		label := strings.TrimPrefix(s.Name, "/sched/")
+		fmt.Println("  ", label+":", v)
+	}
 }
 
 // Helper for formatting uptime
