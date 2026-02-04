@@ -3,13 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"dnsplane/api"
-	"dnsplane/commandhandler"
-	"dnsplane/config"
-	"dnsplane/daemon"
-	"dnsplane/data"
-	"dnsplane/fullstats"
-	"dnsplane/resolver"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +21,14 @@ import (
 	tui "github.com/network-plane/planetui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+
+	"dnsplane/api"
+	"dnsplane/commandhandler"
+	"dnsplane/config"
+	"dnsplane/daemon"
+	"dnsplane/data"
+	"dnsplane/fullstats"
+	"dnsplane/resolver"
 )
 
 const (
@@ -408,8 +409,10 @@ func startDNSServer(state *daemon.State, port string) (<-chan struct{}, <-chan e
 	dnsData := data.GetInstance()
 
 	server := &dns.Server{
-		Addr: fmt.Sprintf(":%s", trimmedPort),
-		Net:  "udp",
+		Addr:         fmt.Sprintf(":%s", trimmedPort),
+		Net:          "udp",
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
 	}
 
 	log.Printf("Starting DNS server on %s\n", server.Addr)
