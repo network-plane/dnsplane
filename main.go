@@ -310,6 +310,7 @@ func runRoot(cmd *cobra.Command, args []string) error {
 		InterruptPrompt:        "^C",
 		EOFPrompt:              "exit",
 		HistorySearchFold:      true,
+		FuncGetWidth:           func() int { return 80 }, // Fix: prevent -1 width causing cursor-up on each key
 	})
 
 	var unixListener net.Listener
@@ -583,45 +584,23 @@ func serveInteractiveSession(conn net.Conn) {
 	tuiLock.Lock()
 	defer tuiLock.Unlock()
 
-	readPipe, writePipe, err := os.Pipe()
-	if err != nil {
-		fmt.Fprintf(conn, "Error initialising session: %v\r\n", err)
-		return
-	}
-
-	oldStdout := os.Stdout
-	oldStderr := os.Stderr
-	os.Stdout = writePipe
-	os.Stderr = writePipe
-	prevOutputWriter := tui.SetOutputWriter(writePipe)
-
-	copyDone := make(chan struct{})
-	go func() {
-		_, _ = io.Copy(&crlfWriter{w: conn}, readPipe)
-		close(copyDone)
-	}()
-
-	defer func() {
-		tui.SetOutputWriter(prevOutputWriter)
-		_ = writePipe.Close()
-		<-copyDone
-		_ = readPipe.Close()
-		os.Stdout = oldStdout
-		os.Stderr = oldStderr
-	}()
+	// Wrap conn with CRLF writer so TUI output \n becomes \r\n
+	crlfConn := &crlfWriter{w: conn}
+	prevOutputWriter := tui.SetOutputWriter(crlfConn)
+	defer tui.SetOutputWriter(prevOutputWriter)
 
 	cfg := appState.ReadlineConfig()
 	cfg.Stdin = conn
 	cfg.Stdout = conn
 	cfg.Stderr = conn
-	// Use the configured history file, or default if empty
 	if cfg.HistoryFile == "" {
 		cfg.HistoryFile = "/tmp/dnsplane.history"
 	}
-	cfg.DisableAutoSaveHistory = false // Enable auto-save for client sessions
+	cfg.DisableAutoSaveHistory = false
 	cfg.FuncMakeRaw = func() error { return nil }
 	cfg.FuncExitRaw = func() error { return nil }
 	cfg.FuncIsTerminal = func() bool { return true }
+	cfg.FuncGetWidth = func() int { return 80 } // Fix: prevent -1 width causing cursor-up on each key
 	cfg.ForceUseInteractive = true
 
 	rl, err := readline.NewEx(&cfg)
@@ -632,6 +611,7 @@ func serveInteractiveSession(conn net.Conn) {
 	defer rl.Close()
 	defer resetTUIState()
 	resetTUIState()
+
 	if err := tui.Run(rl); err != nil {
 		fmt.Fprintf(conn, "\r\nSession terminated: %v\r\n", err)
 	} else {
