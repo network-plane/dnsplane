@@ -16,7 +16,15 @@ const (
 	requestsBucket   = "requests"
 	requestersBucket = "requesters"
 	dbFileName       = "stats.db"
+	asyncQueueSize   = 10000
 )
+
+// recordReq is a single request to record (for async processing).
+type recordReq struct {
+	key         string
+	requesterIP string
+	recordType  string
+}
 
 // RequestStats tracks statistics for a specific DNS request (domain + type).
 type RequestStats struct {
@@ -33,9 +41,12 @@ type RequesterStats struct {
 
 // Tracker manages full statistics tracking using bbolt.
 type Tracker struct {
-	db      *bbolt.DB
-	mu      sync.RWMutex
-	enabled bool
+	db       *bbolt.DB
+	mu       sync.RWMutex
+	enabled  bool
+	asyncCh  chan recordReq
+	asyncWg  sync.WaitGroup
+	closeOnce sync.Once
 }
 
 // New creates a new statistics tracker. If enabled is false, returns nil.
@@ -57,6 +68,7 @@ func New(statsDir string, enabled bool) (*Tracker, error) {
 	t := &Tracker{
 		db:      db,
 		enabled: true,
+		asyncCh: make(chan recordReq, asyncQueueSize),
 	}
 
 	// Initialize buckets
@@ -65,7 +77,17 @@ func New(statsDir string, enabled bool) (*Tracker, error) {
 		return nil, fmt.Errorf("fullstats: initialize buckets: %w", err)
 	}
 
+	t.asyncWg.Add(1)
+	go t.asyncWorker()
+
 	return t, nil
+}
+
+func (t *Tracker) asyncWorker() {
+	defer t.asyncWg.Done()
+	for req := range t.asyncCh {
+		_ = t.recordRequestSync(req.key, req.requesterIP, req.recordType)
+	}
 }
 
 func (t *Tracker) initBuckets() error {
@@ -80,10 +102,24 @@ func (t *Tracker) initBuckets() error {
 	})
 }
 
-// RecordRequest records a DNS request.
+// RecordRequest records a DNS request asynchronously so the DNS reply is not delayed by disk I/O.
 // key should be in format "domain:type" (e.g., "example.com:A")
 // requesterIP is the IP address of the client making the request.
+// If the async queue is full, the record is dropped (non-blocking).
 func (t *Tracker) RecordRequest(key string, requesterIP string, recordType string) error {
+	if t == nil || !t.enabled {
+		return nil
+	}
+	select {
+	case t.asyncCh <- recordReq{key: key, requesterIP: requesterIP, recordType: recordType}:
+	default:
+		// Queue full; drop to avoid blocking the DNS path
+	}
+	return nil
+}
+
+// recordRequestSync does the actual bbolt write (used by async worker).
+func (t *Tracker) recordRequestSync(key string, requesterIP string, recordType string) error {
 	if t == nil || !t.enabled {
 		return nil
 	}
@@ -253,12 +289,18 @@ func (t *Tracker) GetAllRequesters() (map[string]*RequesterStats, error) {
 	return result, err
 }
 
-// Close closes the database connection.
+// Close closes the async channel, waits for the worker to drain, then closes the database.
 func (t *Tracker) Close() error {
 	if t == nil || !t.enabled {
 		return nil
 	}
-	return t.db.Close()
+	var closeErr error
+	t.closeOnce.Do(func() {
+		close(t.asyncCh)
+		t.asyncWg.Wait()
+		closeErr = t.db.Close()
+	})
+	return closeErr
 }
 
 // Helper function to convert uint64 to bytes (for bbolt keys if needed)
