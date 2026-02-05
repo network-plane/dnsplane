@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/chzyer/readline"
 )
@@ -38,7 +40,11 @@ type State struct {
 
 	apiRunning atomic.Bool
 
-	tuiSessionMu sync.Mutex
+	tuiSessionMu   sync.Mutex
+	tuiClientMu    sync.Mutex
+	tuiClientConn  net.Conn
+	tuiClientAddr  string
+	tuiClientSince time.Time
 }
 
 // NewState builds a State with initial runtime defaults.
@@ -168,4 +174,42 @@ func (s *State) WithTUISession(fn func()) {
 // TUISessionMutex exposes the mutex guarding interactive TUI sessions for legacy call sites.
 func (s *State) TUISessionMutex() *sync.Mutex {
 	return &s.tuiSessionMu
+}
+
+// SetTUIClientSession records the current TUI client conn and addr. Call with tuiSessionMu held.
+func (s *State) SetTUIClientSession(conn net.Conn, addr string) {
+	s.tuiClientMu.Lock()
+	defer s.tuiClientMu.Unlock()
+	s.tuiClientConn = conn
+	s.tuiClientAddr = addr
+	s.tuiClientSince = time.Now()
+}
+
+// ClearTUIClientSession clears the current TUI client. Call with tuiSessionMu held (or from the session's defer).
+func (s *State) ClearTUIClientSession() {
+	s.tuiClientMu.Lock()
+	defer s.tuiClientMu.Unlock()
+	s.tuiClientConn = nil
+	s.tuiClientAddr = ""
+	s.tuiClientSince = time.Time{}
+}
+
+// GetTUIClientInfo returns the current TUI client addr and connected-since time (for busy message). Safe to call without holding tuiSessionMu.
+func (s *State) GetTUIClientInfo() (addr string, since time.Time) {
+	s.tuiClientMu.Lock()
+	defer s.tuiClientMu.Unlock()
+	return s.tuiClientAddr, s.tuiClientSince
+}
+
+// DisconnectCurrentTUIClient closes the current TUI client connection so a new session can take over (e.g. client --kill). The session goroutine will exit when its conn is closed.
+func (s *State) DisconnectCurrentTUIClient() {
+	s.tuiClientMu.Lock()
+	conn := s.tuiClientConn
+	s.tuiClientConn = nil
+	s.tuiClientAddr = ""
+	s.tuiClientSince = time.Time{}
+	s.tuiClientMu.Unlock()
+	if conn != nil {
+		_ = conn.Close()
+	}
 }
