@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -37,11 +38,13 @@ const (
 	defaultUnixSocketPath  = "/tmp/dnsplane.socket"
 	defaultTCPTerminalAddr = ":8053"
 	defaultClientTCPPort   = "8053"
+	// tuiBannerPrefix is sent by the server on new TUI connections; client must see this or disconnect.
+	tuiBannerPrefix = "dnsplane-tui"
 )
 
 var (
 	appState         = daemon.NewState()
-	appversion       = "0.1.63"
+	appversion       = "0.1.71"
 	dnsResolver      *resolver.Resolver
 	fullStatsTracker *fullstats.Tracker
 	dnsLogger        *slog.Logger
@@ -654,6 +657,12 @@ func serveInteractiveSession(conn net.Conn, log *slog.Logger) {
 		defer func() { log.Debug("TUI client disconnected", "addr", addr) }()
 	}
 
+	// Send banner first so remote client can verify this is a dnsplane server.
+	if err := conn.SetWriteDeadline(time.Now().Add(3 * time.Second)); err == nil {
+		_, _ = fmt.Fprintf(conn, "%s %s\n", tuiBannerPrefix, appversion)
+		_ = conn.SetWriteDeadline(time.Time{})
+	}
+
 	tuiLock := appState.TUISessionMutex()
 	tuiLock.Lock()
 	defer tuiLock.Unlock()
@@ -756,6 +765,27 @@ func connectToInteractiveEndpoint(target string) {
 	}
 	defer conn.Close()
 
+	// Verify server is dnsplane by reading the banner (avoids garbage/stuck when connecting to wrong service).
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	reader := bufio.NewReader(conn)
+	banner, err := reader.ReadString('\n')
+	_ = conn.SetReadDeadline(time.Time{})
+	if err != nil {
+		if clientLogger != nil {
+			clientLogger.Error("failed to read server banner", "address", address, "error", err)
+		}
+		fmt.Fprintf(os.Stderr, "Error: not a dnsplane server at %s (could not read banner: %v)\n", address, err)
+		return
+	}
+	banner = strings.TrimSpace(banner)
+	if !strings.HasPrefix(banner, tuiBannerPrefix) {
+		if clientLogger != nil {
+			clientLogger.Error("invalid server banner", "address", address, "banner", banner)
+		}
+		fmt.Fprintf(os.Stderr, "Error: not a dnsplane server at %s (got %q)\n", address, banner)
+		return
+	}
+
 	if clientLogger != nil {
 		clientLogger.Info("connected", "network", network, "address", address)
 	}
@@ -807,7 +837,7 @@ func connectToInteractiveEndpoint(target string) {
 	}()
 
 	go func() {
-		_, _ = io.Copy(os.Stdout, conn)
+		_, _ = io.Copy(os.Stdout, reader)
 		close(readDone)
 	}()
 
