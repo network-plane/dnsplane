@@ -31,6 +31,24 @@ type DNSRecordSettings struct {
 	AddUpdatesRecords bool `json:"add_updates_records,omitempty"`
 }
 
+// LogRotationMode is the log rotation strategy: "none", "size", or "time".
+type LogRotationMode string
+
+const (
+	LogRotationNone LogRotationMode = "none"
+	LogRotationSize LogRotationMode = "size"
+	LogRotationTime LogRotationMode = "time"
+)
+
+// LogConfig holds logging directory, severity, and rotation settings.
+type LogConfig struct {
+	Dir            string         `json:"log_dir"`
+	Severity       string         `json:"log_severity"`
+	Rotation       LogRotationMode `json:"log_rotation"`
+	RotationSizeMB int            `json:"log_rotation_size_mb"`
+	RotationDays   int            `json:"log_rotation_time_days"`
+}
+
 // Config captures all persisted settings for dnsplane.
 // Port/socket keys match CLI flags: --port, --apiport, --api, --server-socket, --server-tcp.
 type Config struct {
@@ -47,6 +65,7 @@ type Config struct {
 	ClientTCPAddress   string            `json:"server_tcp"`
 	FileLocations      FileLocations     `json:"file_locations"`
 	DNSRecordSettings  DNSRecordSettings `json:"DNSRecordSettings"`
+	Log                LogConfig         `json:"log"`
 }
 
 // Loaded contains the configuration together with metadata about the source file.
@@ -250,6 +269,13 @@ func defaultConfig(baseDir string) *Config {
 			AutoBuildPTRFromA: true,
 			ForwardPTRQueries: false,
 		},
+		Log: LogConfig{
+			Dir:            "/var/log/dnsplane",
+			Severity:       "none",
+			Rotation:       LogRotationSize,
+			RotationSizeMB: 100,
+			RotationDays:   7,
+		},
 	}
 }
 
@@ -281,6 +307,23 @@ func (c *Config) applyDefaults(configDir string) {
 	c.FileLocations.DNSServerFile = ensureAbsolutePath(configDir, c.FileLocations.DNSServerFile, "dnsservers.json")
 	c.FileLocations.DNSRecordsFile = ensureAbsolutePath(configDir, c.FileLocations.DNSRecordsFile, "dnsrecords.json")
 	c.FileLocations.CacheFile = ensureAbsolutePath(configDir, c.FileLocations.CacheFile, "dnscache.json")
+
+	if c.Log.Dir == "" {
+		c.Log.Dir = "/var/log/dnsplane"
+	}
+	if c.Log.Severity == "" {
+		c.Log.Severity = "none"
+	}
+	// "none" means logging disabled: no log files created
+	if c.Log.Rotation == "" {
+		c.Log.Rotation = LogRotationSize
+	}
+	if c.Log.RotationSizeMB <= 0 {
+		c.Log.RotationSizeMB = 100
+	}
+	if c.Log.RotationDays <= 0 {
+		c.Log.RotationDays = 7
+	}
 }
 
 func appendIfMissing(paths []string, candidate string) []string {
@@ -400,6 +443,9 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	}
 	if r, ok := raw["DNSRecordSettings"]; ok {
 		_ = json.Unmarshal(r, &c.DNSRecordSettings)
+	}
+	if r, ok := raw["log"]; ok {
+		_ = json.Unmarshal(r, &c.Log)
 	}
 	// If any renamed field was missing, standard unmarshal would leave zero value; apply defaults later via applyDefaults
 	return nil

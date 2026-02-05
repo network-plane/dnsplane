@@ -3,7 +3,7 @@ package api
 import (
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -20,18 +20,21 @@ type RouteRegistrar func(*gin.Engine)
 // Start launches the REST API server asynchronously. If registrar is nil, the
 // package's default DNS routes are registered. The server listens on the
 // provided port and updates the daemon state when it stops.
-func Start(state *daemon.State, port string, registrar RouteRegistrar) {
+// If logger is nil, no file logging is done for API messages.
+func Start(state *daemon.State, port string, registrar RouteRegistrar, logger *slog.Logger) {
 	if state == nil {
-		log.Printf("api: missing daemon state; cannot start API")
+		logAPIWarn(logger, "missing daemon state; cannot start API")
 		return
 	}
 	trimmed := strings.TrimSpace(port)
 	if trimmed == "" {
-		log.Printf("api: invalid port; refusing to start")
+		logAPIWarn(logger, "invalid port; refusing to start")
 		return
 	}
 	if state.APIRunning() {
-		log.Printf("api: server already running, skipping start")
+		if logger != nil {
+			logger.Info("API server already running; skipping start")
+		}
 		return
 	}
 	if registrar == nil {
@@ -39,6 +42,9 @@ func Start(state *daemon.State, port string, registrar RouteRegistrar) {
 	}
 
 	state.SetAPIRunning(true)
+	if logger != nil {
+		logger.Info("API server starting", "port", trimmed)
+	}
 	go func() {
 		defer state.SetAPIRunning(false)
 
@@ -46,9 +52,21 @@ func Start(state *daemon.State, port string, registrar RouteRegistrar) {
 		registrar(router)
 
 		if err := router.Run(fmt.Sprintf(":%s", trimmed)); err != nil {
-			log.Printf("api: server stopped with error: %v", err)
+			logAPIError(logger, "API server stopped with error", "error", err)
 		}
 	}()
+}
+
+func logAPIWarn(logger *slog.Logger, msg string, keyValues ...any) {
+	if logger != nil {
+		logger.Warn(msg, keyValues...)
+	}
+}
+
+func logAPIError(logger *slog.Logger, msg string, keyValues ...any) {
+	if logger != nil {
+		logger.Error(msg, keyValues...)
+	}
 }
 
 // RegisterDNSRoutes wires up the default DNS-related REST handlers.

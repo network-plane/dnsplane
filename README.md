@@ -71,6 +71,20 @@ https://github.com/user-attachments/assets/f5ca52cb-3874-499c-a594-ba3bf64b3ba9
 | dnscache.json | holds queries already done if their ttl diff is still above 0 |
 | dnsplane.json | the app config |
 
+## Logging
+
+**Server:** Logging is configured in `dnsplane.json` under a `log` section. By default logs are written to `/var/log/dnsplane/` with fixed filenames: `dnsserver.log`, `apiserver.log`, and `tuiserver.log`. You can set:
+
+- `log_dir` – directory for log files (default: `/var/log/dnsplane`)
+- `log_severity` – minimum level: `debug`, `info`, `warn`, or `error`; or `none` to disable logging (no log files are created). Default is `none`.
+- `log_rotation` – `none`, `size`, or `time`
+- `log_rotation_size_mb` – max size in MB before rotation (when rotation is `size`)
+- `log_rotation_time_days` – max age in days before rotation (when rotation is `time`)
+
+Rotation is checked at most every 5 minutes to avoid repeated stat calls. If writing to a log file fails, the process keeps running and the message is written to stderr.
+
+**Client:** File logging is off by default. Use `--log-file` to enable it; you can pass a file path or a directory (in which case the file is named `dnsplaneclient.log`).
+
 ## Running as a systemd service
 
 A systemd unit file is provided under `systemd/dnsplane.service`. It runs the binary from `/usr/local/dnsplane/` with the **server** command and **explicitly** passes config and data paths under `/etc/dnsplane/` (via `--config` and server flags `--dnsservers`, `--dnsrecords`, `--cache`). dnsplane does not use or create files in `/etc` by default; that only happens when you use this service file or pass those paths yourself.
