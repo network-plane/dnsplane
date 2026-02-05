@@ -47,7 +47,16 @@ var (
 		Short:         "DNS Server with optional CLI mode",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		RunE:          runRoot,
+	}
+	serverCmd = &cobra.Command{
+		Use:   "server",
+		Short: "Run the DNS server and optional TUI/API listeners",
+		RunE:  runServer,
+	}
+	clientCmd = &cobra.Command{
+		Use:   "client",
+		Short: "Connect to a running dnsplane server (TUI client)",
+		RunE:  runClient,
 	}
 )
 
@@ -90,18 +99,22 @@ func main() {
 }
 
 func init() {
-	flags := rootCmd.PersistentFlags()
-	flags.String("config", "", "Path to config file (default: standard search order)")
-	flags.String("dnsservers", "", "Path to dnsservers.json file (overrides config)")
-	flags.String("dnsrecords", "", "Path to dnsrecords.json file (overrides config)")
-	flags.String("cache", "", "Path to dnscache.json file (overrides config)")
-	flags.String("port", "53", "Port for DNS server")
-	flags.String("server-socket", defaultUnixSocketPath, "Path to UNIX domain socket for the daemon listener")
-	flags.String("server-tcp", defaultTCPTerminalAddr, "TCP address for remote TUI clients")
-	flags.Bool("api", false, "Enable the REST API")
-	flags.String("apiport", "8080", "Port for the REST API")
-	flags.String("client", "", "Run in client mode socket or address (default: "+defaultUnixSocketPath+")")
-	if f := flags.Lookup("client"); f != nil {
+	rootCmd.AddCommand(serverCmd, clientCmd)
+
+	// Server flags
+	serverCmd.Flags().String("config", "", "Path to config file (default: standard search order)")
+	serverCmd.Flags().String("port", "53", "Port for DNS server")
+	serverCmd.Flags().String("apiport", "8080", "Port for the REST API")
+	serverCmd.Flags().Bool("api", false, "Enable the REST API")
+	serverCmd.Flags().String("dnsservers", "", "Path to dnsservers.json file (overrides config)")
+	serverCmd.Flags().String("dnsrecords", "", "Path to dnsrecords.json file (overrides config)")
+	serverCmd.Flags().String("cache", "", "Path to dnscache.json file (overrides config)")
+	serverCmd.Flags().String("server-socket", defaultUnixSocketPath, "Path to UNIX domain socket for the daemon listener")
+	serverCmd.Flags().String("server-tcp", defaultTCPTerminalAddr, "TCP address for remote TUI clients")
+
+	// Client flags
+	clientCmd.Flags().String("client", "", "Socket path or address to connect to (default: "+defaultUnixSocketPath+")")
+	if f := clientCmd.Flags().Lookup("client"); f != nil {
 		f.NoOptDefVal = defaultUnixSocketPath
 	}
 }
@@ -120,38 +133,35 @@ func normalizeTCPAddress(addr string) string {
 	return addr
 }
 
-func runRoot(cmd *cobra.Command, args []string) error {
-	remaining := append([]string(nil), args...)
+func runClient(cmd *cobra.Command, args []string) error {
+	clientTarget, _ := cmd.Flags().GetString("client")
+	if clientTarget == "" {
+		clientTarget = defaultUnixSocketPath
+	}
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		clientTarget = args[0]
+		args = args[1:]
+	}
+	if len(args) > 0 {
+		return fmt.Errorf("unexpected arguments: %v", args)
+	}
+	connectToInteractiveEndpoint(clientTarget)
+	return nil
+}
 
-	// Client mode: no config or file creation, just connect.
-	if cmd.Flags().Changed("client") {
-		clientTarget, _ := cmd.Flags().GetString("client")
-		if cmd.Flags().Changed("server-tcp") {
-			if serverTCP, err := cmd.Flags().GetString("server-tcp"); err == nil && serverTCP != "" {
-				clientTarget = strings.TrimSpace(serverTCP)
-			}
-		}
-		if clientTarget == "" {
-			clientTarget = defaultUnixSocketPath
-		}
-		if len(remaining) > 0 && !strings.HasPrefix(remaining[0], "-") {
-			clientTarget = remaining[0]
-			remaining = remaining[1:]
-		}
-		if len(remaining) > 0 {
-			return fmt.Errorf("unexpected arguments: %v", remaining)
-		}
-		connectToInteractiveEndpoint(clientTarget)
-		return nil
+func runServer(cmd *cobra.Command, args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("unexpected arguments: %v", args)
 	}
 
-	// Server mode: load config and create data files only when we are about to serve DNS.
+	configPath, _ := cmd.Flags().GetString("config")
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
 	var loadedCfg *config.Loaded
-	if configPath, _ := cmd.Flags().GetString("config"); configPath != "" {
+	if configPath != "" {
 		loadedCfg, err = config.LoadFromPath(configPath)
 	} else {
 		loadedCfg, err = config.Load()
@@ -172,10 +182,6 @@ func runRoot(cmd *cobra.Command, args []string) error {
 	data.InitializeJSONFiles()
 	dnsData := data.GetInstance()
 	settings := dnsData.GetResolverSettings()
-
-	if len(remaining) > 0 {
-		return fmt.Errorf("unexpected arguments: %v", remaining)
-	}
 
 	port := settings.DNSPort
 	if cmd.Flags().Changed("port") {
