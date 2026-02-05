@@ -17,10 +17,11 @@ const (
 )
 
 // FileLocations describes the JSON data files used by dnsplane.
+// Keys match CLI flags: --dnsservers, --dnsrecords, --cache.
 type FileLocations struct {
-	DNSServerFile  string `json:"dnsserver_file"`
-	DNSRecordsFile string `json:"dnsrecords_file"`
-	CacheFile      string `json:"cache_file"`
+	DNSServerFile  string `json:"dnsservers"`
+	DNSRecordsFile string `json:"dnsrecords"`
+	CacheFile      string `json:"cache"`
 }
 
 // DNSRecordSettings mirrors record handling settings persisted in the config.
@@ -31,18 +32,19 @@ type DNSRecordSettings struct {
 }
 
 // Config captures all persisted settings for dnsplane.
+// Port/socket keys match CLI flags: --port, --apiport, --api, --server-socket, --server-tcp.
 type Config struct {
 	FallbackServerIP   string            `json:"fallback_server_ip"`
 	FallbackServerPort string            `json:"fallback_server_port"`
 	Timeout            int               `json:"timeout"`
-	DNSPort            string            `json:"dns_port"`
-	RESTPort           string            `json:"rest_port"`
-	APIEnabled         bool              `json:"api_enabled"`
+	DNSPort            string            `json:"port"`
+	RESTPort           string            `json:"apiport"`
+	APIEnabled         bool              `json:"api"`
 	CacheRecords       bool              `json:"cache_records"`
 	FullStats          bool              `json:"full_stats"`
 	FullStatsDir       string            `json:"full_stats_dir"`
-	ClientSocketPath   string            `json:"client_socket_path"`
-	ClientTCPAddress   string            `json:"client_tcp_address"`
+	ClientSocketPath   string            `json:"server_socket"`
+	ClientTCPAddress   string            `json:"server_tcp"`
 	FileLocations      FileLocations     `json:"file_locations"`
 	DNSRecordSettings  DNSRecordSettings `json:"DNSRecordSettings"`
 }
@@ -314,4 +316,91 @@ func extractLegacyRecordSettings(data []byte) *DNSRecordSettings {
 		return nil
 	}
 	return l.DNSRecordSettings
+}
+
+// UnmarshalJSON reads FileLocations, accepting legacy keys (dnsserver_file, dnsrecords_file, cache_file).
+func (fl *FileLocations) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	getStr := func(keys ...string) string {
+		for _, k := range keys {
+			if r, ok := raw[k]; ok && len(r) > 0 {
+				var s string
+				if json.Unmarshal(r, &s) == nil {
+					return s
+				}
+			}
+		}
+		return ""
+	}
+	fl.DNSServerFile = getStr("dnsservers", "dnsserver_file")
+	fl.DNSRecordsFile = getStr("dnsrecords", "dnsrecords_file")
+	fl.CacheFile = getStr("cache", "cache_file")
+	return nil
+}
+
+// UnmarshalJSON reads Config, accepting legacy keys (dns_port, rest_port, api_enabled, client_socket_path, client_tcp_address).
+func (c *Config) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	getStr := func(keys ...string) string {
+		for _, k := range keys {
+			if r, ok := raw[k]; ok && len(r) > 0 {
+				var s string
+				if json.Unmarshal(r, &s) == nil {
+					return s
+				}
+			}
+		}
+		return ""
+	}
+	getBool := func(keys ...string) (bool, bool) {
+		for _, k := range keys {
+			if r, ok := raw[k]; ok && len(r) > 0 {
+				var b bool
+				if json.Unmarshal(r, &b) == nil {
+					return b, true
+				}
+			}
+		}
+		return false, false
+	}
+	// Unmarshal all fields; for renamed ones we accept both new and old keys via getStr/getBool.
+	if r, ok := raw["fallback_server_ip"]; ok {
+		_ = json.Unmarshal(r, &c.FallbackServerIP)
+	}
+	if r, ok := raw["fallback_server_port"]; ok {
+		_ = json.Unmarshal(r, &c.FallbackServerPort)
+	}
+	if r, ok := raw["timeout"]; ok {
+		_ = json.Unmarshal(r, &c.Timeout)
+	}
+	c.DNSPort = getStr("port", "dns_port")
+	c.RESTPort = getStr("apiport", "rest_port")
+	if b, ok := getBool("api", "api_enabled"); ok {
+		c.APIEnabled = b
+	}
+	if r, ok := raw["cache_records"]; ok {
+		_ = json.Unmarshal(r, &c.CacheRecords)
+	}
+	if r, ok := raw["full_stats"]; ok {
+		_ = json.Unmarshal(r, &c.FullStats)
+	}
+	if r, ok := raw["full_stats_dir"]; ok {
+		_ = json.Unmarshal(r, &c.FullStatsDir)
+	}
+	c.ClientSocketPath = getStr("server_socket", "client_socket_path")
+	c.ClientTCPAddress = getStr("server_tcp", "client_tcp_address")
+	if r, ok := raw["file_locations"]; ok {
+		_ = json.Unmarshal(r, &c.FileLocations)
+	}
+	if r, ok := raw["DNSRecordSettings"]; ok {
+		_ = json.Unmarshal(r, &c.DNSRecordSettings)
+	}
+	// If any renamed field was missing, standard unmarshal would leave zero value; apply defaults later via applyDefaults
+	return nil
 }
