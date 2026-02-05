@@ -11,11 +11,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/dnsplane/dnsplane \
-    --config /etc/dnsplane/dnsplane.json \
-    --dnsservers /etc/dnsplane/dnsservers.json \
-    --dnsrecords /etc/dnsplane/dnsrecords.json \
-    --cache /etc/dnsplane/dnscache.json
+ExecStart=/usr/local/dnsplane/dnsplane server --config /etc/dnsplane/dnsplane.json --dnsservers /etc/dnsplane/dnsservers.json --dnsrecords /etc/dnsplane/dnsrecords.json --cache /etc/dnsplane/dnscache.json
 Restart=on-failure
 RestartSec=5
 

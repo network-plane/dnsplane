@@ -10,45 +10,48 @@ A non standard DNS Server with multiple management interfaces. Its main function
 
 ## Usage/Examples
 
-### start as daemon (default)
+dnsplane has two commands: **server** (run the DNS server and TUI/API listeners) and **client** (connect to a running server). The `--config` flag applies only to the **server** command.
+
+### start as daemon (server)
 ```bash
-./dnsplane
+./dnsplane server
 ```
 The daemon keeps the resolver running, exposes the UNIX control socket at `/tmp/dnsplane.socket`, and listens for remote TUI clients on TCP port `8053` by default.
 
 ### start in client mode (connects to the default unix socket unless overridden)
 ```bash
-./dnsplane --client
+./dnsplane client
 # or specify a custom socket path
-./dnsplane --client /tmp/dnsplane.sock
+./dnsplane client /tmp/dnsplane.sock
+./dnsplane client --client /tmp/dnsplane.sock
 ```
 
 ### connect to a remote resolver over TCP (default port 8053)
 ```bash
-./dnsplane --client 192.168.178.40
-./dnsplane --client 192.168.178.40:8053
+./dnsplane client 192.168.178.40
+./dnsplane client 192.168.178.40:8053
 ```
 
-### change the server socket path
+### change the server socket path (server command)
 ```bash
-./dnsplane --server-socket /tmp/custom.sock
+./dnsplane server --server-socket /tmp/custom.sock
 ```
 
-### change the TCP TUI listener
+### change the TCP TUI listener (server command)
 ```bash
-./dnsplane --server-tcp 0.0.0.0:9000
+./dnsplane server --server-tcp 0.0.0.0:9000
 ```
 
 ### config and data file paths
-When you do not pass any path flags, dnsplane looks for an existing `dnsplane.json` in the executable directory, then the user config dir (e.g. `~/.config/dnsplane/`), then `/etc/dnsplane.json`. If none is found, it creates the config and data files in the **current directory only** (never in `/etc` or elsewhere). You can override the config file and the JSON data files with flags:
+When you do not pass any path flags, dnsplane looks for an existing `dnsplane.json` in the executable directory, then the user config dir (e.g. `~/.config/dnsplane/`), then `/etc/dnsplane.json`. If none is found, it creates the config and data files in the **current directory only** (never in `/etc` or elsewhere). You can override the config file and the JSON data files with server flags:
 
 ```bash
-./dnsplane --config ./myconfig.json --dnsrecords ./records.json --cache ./cache.json --dnsservers ./servers.json
+./dnsplane server --config ./myconfig.json --dnsrecords ./records.json --cache ./cache.json --dnsservers ./servers.json
 ```
 
 | Flag | Purpose |
 | --- | --- |
-| `--config` | Path to config file; if the file does not exist, a default config is created there |
+| `--config` | Path to config file; if the file does not exist, a default config is created there (server only) |
 | `--dnsservers` | Path to dnsservers.json (overrides config) |
 | `--dnsrecords` | Path to dnsrecords.json (overrides config) |
 | `--cache` | Path to dnscache.json (overrides config) |
@@ -70,7 +73,7 @@ https://github.com/user-attachments/assets/f5ca52cb-3874-499c-a594-ba3bf64b3ba9
 
 ## Running as a systemd service
 
-A systemd unit file is provided under `systemd/dnsplane.service`. It runs the binary from `/usr/local/dnsplane/` and **explicitly** passes config and data paths under `/etc/dnsplane/` (via `--config`, `--dnsservers`, `--dnsrecords`, `--cache`). dnsplane does not use or create files in `/etc` by default; that only happens when you use this service file or pass those paths yourself.
+A systemd unit file is provided under `systemd/dnsplane.service`. It runs the binary from `/usr/local/dnsplane/` with the **server** command and **explicitly** passes config and data paths under `/etc/dnsplane/` (via `--config` and server flags `--dnsservers`, `--dnsrecords`, `--cache`). dnsplane does not use or create files in `/etc` by default; that only happens when you use this service file or pass those paths yourself.
 
 1. Install the binary: place the `dnsplane` executable at `/usr/local/dnsplane/dnsplane`.
 2. Copy the unit file: `cp systemd/dnsplane.service /etc/systemd/system/`.
