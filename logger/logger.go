@@ -15,6 +15,8 @@ import (
 	lj "gopkg.in/natefinch/lumberjack.v2"
 )
 
+const defaultAsyncLogQueueSize = 10000
+
 const (
 	rotationCheckInterval = 5 * time.Minute
 	clientLogFilename     = "dnsplaneclient.log"
@@ -198,4 +200,55 @@ func NewClientLogger(logFilePath string) *slog.Logger {
 	}
 	h := slog.NewTextHandler(wr, &slog.HandlerOptions{Level: slog.LevelInfo})
 	return slog.New(h)
+}
+
+// AsyncLogQueue runs log (and other) callbacks in a single background goroutine
+// so the caller never blocks on I/O. Used for the DNS reply path: the reply is
+// sent immediately and all logging/stats happen asynchronously.
+type AsyncLogQueue struct {
+	ch       chan func()
+	wg       sync.WaitGroup
+	closeOnce sync.Once
+}
+
+// NewAsyncLogQueue creates a queue with the given buffer size and starts the worker.
+// If size <= 0, defaultAsyncLogQueueSize is used.
+func NewAsyncLogQueue(size int) *AsyncLogQueue {
+	if size <= 0 {
+		size = defaultAsyncLogQueueSize
+	}
+	q := &AsyncLogQueue{ch: make(chan func(), size)}
+	q.wg.Add(1)
+	go q.worker()
+	return q
+}
+
+func (q *AsyncLogQueue) worker() {
+	defer q.wg.Done()
+	for f := range q.ch {
+		f()
+	}
+}
+
+// Enqueue adds f to the queue. If the queue is full, f is dropped so the caller never blocks.
+func (q *AsyncLogQueue) Enqueue(f func()) {
+	if q == nil || q.ch == nil {
+		return
+	}
+	select {
+	case q.ch <- f:
+	default:
+		// Queue full; drop to avoid blocking the DNS path
+	}
+}
+
+// Close closes the queue and waits for the worker to drain. Idempotent.
+func (q *AsyncLogQueue) Close() {
+	if q == nil {
+		return
+	}
+	q.closeOnce.Do(func() {
+		close(q.ch)
+		q.wg.Wait()
+	})
 }
