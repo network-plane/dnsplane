@@ -3,7 +3,6 @@ package resolver
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -16,6 +15,9 @@ import (
 	"dnsplane/dnsrecords"
 	"dnsplane/dnsservers"
 )
+
+// ErrorLogger logs errors (e.g. conversion failures). Optional.
+type ErrorLogger func(msg string, keyValues ...any)
 
 // Store abstracts access to resolver data.
 type Store interface {
@@ -43,6 +45,7 @@ type Config struct {
 	Store           Store
 	Upstream        UpstreamClient
 	Logger          QueryLogger
+	ErrorLogger     ErrorLogger
 	UpstreamTimeout time.Duration
 }
 
@@ -51,6 +54,7 @@ type Resolver struct {
 	store           Store
 	upstream        UpstreamClient
 	logger          QueryLogger
+	errorLogger     ErrorLogger
 	upstreamTimeout time.Duration
 }
 
@@ -64,6 +68,7 @@ func New(cfg Config) *Resolver {
 		store:           cfg.Store,
 		upstream:        cfg.Upstream,
 		logger:          cfg.Logger,
+		errorLogger:     cfg.ErrorLogger,
 		upstreamTimeout: timeout,
 	}
 }
@@ -102,7 +107,7 @@ func (r *Resolver) handleAQuestion(ctx context.Context, question dns.Question, r
 	}
 
 	cache := r.store.GetCacheRecords()
-	if cached := findCacheRecord(cache, question.Name, recordType); cached != nil {
+	if cached := findCacheRecord(cache, question.Name, recordType, r.errorLogger); cached != nil {
 		r.store.IncrementCacheHits()
 		r.processCacheRecord(question, cached, response)
 		return
@@ -281,25 +286,27 @@ func cacheDNSResponse(store Store, rrs []dns.RR) {
 	store.UpdateCacheRecords(cache)
 }
 
-func findCacheRecord(cacheRecords []dnsrecordcache.CacheRecord, name string, recordType string) *dns.RR {
+func findCacheRecord(cacheRecords []dnsrecordcache.CacheRecord, name string, recordType string, errorLog ErrorLogger) *dns.RR {
 	now := time.Now()
 	for _, record := range cacheRecords {
 		if dnsrecords.NormalizeRecordNameKey(record.DNSRecord.Name) == dnsrecords.NormalizeRecordNameKey(name) &&
 			dnsrecords.NormalizeRecordType(record.DNSRecord.Type) == dnsrecords.NormalizeRecordType(recordType) {
 			if now.Before(record.Expiry) {
 				remainingTTL := uint32(record.Expiry.Sub(now).Seconds())
-				return dnsRecordToRR(&record.DNSRecord, remainingTTL)
+				return dnsRecordToRR(&record.DNSRecord, remainingTTL, errorLog)
 			}
 		}
 	}
 	return nil
 }
 
-func dnsRecordToRR(dnsRecord *dnsrecords.DNSRecord, ttl uint32) *dns.RR {
+func dnsRecordToRR(dnsRecord *dnsrecords.DNSRecord, ttl uint32, errorLog ErrorLogger) *dns.RR {
 	recordString := fmt.Sprintf("%s %d IN %s %s", dnsRecord.Name, ttl, dnsRecord.Type, dnsRecord.Value)
 	rr, err := dns.NewRR(recordString)
 	if err != nil {
-		log.Printf("resolver: error converting DNSRecord to RR: %v\n", err)
+		if errorLog != nil {
+			errorLog("resolver: error converting DNSRecord to RR", "error", err)
+		}
 		return nil
 	}
 	return &rr
