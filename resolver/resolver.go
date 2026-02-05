@@ -1,3 +1,4 @@
+// Package resolver implements the DNS resolver.
 package resolver
 
 import (
