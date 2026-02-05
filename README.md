@@ -1,7 +1,14 @@
 # dnsplane
 ![dnsplane](https://github.com/user-attachments/assets/38214dcd-ca33-41ce-a88f-7edad7d85822)
 
-A non standard DNS Server with multiple management interfaces. Its main function is it will do the same dns request to multiple DNS servers, if any of the servers replies with an authoritative reply it chooses that, otherwise it provides the reply from the fallback dns server. This will help in case for example you have a local dns server and you connect to work over a VPN and use that DNS server at the same time.
+A non-standard DNS server with multiple management interfaces (TUI, API). It queries local records, cache, and all configured upstream DNS servers (plus an optional fallback) **in parallel**, then replies by priority: local data wins, then cache, then any authoritative upstream answer, then the first successful upstream answer. This fits setups where you have a local DNS server and use work DNS over VPN at the same time—authoritative answers (e.g. from the work server) are preferred when present; otherwise you get the fastest successful reply from any server.
+
+## Resolution behavior
+
+- **Parallel lookups:** For each A-record query, dnsplane runs **at the same time**: local records (dnsrecords.json), cache (dnscache.json), and every configured upstream—plus the fallback server when it is different from the upstreams. The reply is chosen by priority; there is no second round of queries.
+- **Priority:** (1) Local records, (2) cache, (3) any upstream that returned an **authoritative** answer, (4) the **first** successful answer from any upstream. If fallback is the same as an upstream, it is not queried twice; that server’s reply is used like any other upstream.
+- **Recursive resolvers:** Answers from resolvers like 1.1.1.1 (which are not authoritative for the domain) are accepted as “first success”; the server no longer waits for an authoritative reply and then re-querying fallback, so latency stays low (e.g. ~5–7 ms when the upstream is fast).
+- **Reply path:** The DNS reply is sent as soon as it is ready. Logging, stats, and cache persistence run asynchronously so they do not block the response.
 
 ## Diagram
 ![image](https://github.com/network-plane/dnsplane/assets/97396839/79acfa3e-8b83-48ec-92be-ed99085b2cc5)
@@ -98,8 +105,8 @@ When the service runs, it will create default `dnsplane.json` and JSON data file
 
 ## Roadmap
 
-- ad-blocking
-- full stats tracking
+- ad-blocking (implemented)
+- full stats tracking (implemented; optional, see config)
 
 ## Dependancies & Documentation
 [![Go Mod](https://img.shields.io/github/go-mod/go-version/network-plane/dnsplane?style=for-the-badge)]()

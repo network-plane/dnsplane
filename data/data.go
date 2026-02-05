@@ -35,13 +35,16 @@ import (
 
 // DNSResolverData holds all the data for the DNS resolver
 type DNSResolverData struct {
-	Settings     DNSResolverSettings
-	Stats        DNSStats
-	DNSServers   []dnsservers.DNSServer
-	DNSRecords   []dnsrecords.DNSRecord
-	CacheRecords []dnsrecordcache.CacheRecord
-	BlockList    *adblock.BlockList
-	mu           sync.RWMutex
+	Settings        DNSResolverSettings
+	Stats           DNSStats
+	DNSServers      []dnsservers.DNSServer
+	DNSRecords      []dnsrecords.DNSRecord
+	CacheRecords    []dnsrecordcache.CacheRecord
+	BlockList       *adblock.BlockList
+	mu              sync.RWMutex
+	persistCh       chan struct{}
+	persistWg       sync.WaitGroup
+	persistCloseOnce sync.Once
 }
 
 // DNSStats holds the data for the DNS statistics
@@ -146,7 +149,41 @@ func (d *DNSResolverData) Initialize() error {
 	d.CacheRecords = cache
 	d.BlockList = adblock.NewBlockList()
 	d.Stats = DNSStats{ServerStartTime: time.Now()}
+
+	d.persistCh = make(chan struct{}, 1)
+	d.persistWg.Add(1)
+	go d.cachePersistWorker()
+
 	return nil
+}
+
+// cachePersistWorker runs in the background and writes cache to disk when signaled.
+// This keeps the DNS reply path non-blocking; otherwise every cache update (including
+// answers from local records) would block on disk I/O and add ~85ms+ latency.
+func (d *DNSResolverData) cachePersistWorker() {
+	defer d.persistWg.Done()
+	for range d.persistCh {
+		d.mu.RLock()
+		snapshot := copyCacheRecords(d.CacheRecords)
+		d.mu.RUnlock()
+		if err := SaveCacheRecords(snapshot); err != nil {
+			fmt.Println("Failed to save cache records:", err)
+		}
+	}
+}
+
+// Close stops the async cache persist worker and waits for any pending write to finish.
+// Call this on server shutdown so the cache file is flushed.
+func (d *DNSResolverData) Close() {
+	if d == nil {
+		return
+	}
+	d.persistCloseOnce.Do(func() {
+		if d.persistCh != nil {
+			close(d.persistCh)
+			d.persistWg.Wait()
+		}
+	})
 }
 
 // GetResolverSettings returns the current DNS server settings
@@ -397,11 +434,13 @@ func (d *DNSResolverData) storeRecords(records []dnsrecords.DNSRecord, persist b
 
 func (d *DNSResolverData) storeCacheRecords(records []dnsrecordcache.CacheRecord, persist bool) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.CacheRecords = records
-	if persist {
-		if err := SaveCacheRecords(records); err != nil {
-			fmt.Println("Failed to save cache records:", err)
+	d.mu.Unlock()
+	if persist && d.persistCh != nil {
+		select {
+		case d.persistCh <- struct{}{}:
+		default:
+			// Worker busy or already has a pending write; skip to avoid blocking DNS path
 		}
 	}
 }
