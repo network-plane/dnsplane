@@ -47,6 +47,7 @@ var (
 	dnsLogger        *slog.Logger
 	apiLogger        *slog.Logger
 	tuiLogger        *slog.Logger
+	clientLogger     *slog.Logger
 	rootCmd          = &cobra.Command{
 		Use:           "dnsplane",
 		Short:         "DNS Server with optional CLI mode",
@@ -153,10 +154,13 @@ func runClient(cmd *cobra.Command, args []string) error {
 	}
 	logFilePath, _ := cmd.Flags().GetString("log-file")
 	if logFilePath != "" {
-		clientLog := logger.NewClientLogger(logFilePath)
-		clientLog.Info("client starting", "target", clientTarget)
+		clientLogger = logger.NewClientLogger(logFilePath)
+		clientLogger.Info("client starting", "target", clientTarget)
 	}
 	connectToInteractiveEndpoint(clientTarget)
+	if clientLogger != nil {
+		clientLogger.Debug("client exiting")
+	}
 	return nil
 }
 
@@ -187,9 +191,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 	loadedCfg.Config.FileLocations.DNSRecordsFile = resolveDataPath(dnsrecords, "dnsrecords.json", cwd)
 	loadedCfg.Config.FileLocations.CacheFile = resolveDataPath(cache, "dnscache.json", cwd)
 	data.SetConfig(loadedCfg)
-	if loadedCfg.Created {
-		fmt.Printf("Created default config at %s\n", loadedCfg.Path)
-	}
 	data.InitializeJSONFiles()
 	dnsData := data.GetInstance()
 	settings := dnsData.GetResolverSettings()
@@ -239,6 +240,12 @@ func runServer(cmd *cobra.Command, args []string) error {
 	apiLogger = logger.NewServerLogger(logger.APIServerLog, logCfg.Dir, logCfg)
 	tuiLogger = logger.NewServerLogger(logger.TUIServerLog, logCfg.Dir, logCfg)
 
+	if loadedCfg.Created {
+		dnsLogger.Info("Created default config", "path", loadedCfg.Path)
+	} else {
+		dnsLogger.Debug("Config loaded", "path", loadedCfg.Path)
+	}
+
 	normalisedTCP := normalizeTCPAddress(serverTCP)
 	appState.UpdateListener(func(info *daemon.ListenerSettings) {
 		info.ClientSocketPath = serverSocket
@@ -266,7 +273,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if settings.FullStats {
 		tracker, err := fullstats.New(settings.FullStatsDir, true)
 		if err != nil {
-			dnsLogger.Warn("Failed to initialize full stats tracker", "error", err)
+			dnsLogger.Warn("Failed to initialize full stats tracker; fullstats disabled", "error", err)
 		} else {
 			fullStatsTracker = tracker
 			dnsLogger.Info("Full statistics tracking enabled", "dir", settings.FullStatsDir)
@@ -294,6 +301,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 			Store:           dnsData,
 			Upstream:        resolver.NewDNSClient(2 * time.Second),
 			Logger:          logQuery,
+			ErrorLogger:     dnsErrorLog,
 			UpstreamTimeout: 2 * time.Second,
 		})
 	}
@@ -343,6 +351,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if serverSocket != "" {
 		listener, err := startUnixSocketListener(serverSocket, tuiLogger)
 		if err != nil {
+			if tuiLogger != nil {
+				tuiLogger.Error("failed to start UNIX socket listener", "path", serverSocket, "error", err)
+			}
 			return fmt.Errorf("unix socket listener error: %w", err)
 		}
 		unixListener = listener
@@ -351,6 +362,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if serverTCP != "" {
 		listener, err := startTCPTerminalListener(serverTCP, tuiLogger)
 		if err != nil {
+			if tuiLogger != nil {
+				tuiLogger.Error("failed to start TCP TUI listener", "address", serverTCP, "error", err)
+			}
 			return fmt.Errorf("tcp listener error: %w", err)
 		}
 		tcpListener = listener
@@ -359,20 +373,32 @@ func runServer(cmd *cobra.Command, args []string) error {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
+	if dnsLogger != nil {
+		dnsLogger.Info("Server running; press Ctrl+C to exit")
+	}
 	fmt.Println("Press Ctrl+C to exit daemon mode.")
 	<-sigCh
+	if dnsLogger != nil {
+		dnsLogger.Info("Shutting down")
+	}
 	fmt.Println("Shutting down.")
 	stopDNSServer(appState)
 	if fullStatsTracker != nil {
 		if err := fullStatsTracker.Close(); err != nil {
-			dnsLogger.Error("Error closing full stats tracker", "error", err)
+			dnsLogger.Warn("Error closing full stats tracker on shutdown", "error", err)
 		}
 	}
 	if unixListener != nil {
 		_ = unixListener.Close()
+		if tuiLogger != nil {
+			tuiLogger.Debug("UNIX socket listener closed")
+		}
 	}
 	if tcpListener != nil {
 		_ = tcpListener.Close()
+		if tuiLogger != nil {
+			tuiLogger.Debug("TCP TUI listener closed")
+		}
 	}
 	if serverSocket != "" {
 		_ = syscall.Unlink(serverSocket)
@@ -504,6 +530,9 @@ func stopDNSServer(state *daemon.State) {
 	stoppedCh := state.SignalStop()
 	<-stoppedCh
 	state.SetServerStatus(false)
+	if dnsLogger != nil {
+		dnsLogger.Debug("DNS server stopped")
+	}
 }
 
 func getServerStatus(state *daemon.State) bool {
@@ -511,10 +540,17 @@ func getServerStatus(state *daemon.State) bool {
 }
 
 func logQuery(format string, args ...interface{}) {
-	if !appState.DaemonMode() {
+	if !appState.DaemonMode() || dnsLogger == nil {
 		return
 	}
-	fmt.Printf(format, args...)
+	// Per-query/resolution logs are Debug; fullstats covers successful resolutions.
+	dnsLogger.Debug(fmt.Sprintf(strings.TrimSuffix(format, "\n"), args...))
+}
+
+func dnsErrorLog(msg string, keyValues ...any) {
+	if dnsLogger != nil {
+		dnsLogger.Error(msg, keyValues...)
+	}
 }
 
 // DNS
@@ -544,7 +580,7 @@ func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
 				recordType := dns.TypeToString[question.Qtype]
 				key := fmt.Sprintf("%s:%s", question.Name, recordType)
 				if err := fullStatsTracker.RecordRequest(key, requesterIP, recordType); err != nil {
-					dnsLogger.Error("Error recording full stats", "error", err)
+					dnsLogger.Warn("Error recording full stats; continuing", "error", err)
 				}
 			}
 
@@ -615,7 +651,7 @@ func serveInteractiveSession(conn net.Conn, log *slog.Logger) {
 	addr := formatConnAddr(conn)
 	if log != nil {
 		log.Info("TUI client connected", "addr", addr)
-		defer func() { log.Info("TUI client disconnected", "addr", addr) }()
+		defer func() { log.Debug("TUI client disconnected", "addr", addr) }()
 	}
 
 	tuiLock := appState.TUISessionMutex()
@@ -712,11 +748,17 @@ func connectToInteractiveEndpoint(target string) {
 	network, address := resolveInteractiveTarget(target)
 	conn, err := net.Dial(network, address)
 	if err != nil {
+		if clientLogger != nil {
+			clientLogger.Error("connection failed", "target", address, "error", err)
+		}
 		fmt.Fprintf(os.Stderr, "Error connecting to %s: %v\n", address, err)
 		return
 	}
 	defer conn.Close()
 
+	if clientLogger != nil {
+		clientLogger.Info("connected", "network", network, "address", address)
+	}
 	fmt.Printf("Connected to %s %s\n", network, address)
 
 	stdinFD := int(os.Stdin.Fd())
@@ -790,6 +832,9 @@ func connectToInteractiveEndpoint(target string) {
 		_ = term.Restore(stdinFD, oldState)
 	}
 
+	if clientLogger != nil {
+		clientLogger.Debug("connection closed", "address", address)
+	}
 	fmt.Println("Connection closed.")
 }
 

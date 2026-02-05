@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -95,9 +96,18 @@ func buildLumberjack(logPath string, logCfg config.LogConfig) *lj.Logger {
 	return rot
 }
 
+// SeverityNone disables logging: no files are created, all output is discarded.
+const SeverityNone = "none"
+
+func isSeverityNone(severity string) bool {
+	return strings.EqualFold(severity, SeverityNone)
+}
+
 // levelFromSeverity maps config severity string to slog.Level.
 func levelFromSeverity(severity string) slog.Level {
-	switch severity {
+	switch strings.ToLower(severity) {
+	case SeverityNone:
+		return slog.LevelError + 1000 // effectively nothing passes
 	case "debug":
 		return slog.LevelDebug
 	case "info":
@@ -133,8 +143,13 @@ func newFileWriter(logPath string, logCfg config.LogConfig) (io.Writer, error) {
 
 // NewServerLogger creates a slog.Logger that writes to a service-specific log file
 // under logDir (e.g. dnsserver.log, apiserver.log, tuiserver.log).
-// If the file cannot be created or written, logs are written to stderr instead and the process continues.
+// If severity is "none", no files are created and all log output is discarded.
+// If the file cannot be created or written (and severity is not "none"), logs are written to stderr instead.
 func NewServerLogger(serviceLogName, logDir string, logCfg config.LogConfig) *slog.Logger {
+	if isSeverityNone(logCfg.Severity) {
+		h := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError + 1000})
+		return slog.New(h)
+	}
 	logPath := filepath.Join(logDir, serviceLogName)
 	wr, err := newFileWriter(logPath, logCfg)
 	if err != nil {
