@@ -271,7 +271,7 @@ func defaultConfig(baseDir string) *Config {
 		},
 		Log: LogConfig{
 			Dir:            "/var/log/dnsplane",
-			Severity:       "info",
+			Severity:       "none",
 			Rotation:       LogRotationSize,
 			RotationSizeMB: 100,
 			RotationDays:   7,
@@ -312,8 +312,9 @@ func (c *Config) applyDefaults(configDir string) {
 		c.Log.Dir = "/var/log/dnsplane"
 	}
 	if c.Log.Severity == "" {
-		c.Log.Severity = "info"
+		c.Log.Severity = "none"
 	}
+	// "none" means logging disabled: no log files created
 	if c.Log.Rotation == "" {
 		c.Log.Rotation = LogRotationSize
 	}

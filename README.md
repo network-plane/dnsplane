@@ -76,7 +76,7 @@ https://github.com/user-attachments/assets/f5ca52cb-3874-499c-a594-ba3bf64b3ba9
 **Server:** Logging is configured in `dnsplane.json` under a `log` section. By default logs are written to `/var/log/dnsplane/` with fixed filenames: `dnsserver.log`, `apiserver.log`, and `tuiserver.log`. You can set:
 
 - `log_dir` – directory for log files (default: `/var/log/dnsplane`)
-- `log_severity` – minimum level: `debug`, `info`, `warn`, or `error`
+- `log_severity` – minimum level: `debug`, `info`, `warn`, or `error`; or `none` to disable logging (no log files are created). Default is `none`.
 - `log_rotation` – `none`, `size`, or `time`
 - `log_rotation_size_mb` – max size in MB before rotation (when rotation is `size`)
 - `log_rotation_time_days` – max age in days before rotation (when rotation is `time`)
