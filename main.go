@@ -39,7 +39,9 @@ const (
 	defaultTCPTerminalAddr = ":8053"
 	defaultClientTCPPort   = "8053"
 	// tuiBannerPrefix is sent by the server on new TUI connections; client must see this or disconnect.
-	tuiBannerPrefix = "dnsplane-tui"
+	tuiBannerPrefix   = "dnsplane-tui"
+	tuiBannerBusy     = "dnsplane-tui-busy"
+	tuiClientKillCmd  = "dnsplane-kill"
 )
 
 var (
@@ -124,6 +126,7 @@ func init() {
 	// Client flags
 	clientCmd.Flags().String("client", "", "Socket path or address to connect to (default: "+defaultUnixSocketPath+")")
 	clientCmd.Flags().String("log-file", "", "Path to log file or directory for client (writes dnsplaneclient.log when set)")
+	clientCmd.Flags().Bool("kill", false, "Disconnect the current TUI client and take over the session")
 	if f := clientCmd.Flags().Lookup("client"); f != nil {
 		f.NoOptDefVal = defaultUnixSocketPath
 	}
@@ -160,7 +163,8 @@ func runClient(cmd *cobra.Command, args []string) error {
 		clientLogger = logger.NewClientLogger(logFilePath)
 		clientLogger.Info("client starting", "target", clientTarget)
 	}
-	connectToInteractiveEndpoint(clientTarget)
+	killOther, _ := cmd.Flags().GetBool("kill")
+	connectToInteractiveEndpoint(clientTarget, killOther)
 	if clientLogger != nil {
 		clientLogger.Debug("client exiting")
 	}
@@ -657,15 +661,41 @@ func serveInteractiveSession(conn net.Conn, log *slog.Logger) {
 		defer func() { log.Debug("TUI client disconnected", "addr", addr) }()
 	}
 
-	// Send banner first so remote client can verify this is a dnsplane server.
+	// Read one optional line from client (e.g. dnsplane-kill to take over). Short timeout.
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	clientLine, _ := bufio.NewReader(conn).ReadString('\n')
+	_ = conn.SetReadDeadline(time.Time{})
+	clientLine = strings.TrimSpace(clientLine)
+
+	tuiLock := appState.TUISessionMutex()
+	if strings.TrimSpace(clientLine) == tuiClientKillCmd {
+		appState.DisconnectCurrentTUIClient()
+		// Wait for the disconnected session to release the lock.
+		tuiLock.Lock()
+	} else {
+		if !tuiLock.TryLock() {
+			curAddr, curSince := appState.GetTUIClientInfo()
+			sinceStr := ""
+			if !curSince.IsZero() {
+				sinceStr = curSince.Format(time.RFC3339)
+			}
+			if err := conn.SetWriteDeadline(time.Now().Add(3 * time.Second)); err == nil {
+				_, _ = fmt.Fprintf(conn, "%s %s %s\n", tuiBannerBusy, curAddr, sinceStr)
+				_ = conn.SetWriteDeadline(time.Time{})
+			}
+			return
+		}
+	}
+	defer tuiLock.Unlock()
+
+	appState.SetTUIClientSession(conn, addr)
+	defer appState.ClearTUIClientSession()
+
+	// Send banner so remote client can verify this is a dnsplane server.
 	if err := conn.SetWriteDeadline(time.Now().Add(3 * time.Second)); err == nil {
 		_, _ = fmt.Fprintf(conn, "%s %s\n", tuiBannerPrefix, appversion)
 		_ = conn.SetWriteDeadline(time.Time{})
 	}
-
-	tuiLock := appState.TUISessionMutex()
-	tuiLock.Lock()
-	defer tuiLock.Unlock()
 
 	// Wrap conn with CRLF writer so TUI output \n becomes \r\n
 	crlfConn := &crlfWriter{w: conn}
@@ -753,7 +783,7 @@ func (cw *crlfWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func connectToInteractiveEndpoint(target string) {
+func connectToInteractiveEndpoint(target string, killOther bool) {
 	network, address := resolveInteractiveTarget(target)
 	conn, err := net.Dial(network, address)
 	if err != nil {
@@ -764,6 +794,13 @@ func connectToInteractiveEndpoint(target string) {
 		return
 	}
 	defer conn.Close()
+
+	// If --kill, tell server to disconnect the current client so we can take over.
+	if killOther {
+		_ = conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
+		_, _ = fmt.Fprintf(conn, "%s\n", tuiClientKillCmd)
+		_ = conn.SetWriteDeadline(time.Time{})
+	}
 
 	// Verify server is dnsplane by reading the banner (avoids garbage/stuck when connecting to wrong service).
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
@@ -778,6 +815,26 @@ func connectToInteractiveEndpoint(target string) {
 		return
 	}
 	banner = strings.TrimSpace(banner)
+	if strings.HasPrefix(banner, tuiBannerBusy) {
+		// Another client is connected; server sent: dnsplane-tui-busy <addr> <since>
+		rest := strings.TrimSpace(strings.TrimPrefix(banner, tuiBannerBusy))
+		parts := strings.SplitN(rest, " ", 2)
+		curAddr := "unknown"
+		sinceStr := ""
+		if len(parts) >= 1 && parts[0] != "" {
+			curAddr = parts[0]
+		}
+		if len(parts) >= 2 {
+			sinceStr = parts[1]
+		}
+		msg := fmt.Sprintf("Another client is already connected: %s", curAddr)
+		if sinceStr != "" {
+			msg += fmt.Sprintf(", connected since %s", sinceStr)
+		}
+		msg += ".\nUse --kill to disconnect that client and take over."
+		fmt.Fprintf(os.Stderr, "Error: %s\n", msg)
+		return
+	}
 	if !strings.HasPrefix(banner, tuiBannerPrefix) {
 		if clientLogger != nil {
 			clientLogger.Error("invalid server banner", "address", address, "banner", banner)
