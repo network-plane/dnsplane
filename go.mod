@@ -1,6 +1,6 @@
 module dnsplane
 
-go 1.25.6
+go 1.25.7
 
 require (
 	github.com/chzyer/readline v1.5.1
