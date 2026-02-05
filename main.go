@@ -53,6 +53,7 @@ var (
 	apiLogger        *slog.Logger
 	tuiLogger        *slog.Logger
 	clientLogger     *slog.Logger
+	asyncLogQueue    *logger.AsyncLogQueue
 	rootCmd          = &cobra.Command{
 		Use:           "dnsplane",
 		Short:         "DNS Server with optional CLI mode",
@@ -246,6 +247,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	dnsLogger = logger.NewServerLogger(logger.DNSServerLog, logCfg.Dir, logCfg)
 	apiLogger = logger.NewServerLogger(logger.APIServerLog, logCfg.Dir, logCfg)
 	tuiLogger = logger.NewServerLogger(logger.TUIServerLog, logCfg.Dir, logCfg)
+	asyncLogQueue = logger.NewAsyncLogQueue(0)
 
 	if loadedCfg.Created {
 		dnsLogger.Info("Created default config", "path", loadedCfg.Path)
@@ -305,10 +307,22 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	if dnsResolver == nil {
 		dnsResolver = resolver.New(resolver.Config{
-			Store:           dnsData,
-			Upstream:        resolver.NewDNSClient(2 * time.Second),
-			Logger:          logQuery,
-			ErrorLogger:     dnsErrorLog,
+			Store:   dnsData,
+			Upstream: resolver.NewDNSClient(2 * time.Second),
+			Logger: func(format string, args ...interface{}) {
+				if asyncLogQueue != nil {
+					asyncLogQueue.Enqueue(func() {
+						if appState.DaemonMode() && dnsLogger != nil {
+							dnsLogger.Debug(fmt.Sprintf(strings.TrimSuffix(format, "\n"), args...))
+						}
+					})
+				}
+			},
+			ErrorLogger: func(msg string, keyValues ...any) {
+				if asyncLogQueue != nil && dnsLogger != nil {
+					asyncLogQueue.Enqueue(func() { dnsLogger.Error(msg, keyValues...) })
+				}
+			},
 			UpstreamTimeout: 2 * time.Second,
 		})
 	}
@@ -394,6 +408,12 @@ func runServer(cmd *cobra.Command, args []string) error {
 		if err := fullStatsTracker.Close(); err != nil {
 			dnsLogger.Warn("Error closing full stats tracker on shutdown", "error", err)
 		}
+	}
+	if asyncLogQueue != nil {
+		asyncLogQueue.Close()
+	}
+	if dnsData := data.GetInstance(); dnsData != nil {
+		dnsData.Close()
 	}
 	if unixListener != nil {
 		_ = unixListener.Close()
@@ -546,30 +566,12 @@ func getServerStatus(state *daemon.State) bool {
 	return state.ServerStatus()
 }
 
-func logQuery(format string, args ...interface{}) {
-	if !appState.DaemonMode() || dnsLogger == nil {
-		return
-	}
-	// Per-query/resolution logs are Debug; fullstats covers successful resolutions.
-	dnsLogger.Debug(fmt.Sprintf(strings.TrimSuffix(format, "\n"), args...))
-}
-
-func dnsErrorLog(msg string, keyValues ...any) {
-	if dnsLogger != nil {
-		dnsLogger.Error(msg, keyValues...)
-	}
-}
-
 // DNS
 func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
 	response := new(dns.Msg)
 	response.SetReply(request)
 	response.Authoritative = false
 
-	dnsData := data.GetInstance()
-	dnsData.IncrementTotalQueries()
-
-	// Extract requester IP
 	requesterIP := "unknown"
 	if addr := writer.RemoteAddr(); addr != nil {
 		if host, _, err := net.SplitHostPort(addr.String()); err == nil {
@@ -582,23 +584,28 @@ func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
 	ctx := context.Background()
 	if dnsResolver != nil {
 		for _, question := range request.Question {
-			// Record full stats if enabled
-			if fullStatsTracker != nil {
-				recordType := dns.TypeToString[question.Qtype]
-				key := fmt.Sprintf("%s:%s", question.Name, recordType)
-				if err := fullStatsTracker.RecordRequest(key, requesterIP, recordType); err != nil {
-					dnsLogger.Warn("Error recording full stats; continuing", "error", err)
-				}
-			}
-
 			dnsResolver.HandleQuestion(ctx, question, response)
 		}
 	}
 
 	err := writer.WriteMsg(response)
-	if err != nil {
-		dnsLogger.Error("Error writing response", "error", err)
-	}
+
+	// Everything after the reply is async so the client never waits on logging or stats.
+	go func() {
+		dnsData := data.GetInstance()
+		dnsData.IncrementTotalQueries()
+		for _, question := range request.Question {
+			if fullStatsTracker != nil {
+				recordType := dns.TypeToString[question.Qtype]
+				key := fmt.Sprintf("%s:%s", question.Name, recordType)
+				_ = fullStatsTracker.RecordRequest(key, requesterIP, recordType)
+			}
+		}
+		if err != nil && asyncLogQueue != nil && dnsLogger != nil {
+			errCopy := err
+			asyncLogQueue.Enqueue(func() { dnsLogger.Error("Error writing response", "error", errCopy) })
+		}
+	}()
 }
 
 func startUnixSocketListener(socketPath string, log *slog.Logger) (net.Listener, error) {
