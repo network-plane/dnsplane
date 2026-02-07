@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,11 +12,12 @@ import (
 	"dnsplane/data"
 	"dnsplane/dnsrecords"
 
-	"github.com/gin-gonic/gin"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 )
 
-// RouteRegistrar registers HTTP routes on the supplied Gin engine.
-type RouteRegistrar func(*gin.Engine)
+// RouteRegistrar registers HTTP routes on the supplied Chi router.
+type RouteRegistrar func(chi.Router)
 
 // Start launches the REST API server asynchronously. If registrar is nil, the
 // package's default DNS routes are registered. The server listens on the
@@ -48,10 +50,13 @@ func Start(state *daemon.State, port string, registrar RouteRegistrar, logger *s
 	go func() {
 		defer state.SetAPIRunning(false)
 
-		router := gin.Default()
+		router := chi.NewRouter()
+		router.Use(middleware.Recoverer)
+		router.Use(middleware.Logger)
 		registrar(router)
 
-		if err := router.Run(fmt.Sprintf(":%s", trimmed)); err != nil {
+		addr := fmt.Sprintf(":%s", trimmed)
+		if err := http.ListenAndServe(addr, router); err != nil {
 			logAPIError(logger, "API server stopped with error", "error", err)
 		}
 	}()
@@ -70,18 +75,18 @@ func logAPIError(logger *slog.Logger, msg string, keyValues ...any) {
 }
 
 // RegisterDNSRoutes wires up the default DNS-related REST handlers.
-func RegisterDNSRoutes(router *gin.Engine) {
+func RegisterDNSRoutes(router chi.Router) {
 	if router == nil {
 		return
 	}
-	router.GET("/dns/records", listRecordsHandler)
-	router.POST("/dns/records", addRecordHandler)
+	router.Get("/dns/records", listRecordsHandler)
+	router.Post("/dns/records", addRecordHandler)
 }
 
 type AddRecordRequest struct {
-	Name  string  `json:"name" binding:"required"`
-	Type  string  `json:"type" binding:"required"`
-	Value string  `json:"value" binding:"required"`
+	Name  string  `json:"name"`
+	Type  string  `json:"type"`
+	Value string  `json:"value"`
 	TTL   *uint32 `json:"ttl,omitempty"`
 }
 
@@ -98,11 +103,21 @@ func (r AddRecordRequest) toDNSRecord() dnsrecords.DNSRecord {
 	}
 }
 
-func addRecordHandler(c *gin.Context) {
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func addRecordHandler(w http.ResponseWriter, r *http.Request) {
 	dnsData := data.GetInstance()
 	var request AddRecordRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid input"})
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid input"})
+		return
+	}
+	if strings.TrimSpace(request.Name) == "" || strings.TrimSpace(request.Type) == "" || strings.TrimSpace(request.Value) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid input"})
 		return
 	}
 
@@ -114,22 +129,22 @@ func addRecordHandler(c *gin.Context) {
 		if !errors.Is(err, dnsrecords.ErrInvalidArgs) {
 			status = http.StatusInternalServerError
 		}
-		c.JSON(status, gin.H{"error": err.Error(), "messages": extractRecordMessages(messages)})
+		writeJSON(w, status, map[string]any{"error": err.Error(), "messages": extractRecordMessages(messages)})
 		return
 	}
 	dnsData.UpdateRecords(updated)
-	c.JSON(http.StatusCreated, gin.H{"status": "record added", "messages": extractRecordMessages(messages)})
+	writeJSON(w, http.StatusCreated, map[string]any{"status": "record added", "messages": extractRecordMessages(messages)})
 }
 
-func listRecordsHandler(c *gin.Context) {
+func listRecordsHandler(w http.ResponseWriter, r *http.Request) {
 	dnsData := data.GetInstance()
 	records := dnsData.GetRecords()
 	result, err := dnsrecords.List(records, []string{})
 	if errors.Is(err, dnsrecords.ErrHelpRequested) {
-		c.JSON(200, gin.H{"messages": extractRecordMessages(result.Messages)})
+		writeJSON(w, http.StatusOK, map[string]any{"messages": extractRecordMessages(result.Messages)})
 		return
 	}
-	resp := gin.H{
+	resp := map[string]any{
 		"records":  result.Records,
 		"detailed": result.Detailed,
 	}
@@ -139,7 +154,7 @@ func listRecordsHandler(c *gin.Context) {
 	if len(result.Messages) > 0 {
 		resp["messages"] = extractRecordMessages(result.Messages)
 	}
-	c.JSON(200, resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func extractRecordMessages(msgs []dnsrecords.Message) []string {
