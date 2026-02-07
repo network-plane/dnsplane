@@ -4,6 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"dnsplane/api"
+	"dnsplane/commandhandler"
+	"dnsplane/config"
+	"dnsplane/daemon"
+	"dnsplane/data"
+	"dnsplane/fullstats"
+	"dnsplane/logger"
+	"dnsplane/resolver"
 	"errors"
 	"fmt"
 	"io"
@@ -19,19 +27,11 @@ import (
 	"time"
 
 	"github.com/chzyer/readline"
+	"github.com/inconshreveable/mousetrap"
 	"github.com/miekg/dns"
 	tui "github.com/network-plane/planetui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
-
-	"dnsplane/api"
-	"dnsplane/commandhandler"
-	"dnsplane/config"
-	"dnsplane/daemon"
-	"dnsplane/data"
-	"dnsplane/fullstats"
-	"dnsplane/logger"
-	"dnsplane/resolver"
 )
 
 const (
@@ -39,14 +39,14 @@ const (
 	defaultTCPTerminalAddr = ":8053"
 	defaultClientTCPPort   = "8053"
 	// tuiBannerPrefix is sent by the server on new TUI connections; client must see this or disconnect.
-	tuiBannerPrefix   = "dnsplane-tui"
-	tuiBannerBusy     = "dnsplane-tui-busy"
-	tuiClientKillCmd  = "dnsplane-kill"
+	tuiBannerPrefix  = "dnsplane-tui"
+	tuiBannerBusy    = "dnsplane-tui-busy"
+	tuiClientKillCmd = "dnsplane-kill"
 )
 
 var (
 	appState         = daemon.NewState()
-	appversion       = "0.1.71"
+	appversion       = "0.1.75"
 	dnsResolver      *resolver.Resolver
 	fullStatsTracker *fullstats.Tracker
 	dnsLogger        *slog.Logger
@@ -103,6 +103,10 @@ func resolveDataPath(value, defaultFileName, cwd string) string {
 }
 
 func main() {
+	if mousetrap.StartedByExplorer() {
+		fmt.Fprintln(os.Stderr, "Please check the configuration in the repo.")
+		os.Exit(1)
+	}
 	rootCmd.Version = fmt.Sprintf("DNS Resolver %s", appversion)
 	rootCmd.SetVersionTemplate("{{.Version}}\n")
 	if err := rootCmd.Execute(); err != nil {
@@ -307,7 +311,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	if dnsResolver == nil {
 		dnsResolver = resolver.New(resolver.Config{
-			Store:   dnsData,
+			Store:    dnsData,
 			Upstream: resolver.NewDNSClient(2 * time.Second),
 			Logger: func(format string, args ...interface{}) {
 				if asyncLogQueue != nil {
