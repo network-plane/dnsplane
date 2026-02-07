@@ -33,6 +33,8 @@ var (
 	getServerStatusFunc    func() bool
 	startGinAPIFunc        func(string)
 	getServerListenersFunc func() ServerListenerInfo
+	serverVersionStr       string
+	clientVersionStr       string
 )
 
 // ServerListenerInfo describes runtime listener configuration for status output.
@@ -55,6 +57,12 @@ func RegisterServerControlHooks(stop func(), restart func(string), status func()
 	getServerStatusFunc = status
 	startGinAPIFunc = startAPI
 	getServerListenersFunc = listeners
+}
+
+// SetVersion sets the server and client version strings shown by the server version command.
+func SetVersion(server, client string) {
+	serverVersionStr = server
+	clientVersionStr = client
 }
 
 var captureMu sync.Mutex
@@ -1404,6 +1412,15 @@ func RegisterCommands() {
 			Category:    "Server",
 			Tags:        []string{"server", "save"},
 		}, legacyRunner(handleServerSave)),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "server",
+			Name:        "version",
+			Summary:     "Print server and client version",
+			Description: "Displays server and client version strings.",
+			Usage:       "server version",
+			Category:    "Server",
+			Tags:        []string{"server", "version"},
+		}, legacyRunner(handleServerVersion)),
 
 		newLegacyFactory(tui.CommandSpec{
 			Context:     "tools",
@@ -1515,6 +1532,20 @@ func handleServerSave(args []string) {
 	dnsData := data.GetInstance()
 	data.SaveSettings(dnsData.Settings)
 	fmt.Println("Server settings saved.")
+}
+
+func handleServerVersion(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printServerVersionUsage()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("server version does not accept arguments.")
+		printServerVersionUsage()
+		return
+	}
+	fmt.Println("Server version:", serverVersionStr)
+	fmt.Println("Client version:", clientVersionStr)
 }
 
 func handleServerStart(args []string) {
@@ -1937,6 +1968,12 @@ func printServerLoadUsage() {
 func printServerSaveUsage() {
 	fmt.Println("Usage: server save")
 	fmt.Println("Description: Save current server settings to the default storage file.")
+	printHelpAliasesHint()
+}
+
+func printServerVersionUsage() {
+	fmt.Println("Usage: server version")
+	fmt.Println("Description: Print server and client version.")
 	printHelpAliasesHint()
 }
 

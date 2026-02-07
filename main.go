@@ -301,6 +301,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		func(p string) { startAPIAsync(appState, p, apiLogger) },
 		func() commandhandler.ServerListenerInfo { return currentServerListeners(appState) },
 	)
+	commandhandler.SetVersion(appversion, appversion)
 	tui.SetPrompt("dnsplane> ")
 
 	appState.SetDaemonMode(true)
