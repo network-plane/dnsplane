@@ -118,12 +118,21 @@ type parResult struct {
 
 // resolveAParallel runs local, cache, and all upstream+fallback lookups at once; replies by priority:
 // local wins, then cache, then any upstream authoritative, then first upstream success.
-// Fallback is queried in the same round as upstreams; if it is the same as an upstream we only query it once.
+// Server selection uses domain whitelist: if the query name matches a server's whitelist, only those servers are used (no fallback).
+// Fallback is only used when the selected servers are "global" (no whitelist match).
 func (r *Resolver) resolveAParallel(ctx context.Context, question dns.Question, response *dns.Msg) {
 	settings := r.store.GetResolverSettings()
-	dnsServers := dnsservers.GetDNSArray(r.store.GetServers(), true)
+	allServers := r.store.GetServers()
+	dnsServers := dnsservers.GetServersForQuery(allServers, question.Name, true)
+	useWhitelist := false
+	for _, s := range allServers {
+		if s.Active && dnsservers.ServerMatchesQuery(s, question.Name) {
+			useWhitelist = true
+			break
+		}
+	}
 	fallback := ""
-	if settings.FallbackServerIP != "" && settings.FallbackServerPort != "" {
+	if !useWhitelist && settings.FallbackServerIP != "" && settings.FallbackServerPort != "" {
 		fallback = fmt.Sprintf("%s:%s", settings.FallbackServerIP, settings.FallbackServerPort)
 	}
 
@@ -266,11 +275,21 @@ func (r *Resolver) handleDNSServers(ctx context.Context, question dns.Question, 
 		return
 	}
 
-	settings := r.store.GetResolverSettings()
-	dnsServers := dnsservers.GetDNSArray(r.store.GetServers(), true)
+	allServers := r.store.GetServers()
+	dnsServers := dnsservers.GetServersForQuery(allServers, question.Name, true)
+	useWhitelist := false
+	for _, s := range allServers {
+		if s.Active && dnsservers.ServerMatchesQuery(s, question.Name) {
+			useWhitelist = true
+			break
+		}
+	}
 	fallback := ""
-	if settings.FallbackServerIP != "" && settings.FallbackServerPort != "" {
-		fallback = fmt.Sprintf("%s:%s", settings.FallbackServerIP, settings.FallbackServerPort)
+	if !useWhitelist {
+		settings := r.store.GetResolverSettings()
+		if settings.FallbackServerIP != "" && settings.FallbackServerPort != "" {
+			fallback = fmt.Sprintf("%s:%s", settings.FallbackServerIP, settings.FallbackServerPort)
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, r.upstreamTimeout)
