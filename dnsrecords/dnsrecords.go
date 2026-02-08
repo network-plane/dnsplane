@@ -79,11 +79,22 @@ func normalizeRecordType(recordType string) string {
 	return strings.ToUpper(strings.TrimSpace(recordType))
 }
 
-func normalizeRecordNameKey(name string) string {
+// canonicalizeRecordNameForStorage trims space and strips trailing dots so stored names are consistent (no FQDN trailing dot).
+func canonicalizeRecordNameForStorage(name string) string {
 	name = strings.TrimSpace(name)
 	for strings.HasSuffix(name, ".") {
 		name = strings.TrimSuffix(name, ".")
 	}
+	return name
+}
+
+// CanonicalizeRecordNameForStorage is the exported form for use when loading records from file.
+func CanonicalizeRecordNameForStorage(name string) string {
+	return canonicalizeRecordNameForStorage(name)
+}
+
+func normalizeRecordNameKey(name string) string {
+	name = canonicalizeRecordNameForStorage(name)
 	return strings.ToLower(name)
 }
 
@@ -133,7 +144,7 @@ func Add(fullCommand []string, dnsRecords []DNSRecord, allowUpdate bool) ([]DNSR
 
 // AddRecord appends a DNSRecord to the collection, performing duplicate checks.
 func AddRecord(record DNSRecord, dnsRecords []DNSRecord, allowUpdate bool) ([]DNSRecord, []Message, error) {
-	record.Name = strings.TrimSpace(record.Name)
+	record.Name = canonicalizeRecordNameForStorage(record.Name)
 	record.Value = strings.TrimSpace(record.Value)
 	record.Type = normalizeRecordType(record.Type)
 
@@ -161,6 +172,7 @@ func AddRecord(record DNSRecord, dnsRecords []DNSRecord, allowUpdate bool) ([]DN
 }
 
 func addRecordInternal(dnsRecord DNSRecord, dnsRecords []DNSRecord, allowUpdate bool) ([]DNSRecord, []Message, error) {
+	dnsRecord.Name = canonicalizeRecordNameForStorage(dnsRecord.Name)
 	messages := make([]Message, 0)
 	dnsRecord.Type = normalizeRecordType(dnsRecord.Type)
 	if dnsRecord.AddedOn.IsZero() {
