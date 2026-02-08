@@ -13,6 +13,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -33,17 +34,24 @@ import (
 //newSettings := data.DNSResolverSettings{...}
 //dnsData.UpdateSettings(newSettings)
 
+// AdblockSource records a loaded adblock list source (file path or URL) and how many domains were added from it.
+type AdblockSource struct {
+	Source string
+	Count  int
+}
+
 // DNSResolverData holds all the data for the DNS resolver
 type DNSResolverData struct {
-	Settings        DNSResolverSettings
-	Stats           DNSStats
-	DNSServers      []dnsservers.DNSServer
-	DNSRecords      []dnsrecords.DNSRecord
-	CacheRecords    []dnsrecordcache.CacheRecord
-	BlockList       *adblock.BlockList
-	mu              sync.RWMutex
-	persistCh       chan struct{}
-	persistWg       sync.WaitGroup
+	Settings         DNSResolverSettings
+	Stats            DNSStats
+	DNSServers       []dnsservers.DNSServer
+	DNSRecords       []dnsrecords.DNSRecord
+	CacheRecords     []dnsrecordcache.CacheRecord
+	BlockList        *adblock.BlockList
+	AdblockSources   []AdblockSource // loaded files/URLs and count per source (order preserved)
+	mu               sync.RWMutex
+	persistCh        chan struct{}
+	persistWg        sync.WaitGroup
 	persistCloseOnce sync.Once
 }
 
@@ -148,6 +156,24 @@ func (d *DNSResolverData) Initialize() error {
 	d.DNSRecords = records
 	d.CacheRecords = cache
 	d.BlockList = adblock.NewBlockList()
+	d.AdblockSources = nil
+
+	// Load adblock list files from config one by one; merge into single block list and log added each time
+	for _, path := range cfg.Config.AdblockListFiles {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		before := d.BlockList.Count()
+		if err := adblock.LoadFromFile(d.BlockList, path); err != nil {
+			log.Printf("adblock: failed to load %s: %v", path, err)
+			continue
+		}
+		after := d.BlockList.Count()
+		d.AdblockSources = append(d.AdblockSources, AdblockSource{Source: path, Count: after - before})
+		log.Printf("adblock: added %d from %s (total %d)", after-before, path, after)
+	}
+
 	d.Stats = DNSStats{ServerStartTime: time.Now()}
 
 	d.persistCh = make(chan struct{}, 1)
@@ -314,6 +340,32 @@ func (d *DNSResolverData) GetBlockList() *adblock.BlockList {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.BlockList
+}
+
+// RecordAdblockSource appends a loaded source (file path or URL) and the count of domains added from it.
+func (d *DNSResolverData) RecordAdblockSource(source string, count int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.AdblockSources = append(d.AdblockSources, AdblockSource{Source: source, Count: count})
+}
+
+// GetAdblockSources returns a copy of the loaded adblock sources (files/URLs and count per source).
+func (d *DNSResolverData) GetAdblockSources() []AdblockSource {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if len(d.AdblockSources) == 0 {
+		return nil
+	}
+	out := make([]AdblockSource, len(d.AdblockSources))
+	copy(out, d.AdblockSources)
+	return out
+}
+
+// ClearAdblockSources clears the list of loaded adblock sources (e.g. when the block list is cleared).
+func (d *DNSResolverData) ClearAdblockSources() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.AdblockSources = nil
 }
 
 // LoadFromJSON reads a JSON file and unmarshals it into a struct

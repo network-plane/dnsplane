@@ -1515,24 +1515,34 @@ func RegisterCommands() {
 		newLegacyFactory(tui.CommandSpec{
 			Context:     "adblock",
 			Name:        "load",
-			Summary:     "Load adblock list from file",
-			Description: "Loads blocked domains from an adblock list file (format: 0.0.0.0 domain1.com domain2.com ...).",
-			Usage:       "adblock load <filepath>",
+			Summary:     "Load adblock list from file or URL",
+			Description: "Loads blocked domains from a file path or URL (http/https) and merges into the single block list. Format: 0.0.0.0 domain1.com domain2.com ...",
+			Usage:       "adblock load <filepath|url>",
 			Category:    "Adblock",
 			Tags:        []string{"adblock", "load"},
-			Args:        []tui.ArgSpec{{Name: "filepath", Description: "Path to adblock list file", Required: true}},
-			Examples:    []tui.Example{{Description: "Load adblock list", Command: "adblock load /path/to/hosts.txt"}},
+			Args:        []tui.ArgSpec{{Name: "filepath_or_url", Description: "Path to list file or URL (http/https)", Repeatable: true}},
+			Examples:    []tui.Example{{Description: "Load from file", Command: "adblock load /path/to/hosts.txt"}, {Description: "Load from URL", Command: "adblock load https://example.com/blocklist.txt"}},
 		}, runAdblockLoad()),
 		newLegacyFactory(tui.CommandSpec{
 			Context:     "adblock",
 			Name:        "list",
-			Summary:     "List blocked domains",
-			Description: "Displays all currently blocked domains.",
+			Summary:     "List loaded sources (files/URLs)",
+			Description: "Displays loaded adblock list sources with count per source and total domains in block list.",
 			Usage:       "adblock list",
 			Category:    "Adblock",
 			Tags:        []string{"adblock", "list"},
-			Examples:    []tui.Example{{Description: "List blocked domains", Command: "adblock list"}},
+			Examples:    []tui.Example{{Description: "List loaded sources", Command: "adblock list"}},
 		}, runAdblockList()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "adblock",
+			Name:        "domains",
+			Summary:     "List blocked domains",
+			Description: "Displays all currently blocked domains.",
+			Usage:       "adblock domains",
+			Category:    "Adblock",
+			Tags:        []string{"adblock", "domains"},
+			Examples:    []tui.Example{{Description: "List blocked domains", Command: "adblock domains"}},
+		}, runAdblockDomains()),
 		newLegacyFactory(tui.CommandSpec{
 			Context:     "adblock",
 			Name:        "add",
@@ -1860,6 +1870,14 @@ func printAllServerConfig(settings config.Config) {
 	fmt.Printf("    log_rotation:            %s\n", settings.Log.Rotation)
 	fmt.Printf("    log_rotation_size_mb:    %d\n", settings.Log.RotationSizeMB)
 	fmt.Printf("    log_rotation_time_days:  %d\n", settings.Log.RotationDays)
+	if len(settings.AdblockListFiles) > 0 {
+		fmt.Println("  Adblock list files (loaded in order at startup):")
+		for _, p := range settings.AdblockListFiles {
+			fmt.Printf("    %s\n", p)
+		}
+	} else {
+		fmt.Println("  Adblock list files: (none)")
+	}
 }
 
 func handleServerConfig(args []string) {
@@ -2024,6 +2042,12 @@ func handleStats(args []string) {
 	fmt.Println("Total Records:", len(dnsData.GetRecords()))
 	fmt.Println("Total DNS Servers:", len(dnsData.GetServers()))
 	fmt.Println("Total Cache Records:", len(dnsData.GetCacheRecords()))
+	blockList := dnsData.GetBlockList()
+	adblockCount := 0
+	if blockList != nil {
+		adblockCount = blockList.Count()
+	}
+	fmt.Println("Adblock list:", adblockCount, "domains")
 	fmt.Println()
 	fmt.Println("Total queries received:", dnsData.Stats.TotalQueries)
 	fmt.Println("Total queries answered:", dnsData.Stats.TotalQueriesAnswered)
@@ -2234,41 +2258,51 @@ func runAdblockLoad() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResu
 	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
 		if cliutil.IsHelpRequest(input.Raw) {
 			msgs := infoMessages(
-				"Usage: adblock load <filepath>",
-				"Description: Load blocked domains from an adblock list file.",
-				"File format: 0.0.0.0 domain1.com domain2.com ... (one line per entry)",
+				"Usage: adblock load <filepath|url>",
+				"Description: Load blocked domains from a file path or URL (http/https) and merge into the single block list.",
+				"Format: 0.0.0.0 domain1.com domain2.com ... (one line per entry)",
 				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
 			)
 			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
 		}
 		if len(input.Raw) == 0 {
-			msgs := append(warnMessages("adblock load requires a file path."), infoMessages("Usage: adblock load <filepath>")...)
-			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "missing file path", Severity: tui.SeverityWarning}}
+			msgs := append(warnMessages("adblock load requires a file path or URL."), infoMessages("Usage: adblock load <filepath|url>")...)
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "missing file path or URL", Severity: tui.SeverityWarning}}
 		}
 		if len(input.Raw) > 1 {
-			msgs := append(warnMessages("adblock load accepts exactly one argument."), infoMessages("Usage: adblock load <filepath>")...)
+			msgs := append(warnMessages("adblock load accepts exactly one argument (file path or URL)."), infoMessages("Usage: adblock load <filepath|url>")...)
 			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "too many arguments", Severity: tui.SeverityWarning}}
 		}
 
-		filePath := input.Raw[0]
+		source := input.Raw[0]
 		dnsData := data.GetInstance()
 		blockList := dnsData.GetBlockList()
 		if blockList == nil {
 			blockList = adblock.NewBlockList()
 		}
 
-		if err := adblock.LoadFromFile(blockList, filePath); err != nil {
+		before := blockList.Count()
+		isURL := strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://")
+		var err error
+		if isURL {
+			err = adblock.LoadFromURL(blockList, source)
+		} else {
+			err = adblock.LoadFromFile(blockList, source)
+		}
+		if err != nil {
 			return tui.CommandResult{
 				Status: tui.StatusFailed,
 				Error:  &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError},
 			}
 		}
-
-		count := blockList.Count()
+		after := blockList.Count()
+		added := after - before
+		dnsData.RecordAdblockSource(source, added)
+		msg := fmt.Sprintf("Added %d domain(s) from %s. Total in block list: %d", added, source, after)
 		return tui.CommandResult{
 			Status:   tui.StatusSuccess,
-			Payload:  count,
-			Messages: infoMessages(fmt.Sprintf("Loaded %d blocked domain(s) from %s", count, filePath)),
+			Payload:  after,
+			Messages: infoMessages(msg),
 		}
 	}
 }
@@ -2278,7 +2312,7 @@ func runAdblockList() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResu
 		if cliutil.IsHelpRequest(input.Raw) {
 			msgs := infoMessages(
 				"Usage: adblock list",
-				"Description: List all currently blocked domains.",
+				"Description: List loaded adblock sources (files/URLs) with count per source and total domains.",
 				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
 			)
 			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
@@ -2289,14 +2323,58 @@ func runAdblockList() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResu
 		}
 
 		dnsData := data.GetInstance()
+		sources := dnsData.GetAdblockSources()
+		blockList := dnsData.GetBlockList()
+		total := 0
+		if blockList != nil {
+			total = blockList.Count()
+		}
+
+		if len(sources) == 0 {
+			return tui.CommandResult{
+				Status:   tui.StatusSuccess,
+				Messages: infoMessages("No adblock sources loaded.", fmt.Sprintf("Total domains in block list: %d", total)),
+			}
+		}
+
+		rows := make([][]string, 0, len(sources))
+		for _, s := range sources {
+			rows = append(rows, []string{s.Source, fmt.Sprintf("%d", s.Count)})
+		}
+		rt.Output().WriteTable([]string{"Source", "Count"}, rows)
+		tui.EnsureLineBreak(rt.Output())
+		return tui.CommandResult{
+			Status:   tui.StatusSuccess,
+			Payload:  sources,
+			Messages: infoMessages(fmt.Sprintf("Total domains in block list: %d", total)),
+		}
+	}
+}
+
+func runAdblockDomains() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.IsHelpRequest(input.Raw) {
+			msgs := infoMessages(
+				"Usage: adblock domains",
+				"Description: List all currently blocked domains.",
+				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
+			)
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
+		}
+		if len(input.Raw) > 0 {
+			msgs := append(warnMessages("adblock domains does not accept arguments."), infoMessages("Usage: adblock domains")...)
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
+		}
+
+		dnsData := data.GetInstance()
 		blockList := dnsData.GetBlockList()
 		if blockList == nil {
-			return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("No blocked domains found.")}
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("No blocked domains.")}
 		}
 
 		domains := blockList.GetAll()
 		if len(domains) == 0 {
-			return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("No blocked domains found.")}
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("No blocked domains.")}
 		}
 
 		rows := make([][]string, 0, len(domains))
@@ -2305,8 +2383,11 @@ func runAdblockList() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResu
 		}
 		rt.Output().WriteTable([]string{"Domain"}, rows)
 		tui.EnsureLineBreak(rt.Output())
-
-		return tui.CommandResult{Status: tui.StatusSuccess, Payload: domains, Messages: infoMessages(fmt.Sprintf("Found %d blocked domain(s)", len(domains)))}
+		return tui.CommandResult{
+			Status:   tui.StatusSuccess,
+			Payload:  domains,
+			Messages: infoMessages(fmt.Sprintf("Found %d blocked domain(s)", len(domains))),
+		}
 	}
 }
 
@@ -2400,6 +2481,7 @@ func runAdblockClear() func(tui.CommandRuntime, tui.CommandInput) tui.CommandRes
 		}
 
 		blockList.Clear()
-		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("Block list cleared.")}
+		dnsData.ClearAdblockSources()
+		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("Block list and loaded sources cleared.")}
 	}
 }
