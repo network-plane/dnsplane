@@ -12,7 +12,31 @@ A non-standard DNS server with multiple management interfaces (TUI, API). It que
 - **Domain whitelist (per-server):** An upstream can have an optional **domain whitelist**. If set, that server is used **only** for query names that match one of the listed suffixes (exact or subdomain). For example, a server with whitelist `example.com,example.org` receives only queries for those domains and their subdomains; all other queries use only “global” upstreams (servers with no whitelist). Whitelisted domains are resolved **only** via those servers (no fallback to global upstreams). In the TUI: `dns add 192.168.5.5 53 active:true localresolver:true adblocker:false whitelist:example.com,example.org`.
 
 ## Diagram
-![image](https://github.com/network-plane/dnsplane/assets/97396839/79acfa3e-8b83-48ec-92be-ed99085b2cc5)
+
+Resolution flow including adblock, local records (file/URL/git), cache, per-server domain whitelist, and fallback:
+
+```mermaid
+flowchart TD
+    REQ["DNS Request"]
+    REQ --> ADBLOCK{"Adblock\nblocked?"}
+    ADBLOCK -->|Yes| BLOCK["Blocked / NXDOMAIN"]
+    ADBLOCK -->|No| RECORDS{"Local records\n(records_source)\nmatch?"}
+    RECORDS -->|Yes| REPLY_R["Reply from records"]
+    RECORDS -->|No| CACHE{"Cache\nhit?"}
+    CACHE -->|Yes| REPLY_C["Reply from cache"]
+    CACHE -->|No| SELECT["Get servers for this query\n(whitelist: only matching or global)"]
+    SELECT --> UPSTREAM["Query selected upstreams\n(in parallel)"]
+    UPSTREAM --> AUTH{"Authoritative\nanswer?"}
+    AUTH -->|Yes| REPLY_A["Reply (authoritative)"]
+    AUTH -->|No| FALLBACK["Fallback server\n(if configured)"]
+    FALLBACK --> REPLY_F["Reply (fallback)"]
+```
+
+- **Adblock:** Query name checked against block list first; if blocked, no upstream is used.
+- **Local records:** Loaded from `records_source` (file, URL, or Git). If a record matches, that reply is used and upstreams are not queried.
+- **Cache:** If caching is enabled and the answer is still valid, it is returned without querying upstreams.
+- **Server selection:** `GetServersForQuery` picks upstreams for this name: servers with a matching domain whitelist, or (if none match) only global servers. Whitelisted domains are resolved only via their servers.
+- **Upstreams + fallback:** Selected servers are queried in parallel; priority is authoritative answer, then first success. Fallback is used only when the selected list is “global” and no authoritative answer was returned.
 
 
 
