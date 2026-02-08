@@ -28,13 +28,18 @@ import (
 
 // Function variables for server control
 var (
-	stopDNSServerFunc      func()
-	restartDNSServerFunc   func(string)
-	getServerStatusFunc    func() bool
-	startGinAPIFunc        func(string)
-	getServerListenersFunc func() ServerListenerInfo
-	serverVersionStr       string
-	clientVersionStr       string
+	stopDNSServerFunc         func()
+	restartDNSServerFunc      func(string)
+	getServerStatusFunc       func() bool
+	startGinAPIFunc           func(string)
+	stopAPIFunc               func()
+	startClientTCPFunc        func()
+	stopClientTCPFunc         func()
+	isClientTCPRunningFunc    func() bool
+	isCurrentSessionTCPFunc   func() bool
+	getServerListenersFunc    func() ServerListenerInfo
+	serverVersionStr          string
+	clientVersionStr          string
 )
 
 // ServerListenerInfo describes runtime listener configuration for status output.
@@ -48,14 +53,26 @@ type ServerListenerInfo struct {
 	ClientSocketEnabled bool
 	ClientTCPEndpoint   string
 	ClientTCPEnabled    bool
+	ClientTCPRunning    bool
 }
 
 // RegisterServerControlHooks wires runtime control functions for server commands.
-func RegisterServerControlHooks(stop func(), restart func(string), status func() bool, startAPI func(string), listeners func() ServerListenerInfo) {
+func RegisterServerControlHooks(
+	stop func(), restart func(string), status func() bool,
+	startAPI func(string), stopAPI func(),
+	startClientTCP func(), stopClientTCP func(),
+	isClientTCPRunning func() bool, isSessionTCP func() bool,
+	listeners func() ServerListenerInfo,
+) {
 	stopDNSServerFunc = stop
 	restartDNSServerFunc = restart
 	getServerStatusFunc = status
 	startGinAPIFunc = startAPI
+	stopAPIFunc = stopAPI
+	startClientTCPFunc = startClientTCP
+	stopClientTCPFunc = stopClientTCP
+	isClientTCPRunningFunc = isClientTCPRunning
+	isCurrentSessionTCPFunc = isSessionTCP
 	getServerListenersFunc = listeners
 }
 
@@ -1356,7 +1373,7 @@ func RegisterCommands() {
 			Name:        "start",
 			Summary:     "Start server component",
 			Description: "Starts DNS or API server components.",
-			Usage:       "server start <dns|api>",
+			Usage:       "server start <dns|api|client>",
 			Category:    "Server",
 			Tags:        []string{"server", "start"},
 			Args:        []tui.ArgSpec{{Name: "component", Description: "Component to start", Required: false}},
@@ -1366,7 +1383,7 @@ func RegisterCommands() {
 			Name:        "stop",
 			Summary:     "Stop server component",
 			Description: "Stops DNS or API server components.",
-			Usage:       "server stop <dns|api>",
+			Usage:       "server stop <dns|api|client>",
 			Category:    "Server",
 			Tags:        []string{"server", "stop"},
 			Args:        []tui.ArgSpec{{Name: "component", Description: "Component to stop", Required: false}},
@@ -1574,6 +1591,13 @@ func handleServerStart(args []string) {
 			}
 			fmt.Println("API server started.")
 		},
+		"client": func() {
+			if startClientTCPFunc != nil {
+				startClientTCPFunc()
+			} else {
+				fmt.Println("Client TCP start not available.")
+			}
+		},
 	}
 	component := strings.ToLower(args[0])
 	if cmd, ok := startCommands[component]; ok {
@@ -1596,6 +1620,14 @@ func handleServerStop(args []string) {
 		printServerComponentHint()
 		return
 	}
+	component := strings.ToLower(args[0])
+	if component == "client" && isCurrentSessionTCPFunc != nil && isCurrentSessionTCPFunc() {
+		if len(args) < 2 || strings.ToLower(strings.TrimSpace(args[1])) != "confirm" {
+			fmt.Println("Warning: You are currently connected over TCP. Stopping the client service will disconnect your session.")
+			fmt.Println("Run 'server stop client confirm' to proceed.")
+			return
+		}
+	}
 	stopCommands := map[string]func(){
 		"dns": func() {
 			if stopDNSServerFunc != nil {
@@ -1604,10 +1636,21 @@ func handleServerStop(args []string) {
 			fmt.Println("DNS server stopped.")
 		},
 		"api": func() {
-			fmt.Println("API server stop not implemented yet.")
+			if stopAPIFunc != nil {
+				stopAPIFunc()
+				fmt.Println("API server stopped.")
+			} else {
+				fmt.Println("API server stop not available.")
+			}
+		},
+		"client": func() {
+			if stopClientTCPFunc != nil {
+				stopClientTCPFunc()
+			} else {
+				fmt.Println("Client TCP stop not available.")
+			}
 		},
 	}
-	component := strings.ToLower(args[0])
 	if cmd, ok := stopCommands[component]; ok {
 		cmd()
 	} else {
@@ -1696,7 +1739,16 @@ func handleServerStatus(args []string) {
 	printClients := func() {
 		fmt.Println("Client Access:")
 		fmt.Printf("  UNIX Socket: %s\n", formatEndpoint(info.ClientSocket, info.ClientSocketEnabled))
-		fmt.Printf("  TCP:         %s\n", formatEndpoint(info.ClientTCPEndpoint, info.ClientTCPEnabled))
+		tcpStatus := "disabled"
+		if info.ClientTCPEnabled || info.ClientTCPRunning {
+			tcpStatus = info.ClientTCPEndpoint
+			if info.ClientTCPRunning {
+				tcpStatus += " (running)"
+			} else {
+				tcpStatus += " (stopped)"
+			}
+		}
+		fmt.Printf("  TCP:         %s\n", tcpStatus)
 	}
 
 	switch component {
@@ -1932,13 +1984,13 @@ func serverUpTimeFormat(startTime time.Time) string {
 }
 
 func printServerStartUsage() {
-	fmt.Println("Usage: server start <dns|api>")
+	fmt.Println("Usage: server start <dns|api|client>")
 	fmt.Println("Description: Start the specified server component.")
 	printHelpAliasesHint()
 }
 
 func printServerStopUsage() {
-	fmt.Println("Usage: server stop <dns|api>")
+	fmt.Println("Usage: server stop <dns|api|client>")
 	fmt.Println("Description: Stop the specified server component.")
 	printHelpAliasesHint()
 }
@@ -1950,7 +2002,7 @@ func printServerStatusUsage() {
 }
 
 func printServerComponentHint() {
-	fmt.Println("Available components: dns, api")
+	fmt.Println("Available components: dns, api, client")
 }
 
 func printServerConfigureUsage() {
