@@ -203,7 +203,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	dnsrecords, _ := cmd.Flags().GetString("dnsrecords")
 	cache, _ := cmd.Flags().GetString("cache")
 	loadedCfg.Config.FileLocations.DNSServerFile = resolveDataPath(dnsservers, "dnsservers.json", cwd)
-	loadedCfg.Config.FileLocations.DNSRecordsFile = resolveDataPath(dnsrecords, "dnsrecords.json", cwd)
+	if dnsrecords != "" {
+		loadedCfg.Config.FileLocations.RecordsSource = &config.RecordsSourceConfig{Type: config.RecordsSourceFile, Location: resolveDataPath(dnsrecords, "dnsrecords.json", cwd)}
+	}
 	loadedCfg.Config.FileLocations.CacheFile = resolveDataPath(cache, "dnscache.json", cwd)
 	data.SetConfig(loadedCfg)
 	data.InitializeJSONFiles()

@@ -64,7 +64,21 @@ When you do not pass any path flags, dnsplane looks for an existing `dnsplane.js
 | `--dnsrecords` | Path to dnsrecords.json (overrides config) |
 | `--cache` | Path to dnscache.json (overrides config) |
 
-If a data file does not exist, dnsplane creates it with default contents at the configured (or overridden) path.
+If a data file does not exist, dnsplane creates it with default contents at the configured (or overridden) path. When the records source is URL or Git, no local records file is created (records are read-only from the remote source).
+
+### TUI (interactive client)
+
+When you run `dnsplane client` (or connect over TCP), you get an interactive TUI. Main areas:
+
+- **record** – Add, remove, update, list DNS records (`record add <name> [type] <value> [ttl]`, etc.).
+- **dns** – Manage upstream DNS servers: add, update, remove, list, clear, load, save. Use named params: `dns add 1.1.1.1 53`, `dns add 192.168.5.5 53 active:true adblocker:false whitelist:example.com,example.org`.
+- **server** – **config** (show all settings), **set** (e.g. `server set apiport 8080`; in-memory until you run **save**), **save** (write config to disk), **load** (reload config from disk), **start** / **stop** (dns, api, or client listeners), **status**, **version**.
+- **adblock** – **load** &lt;file or URL&gt; (merge into block list), **list** (loaded sources and counts), **domains** (list blocked domains), **add** / **remove** / **clear**.
+- **tools** – **dig** (e.g. `tools dig example.com`, `tools dig example.com @8.8.8.8`).
+- **cache** – List, clear cache.
+- **stats** – Query counts, cache hits, block list size, runtime stats.
+
+Use `?` or `help` after a command in the TUI for usage.
 
 ### Recording of clearing and adding dns records
 https://github.com/user-attachments/assets/f5ca52cb-3874-499c-a594-ba3bf64b3ba9
@@ -78,6 +92,75 @@ https://github.com/user-attachments/assets/f5ca52cb-3874-499c-a594-ba3bf64b3ba9
 | dnsservers.json | holds the dns servers used for queries |
 | dnscache.json | holds queries already done if their ttl diff is still above 0 |
 | dnsplane.json | the app config |
+
+### Records source (file, URL, or Git)
+
+DNS records are always configured via `file_locations.records_source` in `dnsplane.json`. One source type applies for both loading and (when writable) saving:
+
+- **file** – Local path; records are read from and written to this path (e.g. `dnsrecords.json`). Default.
+- **url** – HTTP(S) URL that returns JSON in the same format as the records file (`{"records": [...]}`). Read-only; a refresh interval controls how often dnsplane re-fetches.
+- **git** – Git repository URL (HTTPS or SSH). dnsplane clones/pulls the repo and reads `dnsrecords.json` at the **root**. Read-only; refresh interval controls how often it runs `git pull`.
+
+When using **url** or **git**, the TUI and API can still add/update/remove records in memory, but changes are overwritten on the next refresh.
+
+Example – local file (default):
+
+```json
+"file_locations": {
+  "dnsservers": "/etc/dnsplane/dnsservers.json",
+  "cache": "/etc/dnsplane/dnscache.json",
+  "records_source": {
+    "type": "file",
+    "location": "/etc/dnsplane/dnsrecords.json"
+  }
+}
+```
+
+Example – URL (read-only):
+
+```json
+"records_source": {
+  "type": "url",
+  "location": "https://example.com/dnsrecords.json",
+  "refresh_interval_seconds": 60
+}
+```
+
+Example – Git (read-only):
+
+```json
+"records_source": {
+  "type": "git",
+  "location": "https://github.com/you/repo.git",
+  "refresh_interval_seconds": 120
+}
+```
+
+For **url** and **git**, `refresh_interval_seconds` defaults to 60 if omitted.
+
+### Adblock lists
+
+Blocked domains are stored in a single in-memory list. You can:
+
+- **TUI:** `adblock load <filepath|url>` (one file or URL per command; each load is merged), `adblock list` (sources and count per source), `adblock domains` (all blocked domains), `adblock add` / `adblock remove` / `adblock clear`.
+- **Config:** In `dnsplane.json`, set `adblock_list_files` to an array of paths. Those files are loaded in order at startup and merged into the block list (same hosts-style format: `0.0.0.0 domain1.com domain2.com`). Stats show "Adblock list: N domains".
+
+### Main config options (dnsplane.json)
+
+Besides `file_locations` (and `records_source`, `adblock_list_files`), the config supports:
+
+- **DNS / fallback:** `port`, `apiport`, `fallback_server_ip`, `fallback_server_port`, `timeout`
+- **API:** `api` (bool), `apiport`
+- **Client access:** `server_socket` (UNIX socket), `server_tcp` (TCP address for remote TUI clients)
+- **Behaviour:** `cache_records`, `full_stats`, `full_stats_dir`
+- **DNSRecordSettings:** `auto_build_ptr_from_a`, `forward_ptr_queries`, `add_updates_records`
+- **Log:** `log_dir`, `log_severity`, `log_rotation`, `log_rotation_size_mb`, `log_rotation_time_days`
+
+Use `server config` in the TUI to print all current settings, and `server set <setting> <value>` then `server save` to change and persist them.
+
+### REST API
+
+Enable the REST API with `"api": true` in `dnsplane.json` and set `apiport` (e.g. `8080`). You can start or stop the API listener from the TUI with `server start api` / `server stop api`. The API exposes DNS record and upstream server endpoints (see the API package for routes).
 
 ## Logging
 
@@ -106,10 +189,13 @@ When the service runs, it will create default `dnsplane.json` and JSON data file
 
 ## Roadmap
 
-- ad-blocking (implemented)
-- full stats tracking (implemented; optional, see config)
+- Ad-blocking (implemented; load from file or URL, merge multiple lists, config `adblock_list_files`)
+- Full stats tracking (implemented; optional, see config)
+- Per-server domain whitelist (implemented; `dns add/update` with `whitelist:example.com,example.org`)
+- Records from URL or Git (implemented; read-only, with refresh interval)
+- Server config/set/save and start/stop (dns, api, client) in TUI (implemented)
 
-## Dependancies & Documentation
+## Dependencies & Documentation
 [![Known Vulnerabilities](https://snyk.io/test/github/network-plane/dnsplane/badge.svg)](https://snyk.io/test/github/network-plane/dnsplane)
 [![Maintainability](https://qlty.sh/gh/network-plane/projects/dnsplane/maintainability.svg)](https://qlty.sh/gh/network-plane/projects/dnsplane)
 
