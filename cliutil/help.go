@@ -22,3 +22,13 @@ func IsHelpRequest(args []string) bool {
 	}
 	return IsHelpToken(args[0])
 }
+
+// ContainsHelpToken reports whether any argument in args is a help alias (e.g. for "dns add ?" where args are ["add", "?"]).
+func ContainsHelpToken(args []string) bool {
+	for _, a := range args {
+		if IsHelpToken(a) {
+			return true
+		}
+	}
+	return false
+}

@@ -583,14 +583,41 @@ func runDNSList() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 	}
 }
 
+// noDNSAddArgs reports whether there are no effective arguments for "dns add" (e.g. user typed "dns add" or "add" only).
+// When in dns context, input.Raw may be [] or ["add"]; treat both as "show usage".
+func noDNSAddArgs(raw []string) bool {
+	return noDNSSubArgs(raw, "add")
+}
+
+// noDNSSubArgs reports whether there are no effective arguments for "dns <sub>" (e.g. "remove" or "update" only).
+func noDNSSubArgs(raw []string, sub string) bool {
+	if len(raw) == 0 {
+		return true
+	}
+	if len(raw) == 1 {
+		first := strings.TrimSpace(raw[0])
+		if strings.EqualFold(first, sub) || first == "" {
+			return true
+		}
+	}
+	return false
+}
+
 func runDNSAdd() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.ContainsHelpToken(input.Raw) || noDNSAddArgs(input.Raw) {
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: convertServerMessages(dnsservers.UsageAdd())}
+		}
 		dnsData := data.GetInstance()
 		servers := dnsData.GetServers()
 		updated, msgs, err := dnsservers.Add(input.Raw, servers)
 		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertServerMessages(msgs)}
 		if errors.Is(err, dnsservers.ErrHelpRequested) {
 			return result
+		}
+		if errors.Is(err, dnsservers.ErrInvalidArgs) {
+			// Show usage like record add: success + usage messages, no error banner
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: convertServerMessages(msgs)}
 		}
 		if err != nil {
 			result.Status = tui.StatusFailed
@@ -605,12 +632,18 @@ func runDNSAdd() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 
 func runDNSRemove() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.ContainsHelpToken(input.Raw) || noDNSSubArgs(input.Raw, "remove") {
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: convertServerMessages(dnsservers.UsageRemove())}
+		}
 		dnsData := data.GetInstance()
 		servers := dnsData.GetServers()
 		updated, msgs, err := dnsservers.Remove(input.Raw, servers)
 		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertServerMessages(msgs)}
 		if errors.Is(err, dnsservers.ErrHelpRequested) {
 			return result
+		}
+		if errors.Is(err, dnsservers.ErrInvalidArgs) {
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: convertServerMessages(msgs)}
 		}
 		if err != nil {
 			result.Status = tui.StatusFailed
@@ -625,12 +658,18 @@ func runDNSRemove() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult
 
 func runDNSUpdate() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.ContainsHelpToken(input.Raw) || noDNSSubArgs(input.Raw, "update") {
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: convertServerMessages(dnsservers.UsageUpdate())}
+		}
 		dnsData := data.GetInstance()
 		servers := dnsData.GetServers()
 		updated, msgs, err := dnsservers.Update(input.Raw, servers)
 		result := tui.CommandResult{Status: tui.StatusSuccess, Messages: convertServerMessages(msgs)}
 		if errors.Is(err, dnsservers.ErrHelpRequested) {
 			return result
+		}
+		if errors.Is(err, dnsservers.ErrInvalidArgs) {
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: convertServerMessages(msgs)}
 		}
 		if err != nil {
 			result.Status = tui.StatusFailed
@@ -776,15 +815,20 @@ func renderDNSServerTable(out tui.OutputChannel, servers []dnsservers.DNSServer)
 	}
 	rows := make([][]string, 0, len(servers))
 	for _, server := range servers {
+		whitelist := "-"
+		if len(server.DomainWhitelist) > 0 {
+			whitelist = strings.Join(server.DomainWhitelist, ", ")
+		}
 		rows = append(rows, []string{
 			server.Address,
 			server.Port,
 			fmt.Sprintf("%t", server.Active),
 			fmt.Sprintf("%t", server.LocalResolver),
 			fmt.Sprintf("%t", server.AdBlocker),
+			whitelist,
 		})
 	}
-	out.WriteTable([]string{"Address", "Port", "Active", "Local", "AdBlocker"}, rows)
+	out.WriteTable([]string{"Address", "Port", "Active", "Local", "AdBlocker", "Whitelist"}, rows)
 	tui.EnsureLineBreak(out)
 }
 
@@ -832,7 +876,7 @@ func runToolsDig() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult 
 			return tui.CommandResult{Status: tui.StatusFailed, Messages: warnMessages(nameErr.Error()), Error: &tui.CommandError{Message: nameErr.Error(), Severity: tui.SeverityWarning}}
 		}
 
-		// Determine DNS servers to query
+		// Determine DNS servers to query (use domain whitelist when no @server specified)
 		var servers []string
 		if serverHost != "" {
 			if serverPort == "" {
@@ -841,9 +885,9 @@ func runToolsDig() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult 
 			servers = []string{net.JoinHostPort(serverHost, serverPort)}
 		} else {
 			dnsData := data.GetInstance()
-			settings := dnsData.GetResolverSettings()
-			servers = dnsservers.GetDNSArray(dnsData.GetServers(), true)
+			servers = dnsservers.GetServersForQuery(dnsData.GetServers(), queryName, true)
 			if len(servers) == 0 {
+				settings := dnsData.GetResolverSettings()
 				fallbackIP := strings.TrimSpace(settings.FallbackServerIP)
 				fallbackPort := strings.TrimSpace(settings.FallbackServerPort)
 				if fallbackIP != "" {
@@ -1293,16 +1337,14 @@ func RegisterCommands() {
 			Context:     "dns",
 			Name:        "add",
 			Summary:     "Add upstream DNS server",
-			Description: "Adds an upstream DNS server definition.",
-			Usage:       "dns add <address> [port] [active] [local_resolver] [adblocker]",
+			Description: "Adds an upstream DNS server definition. Optional whitelist limits this server to specific domains only.",
+			Usage:       "dns add <address> [port] [active] [local_resolver] [adblocker] [whitelist:suffix1,suffix2,...]",
 			Category:    "Upstream Servers",
 			Tags:        []string{"dns", "servers", "add"},
-			Args: []tui.ArgSpec{
-				{Name: "address", Type: tui.ArgTypeString, Required: true, Description: "Server address (e.g. 1.1.1.1)"},
-				{Name: "port", Type: tui.ArgTypeString, Required: false, Description: "Port (default 53)"},
-				{Name: "active", Type: tui.ArgTypeBool, Required: false, Description: "Whether server is active (default true)"},
-				{Name: "local_resolver", Type: tui.ArgTypeBool, Required: false, Description: "Use as local resolver (default true)"},
-				{Name: "adblocker", Type: tui.ArgTypeBool, Required: false, Description: "Enable adblocking for this server (default false)"},
+			Args:        []tui.ArgSpec{{Name: "params", Description: "Address [port] [active] [local_resolver] [adblocker] [whitelist:...]", Repeatable: true}},
+			Examples: []tui.Example{
+				{Description: "Add global server", Command: "dns add 1.1.1.1 53 true false false"},
+				{Description: "Add server with domain whitelist", Command: "dns add 192.168.5.5 53 true true false whitelist:example.com,example.org"},
 			},
 		}, runDNSAdd()),
 		newLegacyFactory(tui.CommandSpec{
@@ -1310,25 +1352,24 @@ func RegisterCommands() {
 			Name:        "remove",
 			Summary:     "Remove upstream DNS server",
 			Description: "Removes an upstream DNS server definition.",
-			Usage:       "dns remove <address> [port]",
+			Usage:       "dns remove <address>",
 			Category:    "Upstream Servers",
 			Tags:        []string{"dns", "servers", "remove"},
-			Args:        []tui.ArgSpec{{Name: "address", Type: tui.ArgTypeString, Required: true, Description: "Server address to remove"}},
+			Args:        []tui.ArgSpec{{Name: "params", Description: "Address to remove", Repeatable: true}},
+			Examples:    []tui.Example{{Description: "Remove server", Command: "dns remove 127.0.0.1"}},
 		}, runDNSRemove()),
 		newLegacyFactory(tui.CommandSpec{
 			Context:     "dns",
 			Name:        "update",
 			Summary:     "Update upstream DNS server",
-			Description: "Updates an existing upstream DNS server definition.",
-			Usage:       "dns update <address> [port] [active] [local_resolver] [adblocker]",
+			Description: "Updates an existing upstream DNS server definition. Use whitelist: to set domains; whitelist: with nothing after to clear.",
+			Usage:       "dns update <address> [port] [active] [local_resolver] [adblocker] [whitelist:suffix1,suffix2,...]",
 			Category:    "Upstream Servers",
 			Tags:        []string{"dns", "servers", "update"},
-			Args: []tui.ArgSpec{
-				{Name: "address", Type: tui.ArgTypeString, Required: true, Description: "Server address to update"},
-				{Name: "port", Type: tui.ArgTypeString, Required: false, Description: "Port (default 53)"},
-				{Name: "active", Type: tui.ArgTypeBool, Required: false, Description: "Whether server is active"},
-				{Name: "local_resolver", Type: tui.ArgTypeBool, Required: false, Description: "Use as local resolver"},
-				{Name: "adblocker", Type: tui.ArgTypeBool, Required: false, Description: "Enable adblocking for this server"},
+			Args:        []tui.ArgSpec{{Name: "params", Description: "Address [port] [active] [local_resolver] [adblocker] [whitelist:...]", Repeatable: true}},
+			Examples: []tui.Example{
+				{Description: "Update server flags", Command: "dns update 1.1.1.1 53 false true true"},
+				{Description: "Set domain whitelist", Command: "dns update 192.168.5.5 53 true true false whitelist:example.com,example.org"},
 			},
 		}, runDNSUpdate()),
 		newLegacyFactory(tui.CommandSpec{
