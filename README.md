@@ -109,17 +109,19 @@ When the service runs, it will create default `dnsplane.json` and JSON data file
 - full stats tracking (implemented; optional, see config)
 
 ## Dependancies & Documentation
-[![Go Mod](https://img.shields.io/github/go-mod/go-version/network-plane/dnsplane?style=for-the-badge)]()
-
-[![Go Reference](https://pkg.go.dev/badge/github.com/network-plane/dnsplane.svg)](https://pkg.go.dev/github.com/network-plane/dnsplane)
-
-[![Dependancies](https://img.shields.io/librariesio/github/network-plane/dnsplane?style=for-the-badge)](https://libraries.io/github/network-plane/dnsplane)
+[![Known Vulnerabilities](https://snyk.io/test/github/network-plane/dnsplane/badge.svg)](https://snyk.io/test/github/network-plane/dnsplane)
+[![Maintainability](https://qlty.sh/gh/network-plane/projects/dnsplane/maintainability.svg)](https://qlty.sh/gh/network-plane/projects/dnsplane)
 
 [![OpenSSF Best Practices](https://bestpractices.coreinfrastructure.org/projects/8887/badge)](https://www.bestpractices.dev/projects/8887)
-
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/network-plane/dnsplane/badge)](https://securityscorecards.dev/viewer/?uri=github.com/network-plane/dnsplane)
+[![OpenSSF Baseline](https://www.bestpractices.dev/projects/8887/baseline)](https://www.bestpractices.dev/projects/8887)
 
-![Code Climate issues](https://img.shields.io/codeclimate/tech-debt/network-plane/dnsplane?style=for-the-badge)
+
+
+[![Go Mod](https://img.shields.io/github/go-mod/go-version/network-plane/dnsplane?style=for-the-badge)]()
+[![Go Reference](https://pkg.go.dev/badge/github.com/network-plane/dnsplane.svg)](https://pkg.go.dev/github.com/network-plane/dnsplane)
+[![Dependancies](https://img.shields.io/librariesio/github/network-plane/dnsplane?style=for-the-badge)](https://libraries.io/github/network-plane/dnsplane)
+
 
 ![GitHub commit activity](https://img.shields.io/github/commit-activity/m/network-plane/dnsplane?style=for-the-badge)
 
@@ -128,6 +130,12 @@ When the service runs, it will create default `dnsplane.json` and JSON data file
 
 Contributions are always welcome!
 All contributions are required to follow the https://google.github.io/styleguide/go/
+
+## Commit Activity
+![GitHub commit activity](https://img.shields.io/github/commit-activity/y/network-plane/dnsplane)
+![GitHub commits since latest release](https://img.shields.io/github/commits-since/network-plane/dnsplane/latest)
+![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/network-plane/dnsplane)
+
 
 
 ## Authors
