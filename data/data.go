@@ -372,7 +372,8 @@ func SaveDNSServers(dnsServers []dnsservers.DNSServer) error {
 	return SaveToJSON(paths.DNSServerFile, data)
 }
 
-// LoadDNSRecords reads the dnsrecords.json file and returns the list of DNS records
+// LoadDNSRecords reads the dnsrecords.json file and returns the list of DNS records.
+// Record names are canonicalized (trailing dot stripped) for consistent display.
 func LoadDNSRecords() ([]dnsrecords.DNSRecord, error) {
 	type recordsType struct {
 		Records []dnsrecords.DNSRecord `json:"records"`
@@ -381,6 +382,9 @@ func LoadDNSRecords() ([]dnsrecords.DNSRecord, error) {
 	records, err := LoadFromJSON[recordsType](paths.DNSRecordsFile)
 	if err != nil {
 		return nil, err
+	}
+	for i := range records.Records {
+		records.Records[i].Name = dnsrecords.CanonicalizeRecordNameForStorage(records.Records[i].Name)
 	}
 	return records.Records, nil
 }
