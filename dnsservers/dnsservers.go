@@ -228,65 +228,71 @@ func List(dnsServerData []DNSServer) ListResult {
 	return result
 }
 
-// Helper function to parse and apply command arguments to a DNSServer.
-
+// applyArgsToDNSServer parses args into a DNSServer. Required ordered args: address; optional second arg is port if it does not contain ':'.
+// Remaining args are named parameters (order-independent): active:true|false, localresolver:true|false, adblocker:true|false, whitelist:suffix1,suffix2
 func applyArgsToDNSServer(server *DNSServer, args []string) error {
-	if len(args) >= 1 {
-		server.Address = args[0]
-		if net.ParseIP(server.Address) == nil {
-			return fmt.Errorf("invalid IP address: %s", server.Address)
-		}
-	} else {
+	if len(args) < 1 {
 		return fmt.Errorf("address is required")
 	}
+	server.Address = args[0]
+	if net.ParseIP(server.Address) == nil {
+		return fmt.Errorf("invalid IP address: %s", server.Address)
+	}
 
-	if len(args) >= 2 {
-		if _, err := strconv.Atoi(args[1]); err != nil {
-			return fmt.Errorf("invalid port: %s", args[1])
+	rest := args[1:]
+	// Optional positional port: only if next arg exists and is not a named param (no ':')
+	if len(rest) >= 1 && !strings.Contains(rest[0], ":") {
+		port := rest[0]
+		if _, err := strconv.Atoi(port); err != nil {
+			return fmt.Errorf("invalid port: %s", port)
 		}
-		server.Port = args[1]
+		server.Port = port
+		rest = rest[1:]
 	}
 
-	boolFields := []struct {
-		name     string
-		index    int
-		assignTo *bool
-	}{
-		{"Active", 2, &server.Active},
-		{"LocalResolver", 3, &server.LocalResolver},
-		{"AdBlocker", 4, &server.AdBlocker},
-	}
-
-	for _, field := range boolFields {
-		if len(args) > field.index {
-			value, err := strconv.ParseBool(args[field.index])
+	for _, arg := range rest {
+		idx := strings.Index(arg, ":")
+		if idx <= 0 {
+			return fmt.Errorf("unexpected argument %q; use named parameters (e.g. active:true whitelist:example.com)", arg)
+		}
+		key := strings.ToLower(strings.TrimSpace(arg[:idx]))
+		val := strings.TrimSpace(arg[idx+1:])
+		switch key {
+		case "active":
+			b, err := strconv.ParseBool(val)
 			if err != nil {
-				return fmt.Errorf("invalid value for %s: %s", field.name, args[field.index])
+				return fmt.Errorf("invalid active value: %s", val)
 			}
-			*field.assignTo = value
-		}
-	}
-
-	// Optional: whitelist:domain1,domain2,... (domain suffixes; this server used only for matching queries)
-	if len(args) > 5 && strings.HasPrefix(args[5], "whitelist:") {
-		val := strings.TrimPrefix(args[5], "whitelist:")
-		val = strings.TrimSpace(val)
-		if val == "" {
-			server.DomainWhitelist = nil
-		} else {
-			parts := strings.Split(val, ",")
-			server.DomainWhitelist = make([]string, 0, len(parts))
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if p != "" {
-					server.DomainWhitelist = append(server.DomainWhitelist, p)
+			server.Active = b
+		case "localresolver":
+			b, err := strconv.ParseBool(val)
+			if err != nil {
+				return fmt.Errorf("invalid localresolver value: %s", val)
+			}
+			server.LocalResolver = b
+		case "adblocker":
+			b, err := strconv.ParseBool(val)
+			if err != nil {
+				return fmt.Errorf("invalid adblocker value: %s", val)
+			}
+			server.AdBlocker = b
+		case "whitelist":
+			if val == "" {
+				server.DomainWhitelist = nil
+			} else {
+				parts := strings.Split(val, ",")
+				server.DomainWhitelist = make([]string, 0, len(parts))
+				for _, p := range parts {
+					p = strings.TrimSpace(p)
+					if p != "" {
+						server.DomainWhitelist = append(server.DomainWhitelist, p)
+					}
 				}
 			}
+		default:
+			return fmt.Errorf("unknown parameter %q; allowed: active, localresolver, adblocker, whitelist", key)
 		}
-	} else if len(args) > 5 {
-		return fmt.Errorf("unexpected 6th argument; use whitelist:suffix1,suffix2 for domain whitelist")
 	}
-
 	return nil
 }
 
@@ -318,9 +324,9 @@ func UsageRemove() []Message {
 // Helper function to handle the help command.
 func usageAdd() []Message {
 	msgs := []Message{
-		{Level: LevelInfo, Text: "Usage  : add <Address> [Port] [Active] [LocalResolver] [AdBlocker] [whitelist:suffix1,suffix2,...]"},
-		{Level: LevelInfo, Text: "Example: add 1.1.1.1 53 true false false"},
-		{Level: LevelInfo, Text: "Example: add 192.168.5.5 53 true true false whitelist:example.com,example.org"},
+		{Level: LevelInfo, Text: "Usage  : add <Address> [Port] [active:true|false] [localresolver:true|false] [adblocker:true|false] [whitelist:suffix1,suffix2,...]"},
+		{Level: LevelInfo, Text: "Example: add 1.1.1.1 53"},
+		{Level: LevelInfo, Text: "Example: add 192.168.5.5 53 active:true localresolver:true adblocker:false whitelist:example.com,example.org"},
 	}
 	return append(msgs, helpHint())
 }
@@ -335,9 +341,9 @@ func usageRemove() []Message {
 
 func usageUpdate() []Message {
 	msgs := []Message{
-		{Level: LevelInfo, Text: "Usage  : update <Address> [Port] [Active] [LocalResolver] [AdBlocker] [whitelist:suffix1,suffix2,...]"},
-		{Level: LevelInfo, Text: "Example: update 1.1.1.1 53 false true true"},
-		{Level: LevelInfo, Text: "Example: update 192.168.5.5 53 true true false whitelist:example.com,example.org"},
+		{Level: LevelInfo, Text: "Usage  : update <Address> [Port] [active:true|false] [localresolver:true|false] [adblocker:true|false] [whitelist:suffix1,suffix2,...]"},
+		{Level: LevelInfo, Text: "Example: update 1.1.1.1 53 active:false"},
+		{Level: LevelInfo, Text: "Example: update 192.168.5.5 adblocker:true whitelist:example.com,example.org"},
 	}
 	return append(msgs, helpHint())
 }
