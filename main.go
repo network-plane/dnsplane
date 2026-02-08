@@ -54,6 +54,9 @@ var (
 	tuiLogger        *slog.Logger
 	clientLogger     *slog.Logger
 	asyncLogQueue    *logger.AsyncLogQueue
+
+	tcpTUIListenerMu sync.Mutex
+	tcpTUIListener   net.Listener
 	rootCmd          = &cobra.Command{
 		Use:           "dnsplane",
 		Short:         "DNS Server with optional CLI mode",
@@ -299,6 +302,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 		func(p string) { restartDNSServer(appState, p) },
 		func() bool { return getServerStatus(appState) },
 		func(p string) { startAPIAsync(appState, p, apiLogger) },
+		func() { stopAPIAsync(appState) },
+		func() { startClientTCPListener(appState, tuiLogger) },
+		func() { stopClientTCPListener(tuiLogger) },
+		isClientTCPListenerRunning,
+		func() bool { return appState.IsTUIClientTCP() },
 		func() commandhandler.ServerListenerInfo { return currentServerListeners(appState) },
 	)
 	commandhandler.SetVersion(appversion, appversion)
@@ -394,6 +402,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("tcp listener error: %w", err)
 		}
 		tcpListener = listener
+		tcpTUIListenerMu.Lock()
+		tcpTUIListener = listener
+		tcpTUIListenerMu.Unlock()
 		go acceptInteractiveSessions(listener, tuiLogger)
 	}
 	sigCh := make(chan os.Signal, 1)
@@ -428,6 +439,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 	if tcpListener != nil {
 		_ = tcpListener.Close()
+		tcpTUIListenerMu.Lock()
+		tcpTUIListener = nil
+		tcpTUIListenerMu.Unlock()
 		if tuiLogger != nil {
 			tuiLogger.Debug("TCP TUI listener closed")
 		}
@@ -436,6 +450,69 @@ func runServer(cmd *cobra.Command, args []string) error {
 		_ = syscall.Unlink(serverSocket)
 	}
 	return nil
+}
+
+func stopAPIAsync(state *daemon.State) {
+	api.Stop(state)
+}
+
+func startClientTCPListener(state *daemon.State, log *slog.Logger) {
+	tcpTUIListenerMu.Lock()
+	if tcpTUIListener != nil {
+		tcpTUIListenerMu.Unlock()
+		if log != nil {
+			log.Info("TCP TUI listener already running")
+		}
+		fmt.Println("Client TCP listener already running.")
+		return
+	}
+	addr := strings.TrimSpace(state.ListenerSnapshot().ClientTCPAddress)
+	if addr == "" {
+		addr = defaultTCPTerminalAddr
+	}
+	tcpTUIListenerMu.Unlock()
+	listener, err := startTCPTerminalListener(addr, log)
+	if err != nil {
+		if log != nil {
+			log.Error("failed to start TCP TUI listener", "address", addr, "error", err)
+		}
+		fmt.Printf("Failed to start TCP TUI listener: %v\n", err)
+		return
+	}
+	tcpTUIListenerMu.Lock()
+	tcpTUIListener = listener
+	tcpTUIListenerMu.Unlock()
+	go acceptInteractiveSessions(listener, log)
+	state.UpdateListener(func(info *daemon.ListenerSettings) {
+		info.ClientTCPAddress = addr
+	})
+	if log != nil {
+		log.Info("TCP TUI listener started", "address", addr)
+	}
+	fmt.Println("Client TCP listener started.")
+}
+
+func stopClientTCPListener(log *slog.Logger) {
+	tcpTUIListenerMu.Lock()
+	l := tcpTUIListener
+	tcpTUIListener = nil
+	tcpTUIListenerMu.Unlock()
+	if l == nil {
+		fmt.Println("Client TCP listener was not running.")
+		return
+	}
+	_ = l.Close()
+	if log != nil {
+		log.Info("TCP TUI listener stopped")
+	}
+	fmt.Println("Client TCP listener stopped.")
+}
+
+func isClientTCPListenerRunning() bool {
+	tcpTUIListenerMu.Lock()
+	running := tcpTUIListener != nil
+	tcpTUIListenerMu.Unlock()
+	return running
 }
 
 func currentServerListeners(state *daemon.State) commandhandler.ServerListenerInfo {
@@ -460,6 +537,7 @@ func currentServerListeners(state *daemon.State) commandhandler.ServerListenerIn
 		ClientSocketEnabled: socket != "",
 		ClientTCPEndpoint:   tcp,
 		ClientTCPEnabled:    tcp != "",
+		ClientTCPRunning:    isClientTCPListenerRunning(),
 		APIEndpoint:         apiEndpoint,
 		APIEnabled:          listener.APIEnabled,
 		APIRunning:          state.APIRunning(),

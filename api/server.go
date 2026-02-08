@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 
 	"dnsplane/daemon"
 	"dnsplane/data"
@@ -14,6 +16,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+)
+
+var (
+	apiServerMu sync.Mutex
+	apiServer   *http.Server
 )
 
 // RouteRegistrar registers HTTP routes on the supplied Chi router.
@@ -47,19 +54,37 @@ func Start(state *daemon.State, port string, registrar RouteRegistrar, logger *s
 	if logger != nil {
 		logger.Info("API server starting", "port", trimmed)
 	}
+	router := chi.NewRouter()
+	router.Use(middleware.Recoverer)
+	router.Use(middleware.Logger)
+	registrar(router)
+
+	addr := fmt.Sprintf(":%s", trimmed)
+	srv := &http.Server{Addr: addr, Handler: router}
+	apiServerMu.Lock()
+	apiServer = srv
+	apiServerMu.Unlock()
 	go func() {
 		defer state.SetAPIRunning(false)
-
-		router := chi.NewRouter()
-		router.Use(middleware.Recoverer)
-		router.Use(middleware.Logger)
-		registrar(router)
-
-		addr := fmt.Sprintf(":%s", trimmed)
-		if err := http.ListenAndServe(addr, router); err != nil {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logAPIError(logger, "API server stopped with error", "error", err)
 		}
 	}()
+}
+
+// Stop shuts down the API server and updates state. No-op if not running.
+func Stop(state *daemon.State) {
+	apiServerMu.Lock()
+	srv := apiServer
+	apiServer = nil
+	apiServerMu.Unlock()
+	if srv == nil {
+		return
+	}
+	_ = srv.Shutdown(context.Background())
+	if state != nil {
+		state.SetAPIRunning(false)
+	}
 }
 
 func logAPIWarn(logger *slog.Logger, msg string, keyValues ...any) {
