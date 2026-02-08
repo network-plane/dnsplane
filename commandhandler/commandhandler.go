@@ -6,6 +6,7 @@ import (
 	"context"
 	"dnsplane/adblock"
 	"dnsplane/cliutil"
+	"dnsplane/config"
 	"dnsplane/data"
 	"dnsplane/dnsrecordcache"
 	"dnsplane/dnsrecords"
@@ -18,6 +19,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/metrics"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1441,17 +1443,27 @@ func RegisterCommands() {
 		}, legacyRunner(handleServerStatus)),
 		newLegacyFactory(tui.CommandSpec{
 			Context:     "server",
-			Name:        "configure",
-			Summary:     "Configure server settings",
-			Description: "Updates resolver settings or displays current configuration.",
-			Usage:       "server configure [setting] [value]",
+			Name:        "config",
+			Summary:     "Show server settings",
+			Description: "Displays current server settings. Use 'server set <setting> <value>' to change a setting.",
+			Usage:       "server config",
 			Category:    "Server",
-			Tags:        []string{"server", "configure"},
-			Args: []tui.ArgSpec{
-				{Name: "setting", Description: "Setting name", Required: false},
-				{Name: "value", Description: "Setting value", Required: false},
+			Tags:        []string{"server", "config", "settings"},
+		}, legacyRunner(handleServerConfig)),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "server",
+			Name:        "set",
+			Summary:     "Set a config setting (in memory)",
+			Description: "Sets a config setting to the given value. Changes are in memory only; run 'server save' to write to the config file.",
+			Usage:       "server set <setting> <value>",
+			Category:    "Server",
+			Tags:        []string{"server", "set", "config"},
+			Args:        []tui.ArgSpec{{Name: "params", Description: "Setting and value (e.g. apiport 8080)", Repeatable: true}},
+			Examples: []tui.Example{
+				{Description: "Set API port", Command: "server set apiport 8080"},
+				{Description: "Set fallback server", Command: "server set fallback_ip 1.1.1.1"},
 			},
-		}, legacyRunner(handleServerConfigure)),
+		}, legacyRunner(handleServerSet)),
 		newLegacyFactory(tui.CommandSpec{
 			Context:     "server",
 			Name:        "load",
@@ -1816,53 +1828,182 @@ func handleServerStatus(args []string) {
 	}
 }
 
-func handleServerConfigure(args []string) {
+func printAllServerConfig(settings config.Config) {
+	fmt.Println("Current Server Configuration:")
+	fmt.Println("  DNS:")
+	fmt.Printf("    port: %s\n", settings.DNSPort)
+	fmt.Println("  Fallback:")
+	fmt.Printf("    fallback_server_ip:   %s\n", settings.FallbackServerIP)
+	fmt.Printf("    fallback_server_port: %s\n", settings.FallbackServerPort)
+	fmt.Printf("    timeout:              %d\n", settings.Timeout)
+	fmt.Println("  API:")
+	fmt.Printf("    apiport:   %s\n", settings.RESTPort)
+	fmt.Printf("    api:       %v\n", settings.APIEnabled)
+	fmt.Println("  Client access:")
+	fmt.Printf("    server_socket: %s\n", settings.ClientSocketPath)
+	fmt.Printf("    server_tcp:    %s\n", settings.ClientTCPAddress)
+	fmt.Println("  Behaviour:")
+	fmt.Printf("    cache_records:  %v\n", settings.CacheRecords)
+	fmt.Printf("    full_stats:     %v\n", settings.FullStats)
+	fmt.Printf("    full_stats_dir: %s\n", settings.FullStatsDir)
+	fmt.Println("  File locations:")
+	fmt.Printf("    dnsservers:  %s\n", settings.FileLocations.DNSServerFile)
+	fmt.Printf("    dnsrecords:  %s\n", settings.FileLocations.DNSRecordsFile)
+	fmt.Printf("    cache:       %s\n", settings.FileLocations.CacheFile)
+	fmt.Println("  Record settings:")
+	fmt.Printf("    auto_build_ptr_from_a: %v\n", settings.DNSRecordSettings.AutoBuildPTRFromA)
+	fmt.Printf("    forward_ptr_queries:   %v\n", settings.DNSRecordSettings.ForwardPTRQueries)
+	fmt.Printf("    add_updates_records:   %v\n", settings.DNSRecordSettings.AddUpdatesRecords)
+	fmt.Println("  Log:")
+	fmt.Printf("    log_dir:                 %s\n", settings.Log.Dir)
+	fmt.Printf("    log_severity:            %s\n", settings.Log.Severity)
+	fmt.Printf("    log_rotation:            %s\n", settings.Log.Rotation)
+	fmt.Printf("    log_rotation_size_mb:    %d\n", settings.Log.RotationSizeMB)
+	fmt.Printf("    log_rotation_time_days:  %d\n", settings.Log.RotationDays)
+}
+
+func handleServerConfig(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printServerConfigUsage()
+		return
+	}
+	dnsData := data.GetInstance()
+	printAllServerConfig(dnsData.Settings)
+}
+
+// applyConfigSetting updates the named setting on cfg and returns a success message or an error.
+func applyConfigSetting(cfg *config.Config, setting, value string) (successMsg string, err error) {
+	switch setting {
+	case "dns_port", "port":
+		cfg.DNSPort = value
+		return fmt.Sprintf("DNS port set to %s", value), nil
+	case "api_port", "apiport":
+		cfg.RESTPort = value
+		return fmt.Sprintf("API port set to %s", value), nil
+	case "fallback_ip", "fallback_server_ip":
+		cfg.FallbackServerIP = value
+		return fmt.Sprintf("Fallback server IP set to %s", value), nil
+	case "fallback_port", "fallback_server_port":
+		cfg.FallbackServerPort = value
+		return fmt.Sprintf("Fallback server port set to %s", value), nil
+	case "timeout":
+		n, e := strconv.Atoi(value)
+		if e != nil || n < 0 {
+			return "", fmt.Errorf("invalid timeout: %s (must be a non-negative integer)", value)
+		}
+		cfg.Timeout = n
+		return fmt.Sprintf("Timeout set to %d", n), nil
+	case "api", "api_enabled":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid value for api: %s (use true/false)", value)
+		}
+		cfg.APIEnabled = b
+		return fmt.Sprintf("API enabled set to %v", b), nil
+	case "cache_records":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid value for cache_records: %s (use true/false)", value)
+		}
+		cfg.CacheRecords = b
+		return fmt.Sprintf("Cache records set to %v", b), nil
+	case "full_stats":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid value for full_stats: %s (use true/false)", value)
+		}
+		cfg.FullStats = b
+		return fmt.Sprintf("Full stats set to %v", b), nil
+	case "full_stats_dir":
+		cfg.FullStatsDir = value
+		return fmt.Sprintf("Full stats dir set to %s", value), nil
+	case "server_socket":
+		cfg.ClientSocketPath = value
+		return fmt.Sprintf("Server socket set to %s", value), nil
+	case "server_tcp":
+		cfg.ClientTCPAddress = value
+		return fmt.Sprintf("Server TCP address set to %s", value), nil
+	case "dnsservers_file", "dnsservers":
+		cfg.FileLocations.DNSServerFile = value
+		return fmt.Sprintf("DNS servers file set to %s", value), nil
+	case "dnsrecords_file", "dnsrecords":
+		cfg.FileLocations.DNSRecordsFile = value
+		return fmt.Sprintf("DNS records file set to %s", value), nil
+	case "cache_file", "cache":
+		cfg.FileLocations.CacheFile = value
+		return fmt.Sprintf("Cache file set to %s", value), nil
+	case "auto_build_ptr_from_a":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid value for auto_build_ptr_from_a: %s (use true/false)", value)
+		}
+		cfg.DNSRecordSettings.AutoBuildPTRFromA = b
+		return fmt.Sprintf("Auto build PTR from A set to %v", b), nil
+	case "forward_ptr_queries":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid value for forward_ptr_queries: %s (use true/false)", value)
+		}
+		cfg.DNSRecordSettings.ForwardPTRQueries = b
+		return fmt.Sprintf("Forward PTR queries set to %v", b), nil
+	case "add_updates_records":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid value for add_updates_records: %s (use true/false)", value)
+		}
+		cfg.DNSRecordSettings.AddUpdatesRecords = b
+		return fmt.Sprintf("Add updates records set to %v", b), nil
+	case "log_dir":
+		cfg.Log.Dir = value
+		return fmt.Sprintf("Log dir set to %s", value), nil
+	case "log_severity":
+		cfg.Log.Severity = value
+		return fmt.Sprintf("Log severity set to %s", value), nil
+	case "log_rotation":
+		cfg.Log.Rotation = config.LogRotationMode(strings.ToLower(value))
+		return fmt.Sprintf("Log rotation set to %s", value), nil
+	case "log_rotation_size_mb":
+		n, e := strconv.Atoi(value)
+		if e != nil || n < 0 {
+			return "", fmt.Errorf("invalid log_rotation_size_mb: %s (must be a non-negative integer)", value)
+		}
+		cfg.Log.RotationSizeMB = n
+		return fmt.Sprintf("Log rotation size MB set to %d", n), nil
+	case "log_rotation_time_days":
+		n, e := strconv.Atoi(value)
+		if e != nil || n < 0 {
+			return "", fmt.Errorf("invalid log_rotation_time_days: %s (must be a non-negative integer)", value)
+		}
+		cfg.Log.RotationDays = n
+		return fmt.Sprintf("Log rotation time days set to %d", n), nil
+	default:
+		return "", fmt.Errorf("unknown setting: %s", setting)
+	}
+}
+
+func handleServerSet(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		printServerSetUsage()
+		return
+	}
+	if len(args) != 2 {
+		fmt.Println("server set requires exactly two arguments: <setting> <value>")
+		printServerSetUsage()
+		return
+	}
 	dnsData := data.GetInstance()
 	settings := dnsData.Settings
-	if cliutil.IsHelpRequest(args) {
-		printServerConfigureUsage()
+	setting := strings.ToLower(strings.TrimSpace(args[0]))
+	value := strings.TrimSpace(args[1])
+	msg, err := applyConfigSetting(&settings, setting, value)
+	if err != nil {
+		fmt.Println(err.Error())
+		printServerSetUsage()
 		return
 	}
-	if len(args) == 0 {
-		fmt.Println("Current Server Configuration:")
-		fmt.Printf("DNS Port: %s\n", settings.DNSPort)
-		fmt.Printf("API Port: %s\n", settings.RESTPort)
-		fmt.Printf("Fallback Server IP: %s\n", settings.FallbackServerIP)
-		fmt.Printf("Fallback Server Port: %s\n", settings.FallbackServerPort)
-		return
-	}
-	if len(args) < 2 {
-		fmt.Println("server configure requires both setting and value.")
-		printServerConfigureUsage()
-		return
-	}
-	if len(args) > 2 {
-		fmt.Println("server configure accepts exactly two arguments.")
-		printServerConfigureUsage()
-		return
-	}
-	setting := strings.ToLower(args[0])
-	value := args[1]
-	switch setting {
-	case "dns_port":
-		settings.DNSPort = value
-		fmt.Printf("DNS Port set to %s\n", value)
-	case "api_port":
-		settings.RESTPort = value
-		fmt.Printf("API Port set to %s\n", value)
-	case "fallback_ip":
-		settings.FallbackServerIP = value
-		fmt.Printf("Fallback Server IP set to %s\n", value)
-	case "fallback_port":
-		settings.FallbackServerPort = value
-		fmt.Printf("Fallback Server Port set to %s\n", value)
-	default:
-		fmt.Printf("Unknown setting: %s\n", setting)
-		printServerConfigureUsage()
-		return
-	}
-	dnsData.UpdateSettings(settings)
-	fmt.Println("Server configuration updated.")
+	dnsData.UpdateSettingsInMemory(settings)
+	fmt.Println(msg)
+	fmt.Println("Run 'server save' to persist the config to the config file.")
 }
 
 // Stats command
@@ -2046,9 +2187,17 @@ func printServerComponentHint() {
 	fmt.Println("Available components: dns, api, client")
 }
 
-func printServerConfigureUsage() {
-	fmt.Println("Usage: server configure <dns_port|api_port|fallback_ip|fallback_port> <value>")
-	fmt.Println("Description: Update a server configuration setting. Run without arguments to view current settings.")
+func printServerConfigUsage() {
+	fmt.Println("Usage: server config")
+	fmt.Println("Description: Show server settings. Use 'server set <setting> <value>' to change a setting.")
+	printHelpAliasesHint()
+}
+
+func printServerSetUsage() {
+	fmt.Println("Usage: server set <setting> <value>")
+	fmt.Println("Description: Set a config setting in memory. Run 'server save' to write to the config file.")
+	fmt.Println("Example: server set apiport 8080")
+	fmt.Println("Settings: dns_port, api_port, fallback_ip, fallback_port, timeout, api, cache_records, full_stats, full_stats_dir, server_socket, server_tcp, dnsservers_file, dnsrecords_file, cache_file, auto_build_ptr_from_a, forward_ptr_queries, add_updates_records, log_dir, log_severity, log_rotation, log_rotation_size_mb, log_rotation_time_days")
 	printHelpAliasesHint()
 }
 
