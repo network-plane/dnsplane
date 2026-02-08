@@ -66,6 +66,8 @@ type Config struct {
 	FileLocations      FileLocations     `json:"file_locations"`
 	DNSRecordSettings  DNSRecordSettings `json:"DNSRecordSettings"`
 	Log                LogConfig         `json:"log"`
+	// AdblockListFiles is a list of paths to adblock list files (e.g. hosts-style). Loaded in order at startup and merged into a single block list.
+	AdblockListFiles   []string          `json:"adblock_list_files,omitempty"`
 }
 
 // Loaded contains the configuration together with metadata about the source file.
@@ -276,6 +278,7 @@ func defaultConfig(baseDir string) *Config {
 			RotationSizeMB: 100,
 			RotationDays:   7,
 		},
+		AdblockListFiles: nil,
 	}
 }
 
