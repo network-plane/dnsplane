@@ -18,17 +18,17 @@ Resolution flow including adblock, local records (file/URL/git), cache, per-serv
 ```mermaid
 flowchart TD
     REQ["DNS Request"]
-    REQ --> ADBLOCK{"Adblock\nblocked?"}
+    REQ --> ADBLOCK{"Adblock blocked?"}
     ADBLOCK -->|Yes| BLOCK["Blocked / NXDOMAIN"]
-    ADBLOCK -->|No| RECORDS{"Local records\n(records_source)\nmatch?"}
+    ADBLOCK -->|No| RECORDS{"Local records (records_source) match?"}
     RECORDS -->|Yes| REPLY_R["Reply from records"]
-    RECORDS -->|No| CACHE{"Cache\nhit?"}
+    RECORDS -->|No| CACHE{"Cache hit?"}
     CACHE -->|Yes| REPLY_C["Reply from cache"]
-    CACHE -->|No| SELECT["Get servers for this query\n(whitelist: only matching or global)"]
-    SELECT --> UPSTREAM["Query selected upstreams\n(in parallel)"]
-    UPSTREAM --> AUTH{"Authoritative\nanswer?"}
+    CACHE -->|No| SELECT["Get servers for this query (whitelist: only matching or global)"]
+    SELECT --> UPSTREAM["Query selected upstreams (in parallel)"]
+    UPSTREAM --> AUTH{"Authoritative answer?"}
     AUTH -->|Yes| REPLY_A["Reply (authoritative)"]
-    AUTH -->|No| FALLBACK["Fallback server\n(if configured)"]
+    AUTH -->|No| FALLBACK["Fallback server (if configured)"]
     FALLBACK --> REPLY_F["Reply (fallback)"]
 ```
 
