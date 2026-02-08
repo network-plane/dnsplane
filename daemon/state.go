@@ -40,11 +40,12 @@ type State struct {
 
 	apiRunning atomic.Bool
 
-	tuiSessionMu   sync.Mutex
-	tuiClientMu    sync.Mutex
-	tuiClientConn  net.Conn
-	tuiClientAddr  string
-	tuiClientSince time.Time
+	tuiSessionMu    sync.Mutex
+	tuiClientMu     sync.Mutex
+	tuiClientConn   net.Conn
+	tuiClientAddr   string
+	tuiClientSince  time.Time
+	tuiClientIsTCP  bool
 }
 
 // NewState builds a State with initial runtime defaults.
@@ -183,6 +184,10 @@ func (s *State) SetTUIClientSession(conn net.Conn, addr string) {
 	s.tuiClientConn = conn
 	s.tuiClientAddr = addr
 	s.tuiClientSince = time.Now()
+	s.tuiClientIsTCP = false
+	if conn != nil && conn.RemoteAddr() != nil {
+		s.tuiClientIsTCP = conn.RemoteAddr().Network() == "tcp"
+	}
 }
 
 // ClearTUIClientSession clears the current TUI client. Call with tuiSessionMu held (or from the session's defer).
@@ -192,6 +197,14 @@ func (s *State) ClearTUIClientSession() {
 	s.tuiClientConn = nil
 	s.tuiClientAddr = ""
 	s.tuiClientSince = time.Time{}
+	s.tuiClientIsTCP = false
+}
+
+// IsTUIClientTCP reports whether the current TUI session is a TCP (remote) client.
+func (s *State) IsTUIClientTCP() bool {
+	s.tuiClientMu.Lock()
+	defer s.tuiClientMu.Unlock()
+	return s.tuiClientIsTCP
 }
 
 // GetTUIClientInfo returns the current TUI client addr and connected-since time (for busy message). Safe to call without holding tuiSessionMu.
