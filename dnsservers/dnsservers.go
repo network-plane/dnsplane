@@ -6,20 +6,26 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"dnsplane/cliutil"
 )
 
-// DNSServer holds the data for a DNS server
+// DNSServer holds the data for a DNS server.
+// DomainWhitelist is optional: if non-empty, this server is only used for query names
+// that match one of the entries (exact or suffix, e.g. internal.example.com matches
+// api.internal.example.com). Empty or nil means the server is "global" and receives
+// all queries not claimed by a whitelisted server.
 type DNSServer struct {
-	Address       string    `json:"address"`
-	Port          string    `json:"port"`
-	Active        bool      `json:"active"`
-	LocalResolver bool      `json:"local_resolver"`
-	AdBlocker     bool      `json:"adblocker"`
-	LastUsed      time.Time `json:"last_used,omitempty"`
-	LastSuccess   time.Time `json:"last_success,omitempty"`
+	Address          string    `json:"address"`
+	Port             string    `json:"port"`
+	Active           bool      `json:"active"`
+	LocalResolver    bool      `json:"local_resolver"`
+	AdBlocker        bool      `json:"adblocker"`
+	DomainWhitelist  []string  `json:"domain_whitelist,omitempty"`
+	LastUsed         time.Time `json:"last_used,omitempty"`
+	LastSuccess      time.Time `json:"last_success,omitempty"`
 }
 
 var (
@@ -55,6 +61,82 @@ func GetDNSArray(dnsServerData []DNSServer, activeOnly bool) []string {
 		dnsArray = append(dnsArray, dnsServer.Address+":"+dnsServer.Port)
 	}
 	return dnsArray
+}
+
+// normalizeQueryNameForWhitelist returns the query name normalized for whitelist matching (lowercase, trailing dot stripped).
+func normalizeQueryNameForWhitelist(queryName string) string {
+	s := strings.TrimSpace(queryName)
+	for strings.HasSuffix(s, ".") {
+		s = strings.TrimSuffix(s, ".")
+	}
+	return strings.ToLower(s)
+}
+
+// ServerMatchesQuery reports whether the query name matches the server's domain whitelist.
+// Query name is normalized (lowercase, no trailing dot). Match is exact or suffix:
+// if whitelist contains "internal.example.com", then "internal.example.com" and "api.internal.example.com" match.
+// If the server has no whitelist (nil or empty), this returns false (server is global, not domain-specific).
+func ServerMatchesQuery(server DNSServer, queryName string) bool {
+	if len(server.DomainWhitelist) == 0 {
+		return false
+	}
+	q := normalizeQueryNameForWhitelist(queryName)
+	if q == "" {
+		return false
+	}
+	for _, entry := range server.DomainWhitelist {
+		e := strings.ToLower(strings.TrimSpace(entry))
+		for strings.HasSuffix(e, ".") {
+			e = strings.TrimSuffix(e, ".")
+		}
+		if e == "" {
+			continue
+		}
+		if q == e {
+			return true
+		}
+		if strings.HasSuffix(q, "."+e) {
+			return true
+		}
+	}
+	return false
+}
+
+// GetServersForQuery returns the list of "Address:Port" servers to use for the given query name.
+// If any server has a non-empty whitelist and matches the query, only active matching servers are returned (whitelist-only; no fallback to global).
+// If the query matches a whitelist but no matching server is active, returns nil (strict: do not use global servers).
+// Otherwise returns global servers only (servers with no whitelist or empty whitelist).
+// activeOnly filters to Active servers in both cases.
+func GetServersForQuery(dnsServerData []DNSServer, queryName string, activeOnly bool) []string {
+	var whitelisted []string
+	for _, s := range dnsServerData {
+		if activeOnly && !s.Active {
+			continue
+		}
+		if ServerMatchesQuery(s, queryName) {
+			whitelisted = append(whitelisted, s.Address+":"+s.Port)
+		}
+	}
+	if len(whitelisted) > 0 {
+		return whitelisted
+	}
+	// Query matched a whitelist but no active server? (e.g. only matching server is inactive) → return none
+	for _, s := range dnsServerData {
+		if ServerMatchesQuery(s, queryName) {
+			return nil
+		}
+	}
+	// Global: servers with no whitelist
+	var global []string
+	for _, s := range dnsServerData {
+		if activeOnly && !s.Active {
+			continue
+		}
+		if len(s.DomainWhitelist) == 0 {
+			global = append(global, s.Address+":"+s.Port)
+		}
+	}
+	return global
 }
 
 // Add adds a DNS server to the list, returning the updated slice and messages.
@@ -185,9 +267,24 @@ func applyArgsToDNSServer(server *DNSServer, args []string) error {
 		}
 	}
 
-	maxArgs := 2 + len(boolFields)
-	if len(args) > maxArgs {
-		return fmt.Errorf("too many arguments provided; expected at most %d parameters", maxArgs)
+	// Optional: whitelist:domain1,domain2,... (domain suffixes; this server used only for matching queries)
+	if len(args) > 5 && strings.HasPrefix(args[5], "whitelist:") {
+		val := strings.TrimPrefix(args[5], "whitelist:")
+		val = strings.TrimSpace(val)
+		if val == "" {
+			server.DomainWhitelist = nil
+		} else {
+			parts := strings.Split(val, ",")
+			server.DomainWhitelist = make([]string, 0, len(parts))
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					server.DomainWhitelist = append(server.DomainWhitelist, p)
+				}
+			}
+		}
+	} else if len(args) > 5 {
+		return fmt.Errorf("unexpected 6th argument; use whitelist:suffix1,suffix2 for domain whitelist")
 	}
 
 	return nil
@@ -203,11 +300,27 @@ func findDNSServerIndex(dnsServers []DNSServer, address string) int {
 	return -1
 }
 
+// UsageAdd returns the usage messages for the add command (for TUI help).
+func UsageAdd() []Message {
+	return usageAdd()
+}
+
+// UsageUpdate returns the usage messages for the update command (for TUI help).
+func UsageUpdate() []Message {
+	return usageUpdate()
+}
+
+// UsageRemove returns the usage messages for the remove command (for TUI help).
+func UsageRemove() []Message {
+	return usageRemove()
+}
+
 // Helper function to handle the help command.
 func usageAdd() []Message {
 	msgs := []Message{
-		{Level: LevelInfo, Text: "Usage  : add <Address> [Port] [Active] [LocalResolver] [AdBlocker]"},
+		{Level: LevelInfo, Text: "Usage  : add <Address> [Port] [Active] [LocalResolver] [AdBlocker] [whitelist:suffix1,suffix2,...]"},
 		{Level: LevelInfo, Text: "Example: add 1.1.1.1 53 true false false"},
+		{Level: LevelInfo, Text: "Example: add 192.168.5.5 53 true true false whitelist:example.com,example.org"},
 	}
 	return append(msgs, helpHint())
 }
@@ -222,8 +335,9 @@ func usageRemove() []Message {
 
 func usageUpdate() []Message {
 	msgs := []Message{
-		{Level: LevelInfo, Text: "Usage  : update <Address> [Port] [Active] [LocalResolver] [AdBlocker]"},
+		{Level: LevelInfo, Text: "Usage  : update <Address> [Port] [Active] [LocalResolver] [AdBlocker] [whitelist:suffix1,suffix2,...]"},
 		{Level: LevelInfo, Text: "Example: update 1.1.1.1 53 false true true"},
+		{Level: LevelInfo, Text: "Example: update 192.168.5.5 53 true true false whitelist:example.com,example.org"},
 	}
 	return append(msgs, helpHint())
 }
