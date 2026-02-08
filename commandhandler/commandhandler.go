@@ -1858,8 +1858,15 @@ func printAllServerConfig(settings config.Config) {
 	fmt.Printf("    full_stats_dir: %s\n", settings.FullStatsDir)
 	fmt.Println("  File locations:")
 	fmt.Printf("    dnsservers:  %s\n", settings.FileLocations.DNSServerFile)
-	fmt.Printf("    dnsrecords:  %s\n", settings.FileLocations.DNSRecordsFile)
 	fmt.Printf("    cache:       %s\n", settings.FileLocations.CacheFile)
+	if settings.FileLocations.RecordsSource != nil {
+		rs := settings.FileLocations.RecordsSource
+		fmt.Printf("    records_source: type=%s location=%s", rs.Type, rs.Location)
+		if rs.Type == "url" || rs.Type == "git" {
+			fmt.Printf(" refresh_interval_seconds=%d", rs.RefreshIntervalSeconds)
+		}
+		fmt.Println()
+	}
 	fmt.Println("  Record settings:")
 	fmt.Printf("    auto_build_ptr_from_a: %v\n", settings.DNSRecordSettings.AutoBuildPTRFromA)
 	fmt.Printf("    forward_ptr_queries:   %v\n", settings.DNSRecordSettings.ForwardPTRQueries)
@@ -1944,9 +1951,25 @@ func applyConfigSetting(cfg *config.Config, setting, value string) (successMsg s
 	case "dnsservers_file", "dnsservers":
 		cfg.FileLocations.DNSServerFile = value
 		return fmt.Sprintf("DNS servers file set to %s", value), nil
-	case "dnsrecords_file", "dnsrecords":
-		cfg.FileLocations.DNSRecordsFile = value
-		return fmt.Sprintf("DNS records file set to %s", value), nil
+	case "dnsrecords_file", "dnsrecords", "records_source_location":
+		if cfg.FileLocations.RecordsSource == nil {
+			cfg.FileLocations.RecordsSource = &config.RecordsSourceConfig{Type: config.RecordsSourceFile, Location: value}
+		} else {
+			cfg.FileLocations.RecordsSource.Location = value
+			cfg.FileLocations.RecordsSource.Type = config.RecordsSourceFile
+		}
+		return fmt.Sprintf("Records source location set to %s (type=file)", value), nil
+	case "records_source_type":
+		t := strings.ToLower(strings.TrimSpace(value))
+		if t != config.RecordsSourceFile && t != config.RecordsSourceURL && t != config.RecordsSourceGit {
+			return "", fmt.Errorf("records_source_type must be file, url, or git (got %q)", value)
+		}
+		if cfg.FileLocations.RecordsSource == nil {
+			cfg.FileLocations.RecordsSource = &config.RecordsSourceConfig{Type: t, Location: ""}
+		} else {
+			cfg.FileLocations.RecordsSource.Type = t
+		}
+		return fmt.Sprintf("Records source type set to %s", t), nil
 	case "cache_file", "cache":
 		cfg.FileLocations.CacheFile = value
 		return fmt.Sprintf("Cache file set to %s", value), nil
@@ -2221,7 +2244,7 @@ func printServerSetUsage() {
 	fmt.Println("Usage: server set <setting> <value>")
 	fmt.Println("Description: Set a config setting in memory. Run 'server save' to write to the config file.")
 	fmt.Println("Example: server set apiport 8080")
-	fmt.Println("Settings: dns_port, api_port, fallback_ip, fallback_port, timeout, api, cache_records, full_stats, full_stats_dir, server_socket, server_tcp, dnsservers_file, dnsrecords_file, cache_file, auto_build_ptr_from_a, forward_ptr_queries, add_updates_records, log_dir, log_severity, log_rotation, log_rotation_size_mb, log_rotation_time_days")
+	fmt.Println("Settings: dns_port, api_port, fallback_ip, fallback_port, timeout, api, cache_records, full_stats, full_stats_dir, server_socket, server_tcp, dnsservers_file, cache_file, records_source_location (or dnsrecords), records_source_type (file|url|git), auto_build_ptr_from_a, forward_ptr_queries, add_updates_records, log_dir, log_severity, log_rotation, log_rotation_size_mb, log_rotation_time_days")
 	printHelpAliasesHint()
 }
 

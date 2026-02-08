@@ -12,19 +12,14 @@ So: **whitelist = “this server only receives queries for these domains, and th
 
 ---
 
-## Current behavior (brief)
+## Current behavior (brief) — *updated after implementation*
 
-- **`dnsservers.DNSServer`** (`dnsservers/dnsservers.go`): `Address`, `Port`, `Active`, `LocalResolver`, `AdBlocker`, `LastUsed`, `LastSuccess`. No domain/whitelist field.
-- **`dnsservers.GetDNSArray(servers, activeOnly)`**: returns `[]string` of `"Address:Port"` for all (active) servers. No domain filtering.
-- **Resolver** (`resolver/resolver.go`):
-  - **A/AAAA** (`resolveAParallel`): gets all active servers via `GetDNSArray(store.GetServers(), true)`, queries **all** in parallel, then local → cache → authoritative upstream → first success. Fallback is appended if not already in the list.
-  - **Other types** (`handleDNSServers`): same — all active servers + fallback, first authoritative or first success.
-- **Persistence**: `data.LoadDNSServers` / `SaveDNSServers` read/write `dnsservers.json` with `{"dnsservers": [...]}`.
-- **CLI/TUI**: `dns add|update|list|remove|clear|load|save` in `commandhandler`; `applyArgsToDNSServer` parses address, port, and three booleans. No domain list.
-- **tools dig**: uses `GetDNSArray(GetServers(), true)` (and fallback) when no `@server` is specified; no domain-based server selection.
-- **API**: only `/dns/records` (list/add). No DNS server API today.
-
-So today every question is sent to every active upstream (plus fallback). There is no per-domain or per-server filtering.
+- **`dnsservers.DNSServer`**: has optional `DomainWhitelist []string`. Empty/nil = global server.
+- **`dnsservers.GetServersForQuery(servers, queryName, activeOnly)`**: returns servers for this query (whitelist match or global). `GetDNSArray` still used where “all active” is needed.
+- **Resolver**: uses `GetServersForQuery` in `resolveAParallel` (A/AAAA) and `handleDNSServers` (other types). Fallback only when not using whitelist selection.
+- **CLI/TUI**: `dns add|update` accept named params including `whitelist:suffix1,suffix2`. `dns list` shows Whitelist column.
+- **tools dig**: uses `GetServersForQuery` when no `@server` is given.
+- **API**: still no DNS server API (optional, see §7).
 
 ---
 
@@ -62,39 +57,39 @@ No change to the upstream client, cache, or local records; only to **which** ser
 
 ### 1. Data model and persistence
 
-- [ ] **1.1** Add optional `DomainWhitelist []string` (or `Whitelist []string`) to `dnsservers.DNSServer` in `dnsservers/dnsservers.go`. Empty/nil = “global” server (current behavior).
-- [ ] **1.2** Ensure `data.LoadDNSServers` / `SaveDNSServers` and default JSON still work (optional field, backward compatible).
-- [ ] **1.3** If needed, add a small migration or default so existing `dnsservers.json` without the field still unmarshals (Go zero value is fine for `nil`/empty slice).
+- [x] **1.1** Add optional `DomainWhitelist []string` (or `Whitelist []string`) to `dnsservers.DNSServer` in `dnsservers/dnsservers.go`. Empty/nil = “global” server (current behavior).
+- [x] **1.2** Ensure `data.LoadDNSServers` / `SaveDNSServers` and default JSON still work (optional field, backward compatible).
+- [x] **1.3** If needed, add a small migration or default so existing `dnsservers.json` without the field still unmarshals (Go zero value is fine for `nil`/empty slice).
 
 ### 2. Domain matching
 
-- [ ] **2.1** Add a function in `dnsservers` (or a small shared package) to decide if a query name matches a server’s whitelist: e.g. `ServerMatchesQuery(server DNSServer, queryName string) bool`. Normalize `queryName` (lowercase, strip trailing dot). Match if any whitelist entry is exact or is a suffix of the query (e.g. query `api.internal.vodafoneinnovus.com` and entry `internal.vodafoneinnovus.com` → true). Reuse pattern similar to adblock’s `IsBlocked` (suffix / subdomain logic).
-- [ ] **2.2** Add a function to get “servers that apply to this query”: e.g. `GetServersForQuery(servers []DNSServer, queryName string, activeOnly bool) []string`. If any server has a non-empty whitelist and matches the query, return only those matching servers (address:port). Otherwise return “global” servers (no whitelist or empty whitelist). Clarify: “global” = servers that have no whitelist; they receive all queries that are not claimed by a whitelist server.
+- [x] **2.1** Add a function in `dnsservers` (or a small shared package) to decide if a query name matches a server’s whitelist: e.g. `ServerMatchesQuery(server DNSServer, queryName string) bool`. Normalize `queryName` (lowercase, strip trailing dot). Match if any whitelist entry is exact or is a suffix of the query (e.g. query `api.internal.vodafoneinnovus.com` and entry `internal.vodafoneinnovus.com` → true). Reuse pattern similar to adblock’s `IsBlocked` (suffix / subdomain logic).
+- [x] **2.2** Add a function to get “servers that apply to this query”: e.g. `GetServersForQuery(servers []DNSServer, queryName string, activeOnly bool) []string`. If any server has a non-empty whitelist and matches the query, return only those matching servers (address:port). Otherwise return “global” servers (no whitelist or empty whitelist). Clarify: “global” = servers that have no whitelist; they receive all queries that are not claimed by a whitelist server.
 
 ### 3. Resolver integration
 
-- [ ] **3.1** In `resolver/resolver.go`, replace the two places that call `GetDNSArray(store.GetServers(), true)` with logic that:
+- [x] **3.1** In `resolver/resolver.go`, replace the two places that call `GetDNSArray(store.GetServers(), true)` with logic that:
   - Takes `question.Name` and `store.GetServers()`.
   - Uses the new “get servers for this query” helper to obtain the list of upstream addresses to use for this question.
   - If the list is empty (e.g. query matches a whitelist but no server is active), optionally try fallback or return NXDOMAIN/no response (decide and document).
-- [ ] **3.2** Apply this in both `resolveAParallel` (A/AAAA) and `handleDNSServers` (other types). Fallback: only add fallback when the selected server list is “global” (or explicitly allow fallback for whitelist misses; recommend not using fallback for whitelist-only selection so that “only this server” is strict).
-- [ ] **3.3** Ensure caching and logging still work; they are per-question and don’t depend on which server list was used.
+- [x] **3.2** Apply this in both `resolveAParallel` (A/AAAA) and `handleDNSServers` (other types). Fallback: only add fallback when the selected server list is “global” (or explicitly allow fallback for whitelist misses; recommend not using fallback for whitelist-only selection so that “only this server” is strict).
+- [x] **3.3** Ensure caching and logging still work; they are per-question and don’t depend on which server list was used.
 
 ### 4. CLI/TUI (dns add/update/list)
 
-- [ ] **4.1** Extend `applyArgsToDNSServer` in `dnsservers/dnsservers.go` to accept an optional whitelist (e.g. extra args after the existing booleans, or a dedicated flag/keyword like `whitelist:suffix1,suffix2`). Define a clear syntax so it’s parseable and document it.
-- [ ] **4.2** Update `dns add` and `dns update` usage/help and parsing in commandhandler so users can add/update a server with a whitelist (e.g. `dns add 192.168.5.5 53 true true false whitelist:internal.vodafoneinnovus.com` or similar).
-- [ ] **4.3** Update `dns list` and `renderDNSServerTable` to show whitelist (e.g. extra column or a “Domains” column with comma-separated suffixes). Ensure TUI table still fits small screens (truncate or tooltip if needed).
-- [ ] **4.4** Add tests or manual checks for add/update/list with and without whitelist.
+- [x] **4.1** Extend `applyArgsToDNSServer` in `dnsservers/dnsservers.go` to accept an optional whitelist (e.g. extra args after the existing booleans, or a dedicated flag/keyword like `whitelist:suffix1,suffix2`). Define a clear syntax so it’s parseable and document it.
+- [x] **4.2** Update `dns add` and `dns update` usage/help and parsing in commandhandler so users can add/update a server with a whitelist (e.g. `dns add 192.168.5.5 53 true true false whitelist:internal.vodafoneinnovus.com` or similar).
+- [x] **4.3** Update `dns list` and `renderDNSServerTable` to show whitelist (e.g. extra column or a “Domains” column with comma-separated suffixes). Ensure TUI table still fits small screens (truncate or tooltip if needed).
+- [x] **4.4** Add tests or manual checks for add/update/list with and without whitelist.
 
 ### 5. tools dig
 
-- [ ] **5.1** When no `@server` is given, tools dig currently uses `GetDNSArray(dnsData.GetServers(), true)`. Change to “servers for this query” using the same helper as the resolver, so that `tools dig api.internal.vodafoneinnovus.com` only queries the whitelisted server(s) for that name. When user specifies `@server`, keep current behavior (query only that server).
+- [x] **5.1** When no `@server` is given, tools dig currently uses `GetDNSArray(dnsData.GetServers(), true)`. Change to “servers for this query” using the same helper as the resolver, so that `tools dig api.internal.vodafoneinnovus.com` only queries the whitelisted server(s) for that name. When user specifies `@server`, keep current behavior (query only that server).
 
 ### 6. Documentation and tests
 
-- [ ] **6.1** Update README or docs: describe per-server domain whitelist, example (e.g. 192.168.5.5 for `*internal.vodafoneinnovus.com`), and that whitelist servers are exclusive for those domains.
-- [ ] **6.2** Add unit tests for: (1) domain matching (suffix / exact), (2) `GetServersForQuery` (whitelist match returns only matching servers; no match returns global only; empty whitelist = global).
+- [x] **6.1** Update README or docs: describe per-server domain whitelist, example (e.g. 192.168.5.5 for `*internal.vodafoneinnovus.com`), and that whitelist servers are exclusive for those domains.
+- [x] **6.2** Add unit tests for: (1) domain matching (suffix / exact), (2) `GetServersForQuery` (whitelist match returns only matching servers; no match returns global only; empty whitelist = global).
 - [ ] **6.3** Optional: integration test or manual test: one global server, one whitelist server; query whitelisted domain → only whitelist server used; query other domain → only global server used.
 
 ### 7. Optional / later

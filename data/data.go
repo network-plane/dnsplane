@@ -180,7 +180,31 @@ func (d *DNSResolverData) Initialize() error {
 	d.persistWg.Add(1)
 	go d.cachePersistWorker()
 
+	// When records are loaded from URL or git, refresh periodically
+	if rs := cfg.Config.FileLocations.RecordsSource; rs != nil {
+		t := strings.ToLower(strings.TrimSpace(rs.Type))
+		if (t == config.RecordsSourceURL || t == config.RecordsSourceGit) && rs.RefreshIntervalSeconds > 0 {
+			interval := time.Duration(rs.RefreshIntervalSeconds) * time.Second
+			go d.recordsRefreshLoop(interval)
+		}
+	}
+
 	return nil
+}
+
+// recordsRefreshLoop re-loads records from the remote source (url/git) at the given interval.
+func (d *DNSResolverData) recordsRefreshLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		records, err := LoadDNSRecords()
+		if err != nil {
+			log.Printf("records refresh: %v", err)
+			continue
+		}
+		d.UpdateRecordsInMemory(records)
+		log.Printf("records refresh: loaded %d records", len(records))
+	}
 }
 
 // cachePersistWorker runs in the background and writes cache to disk when signaled.
@@ -424,32 +448,56 @@ func SaveDNSServers(dnsServers []dnsservers.DNSServer) error {
 	return SaveToJSON(paths.DNSServerFile, data)
 }
 
-// LoadDNSRecords reads the dnsrecords.json file and returns the list of DNS records.
+// LoadDNSRecords loads DNS records from the configured records_source (file, URL, or git).
 // Record names are canonicalized (trailing dot stripped) for consistent display.
 func LoadDNSRecords() ([]dnsrecords.DNSRecord, error) {
-	type recordsType struct {
-		Records []dnsrecords.DNSRecord `json:"records"`
-	}
 	paths := currentConfig().Config.FileLocations
-	records, err := LoadFromJSON[recordsType](paths.DNSRecordsFile)
-	if err != nil {
-		return nil, err
+	rs := paths.RecordsSource
+	if rs == nil {
+		return nil, fmt.Errorf("records_source not configured")
 	}
-	for i := range records.Records {
-		records.Records[i].Name = dnsrecords.CanonicalizeRecordNameForStorage(records.Records[i].Name)
+	t := strings.ToLower(strings.TrimSpace(rs.Type))
+	loc := strings.TrimSpace(rs.Location)
+	if loc == "" {
+		return nil, fmt.Errorf("records_source location is empty")
 	}
-	return records.Records, nil
+	switch t {
+	case config.RecordsSourceURL:
+		return loadRecordsFromURL(loc)
+	case config.RecordsSourceGit:
+		return loadRecordsFromGit(loc)
+	case config.RecordsSourceFile:
+		fallthrough
+	default:
+		type recordsType struct {
+			Records []dnsrecords.DNSRecord `json:"records"`
+		}
+		records, err := LoadFromJSON[recordsType](loc)
+		if err != nil {
+			return nil, err
+		}
+		for i := range records.Records {
+			records.Records[i].Name = dnsrecords.CanonicalizeRecordNameForStorage(records.Records[i].Name)
+		}
+		return records.Records, nil
+	}
 }
 
-// SaveDNSRecords saves the DNS records to the dnsrecords.json file
+// SaveDNSRecords saves the DNS records to the records source path.
+// No-op when records source is URL or git (read-only).
 func SaveDNSRecords(gDNSRecords []dnsrecords.DNSRecord) error {
+	if RecordsSourceIsReadOnly() {
+		return nil
+	}
+	paths := currentConfig().Config.FileLocations
+	if paths.RecordsSource == nil {
+		return fmt.Errorf("records_source not configured")
+	}
 	type recordsType struct {
 		Records []dnsrecords.DNSRecord `json:"records"`
 	}
-
 	data := recordsType{Records: gDNSRecords}
-	paths := currentConfig().Config.FileLocations
-	return SaveToJSON(paths.DNSRecordsFile, data)
+	return SaveToJSON(paths.RecordsSource.Location, data)
 }
 
 // LoadCacheRecords reads the dnscache.json file and returns the list of cache records
@@ -528,11 +576,14 @@ func copyCacheRecords(src []dnsrecordcache.CacheRecord) []dnsrecordcache.CacheRe
 	return dst
 }
 
-// InitializeJSONFiles creates the JSON files if they don't exist
+// InitializeJSONFiles creates the JSON files if they don't exist.
+// When records_source is url or git, records are read-only so we do not create a local file.
 func InitializeJSONFiles() {
 	paths := currentConfig().Config.FileLocations
 	CreateFileIfNotExists(paths.DNSServerFile, `{"dnsservers":[{"address": "1.1.1.1","port": "53","active": false,"local_resolver": false,"adblocker": false }]}`)
-	CreateFileIfNotExists(paths.DNSRecordsFile, `{"records": [{"name": "example.com.", "type": "A", "value": "93.184.216.34", "ttl": 3600, "last_query": "0001-01-01T00:00:00Z"}]}`)
+	if !RecordsSourceIsReadOnly() && paths.RecordsSource != nil {
+		CreateFileIfNotExists(paths.RecordsSource.Location, `{"records": [{"name": "example.com.", "type": "A", "value": "93.184.216.34", "ttl": 3600, "last_query": "0001-01-01T00:00:00Z"}]}`)
+	}
 	CreateFileIfNotExists(paths.CacheFile, `{"cache": [{"dns_record": {"name": "example.com","type": "A","value": "192.168.1.1","ttl": 3600,"added_on": "2024-05-01T12:00:00Z","updated_on": "2024-05-05T18:30:00Z","mac": "00:1A:2B:3C:4D:5E","last_query": "2024-05-07T15:45:00Z"},"expiry": "2024-05-10T12:00:00Z","timestamp": "2024-05-07T12:30:00Z","last_query": "2024-05-07T14:00:00Z"}]}`)
 }
 

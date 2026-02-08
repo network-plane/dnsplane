@@ -16,12 +16,27 @@ const (
 	systemConfigPath = "/etc/" + FileName
 )
 
+// RecordsSourceType is how the DNS records file is provided: local file, HTTP(S) URL, or git repo.
+const (
+	RecordsSourceFile = "file"
+	RecordsSourceURL  = "url"
+	RecordsSourceGit  = "git"
+)
+
+// RecordsSourceConfig describes where to load DNS records from (single source: file, URL, or git).
+// When Type is "file", Location is the local path (read/write). When "url" or "git", Location is the URL and records are read-only; RefreshIntervalSeconds controls re-fetch interval.
+type RecordsSourceConfig struct {
+	Type                   string `json:"type"`                               // "file", "url", or "git"
+	Location               string `json:"location"`                           // path, http(s) URL, or git repo URL
+	RefreshIntervalSeconds int    `json:"refresh_interval_seconds,omitempty"` // for url/git: how often to check for changes (seconds)
+}
+
 // FileLocations describes the JSON data files used by dnsplane.
-// Keys match CLI flags: --dnsservers, --dnsrecords, --cache.
+// Records are always loaded from records_source (type "file", "url", or "git"); dnsservers and cache are paths.
 type FileLocations struct {
-	DNSServerFile  string `json:"dnsservers"`
-	DNSRecordsFile string `json:"dnsrecords"`
-	CacheFile      string `json:"cache"`
+	DNSServerFile string               `json:"dnsservers"`
+	CacheFile     string               `json:"cache"`
+	RecordsSource *RecordsSourceConfig `json:"records_source"` // required: type "file"|"url"|"git", location = path or URL
 }
 
 // DNSRecordSettings mirrors record handling settings persisted in the config.
@@ -264,8 +279,8 @@ func defaultConfig(baseDir string) *Config {
 		ClientTCPAddress:   "0.0.0.0:8053",
 		FileLocations: FileLocations{
 			DNSServerFile:  filepath.Join(baseDir, "dnsservers.json"),
-			DNSRecordsFile: filepath.Join(baseDir, "dnsrecords.json"),
 			CacheFile:      filepath.Join(baseDir, "dnscache.json"),
+			RecordsSource:   &RecordsSourceConfig{Type: RecordsSourceFile, Location: filepath.Join(baseDir, "dnsrecords.json")},
 		},
 		DNSRecordSettings: DNSRecordSettings{
 			AutoBuildPTRFromA: true,
@@ -308,8 +323,21 @@ func (c *Config) applyDefaults(configDir string) {
 	}
 
 	c.FileLocations.DNSServerFile = ensureAbsolutePath(configDir, c.FileLocations.DNSServerFile, "dnsservers.json")
-	c.FileLocations.DNSRecordsFile = ensureAbsolutePath(configDir, c.FileLocations.DNSRecordsFile, "dnsrecords.json")
 	c.FileLocations.CacheFile = ensureAbsolutePath(configDir, c.FileLocations.CacheFile, "dnscache.json")
+	rs := c.FileLocations.RecordsSource
+	if rs == nil {
+		rs = &RecordsSourceConfig{Type: RecordsSourceFile, Location: filepath.Join(configDir, "dnsrecords.json")}
+		c.FileLocations.RecordsSource = rs
+	}
+	if rs.Type == RecordsSourceURL || rs.Type == RecordsSourceGit {
+		if rs.RefreshIntervalSeconds <= 0 {
+			rs.RefreshIntervalSeconds = 60
+		}
+	} else {
+		// type "file" or empty: treat as file, make location absolute
+		rs.Type = RecordsSourceFile
+		rs.Location = ensureAbsolutePath(configDir, rs.Location, "dnsrecords.json")
+	}
 
 	if c.Log.Dir == "" {
 		c.Log.Dir = "/var/log/dnsplane"
@@ -365,6 +393,7 @@ func extractLegacyRecordSettings(data []byte) *DNSRecordSettings {
 }
 
 // UnmarshalJSON reads FileLocations, accepting legacy keys (dnsserver_file, dnsrecords_file, cache_file).
+// If records_source is missing but dnsrecords/dnsrecords_file is set, records_source is set to type "file" at that path.
 func (fl *FileLocations) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -382,8 +411,19 @@ func (fl *FileLocations) UnmarshalJSON(data []byte) error {
 		return ""
 	}
 	fl.DNSServerFile = getStr("dnsservers", "dnsserver_file")
-	fl.DNSRecordsFile = getStr("dnsrecords", "dnsrecords_file")
 	fl.CacheFile = getStr("cache", "cache_file")
+	if r, ok := raw["records_source"]; ok && len(r) > 0 {
+		if err := json.Unmarshal(r, &fl.RecordsSource); err != nil {
+			return err
+		}
+	}
+	// Legacy: no records_source but dnsrecords path present → treat as file source
+	if fl.RecordsSource == nil {
+		legacyPath := getStr("dnsrecords", "dnsrecords_file")
+		if legacyPath != "" {
+			fl.RecordsSource = &RecordsSourceConfig{Type: RecordsSourceFile, Location: legacyPath}
+		}
+	}
 	return nil
 }
 
