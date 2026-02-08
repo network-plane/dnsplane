@@ -5,9 +5,11 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 var (
@@ -160,6 +162,45 @@ func LoadFromFile(blockList *BlockList, filePath string) error {
 		return fmt.Errorf("read file: %w", err)
 	}
 
+	return nil
+}
+
+// defaultHTTPTimeout is the timeout for fetching adblock lists from URLs.
+const defaultHTTPTimeout = 60 * time.Second
+
+// LoadFromURL fetches an adblock list from a URL and adds domains to the block list.
+// The response body is parsed with the same format as LoadFromFile: "0.0.0.0 domain1.com ..." per line.
+func LoadFromURL(blockList *BlockList, url string) error {
+	if blockList == nil {
+		return fmt.Errorf("block list is nil")
+	}
+
+	client := &http.Client{Timeout: defaultHTTPTimeout}
+	resp, err := client.Get(url)
+	if err != nil {
+		return fmt.Errorf("fetch URL: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("fetch URL: status %s", resp.Status)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		domains := parseAdblockLine(line)
+		if len(domains) > 0 {
+			blockList.AddDomains(domains)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
 	return nil
 }
 
