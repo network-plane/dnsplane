@@ -93,3 +93,32 @@ func TestGetServersForQuery(t *testing.T) {
 		t.Errorf("GetServersForQuery(whitelisted but inactive) = %v, want []", got)
 	}
 }
+
+// FuzzServerMatchesQuery exercises whitelist matching with arbitrary query names.
+func FuzzServerMatchesQuery(f *testing.F) {
+	server := DNSServer{
+		Address:         "192.168.1.1",
+		Port:            "53",
+		DomainWhitelist: []string{"internal.example.com", "corp.net"},
+	}
+	f.Add("api.internal.example.com")
+	f.Add("internal.example.com.")
+	f.Add("")
+	f.Fuzz(func(t *testing.T, queryName string) {
+		_ = ServerMatchesQuery(server, queryName)
+	})
+}
+
+// FuzzGetServersForQuery exercises server selection with fuzzed query name.
+func FuzzGetServersForQuery(f *testing.F) {
+	servers := []DNSServer{
+		{Address: "8.8.8.8", Port: "53", Active: true},
+		{Address: "192.168.5.5", Port: "53", Active: true, DomainWhitelist: []string{"internal.example.com"}},
+	}
+	f.Add("example.com")
+	f.Add("api.internal.example.com")
+	f.Fuzz(func(t *testing.T, queryName string) {
+		_ = GetServersForQuery(servers, queryName, true)
+		_ = GetServersForQuery(servers, queryName, false)
+	})
+}
