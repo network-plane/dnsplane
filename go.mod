@@ -5,7 +5,7 @@ go 1.25.7
 require (
 	github.com/chzyer/readline v1.5.1
 	github.com/go-chi/chi/v5 v5.2.5
-	github.com/go-git/go-git/v5 v5.16.4
+	github.com/go-git/go-git/v5 v5.16.5
 	github.com/inconshreveable/mousetrap v1.1.0
 	github.com/miekg/dns v1.1.72
 	github.com/network-plane/planetui v1.0.3
@@ -33,7 +33,6 @@ require (
 	github.com/sergi/go-diff v1.4.0 // indirect
 	github.com/skeema/knownhosts v1.3.2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
-	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	golang.org/x/crypto v0.47.0 // indirect
 	golang.org/x/mod v0.32.0 // indirect
