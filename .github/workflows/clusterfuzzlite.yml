@@ -34,7 +34,16 @@ jobs:
 
       - name: Run Fuzz Tests
         run: |
-          go test -fuzz=. -fuzztime=60s
+          # Run each fuzz target (go test -fuzz=. only runs one per package)
+          go test -fuzz=FuzzValidateIP -fuzztime=12s ./ipvalidator/
+          go test -fuzz=FuzzConvertIPToReverseDNS -fuzztime=12s ./converters/
+          go test -fuzz=FuzzConvertReverseDNSToIP -fuzztime=12s ./converters/
+          go test -fuzz=FuzzAddRecord -fuzztime=12s ./dnsrecords/
+          go test -fuzz=FuzzNormalizeRecordNameKey -fuzztime=12s ./dnsrecords/
+          go test -fuzz=FuzzNormalizeRecordTypeAndValue -fuzztime=12s ./dnsrecords/
+          go test -fuzz=FuzzFindAllRecords -fuzztime=12s ./dnsrecords/
+          go test -fuzz=FuzzServerMatchesQuery -fuzztime=12s ./dnsservers/
+          go test -fuzz=FuzzGetServersForQuery -fuzztime=12s ./dnsservers/
 
       - name: Upload Crash Artifacts
         if: failure()
