@@ -424,8 +424,19 @@ func runServer(cmd *cobra.Command, args []string) error {
 	fmt.Println("Shutting down.")
 	stopDNSServer(appState)
 	if fullStatsTracker != nil {
-		if err := fullStatsTracker.Close(); err != nil {
-			dnsLogger.Warn("Error closing full stats tracker on shutdown", "error", err)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			if err := fullStatsTracker.Close(); err != nil && dnsLogger != nil {
+				dnsLogger.Warn("Error closing full stats tracker on shutdown", "error", err)
+			}
+		}()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			if dnsLogger != nil {
+				dnsLogger.Warn("Full stats tracker close timed out; proceeding with shutdown")
+			}
 		}
 	}
 	if asyncLogQueue != nil {
@@ -611,7 +622,9 @@ func startDNSServer(state *daemon.State, port string) (<-chan struct{}, <-chan e
 	stopCh := state.StopChannel()
 	go func() {
 		<-stopCh
-		if err := server.Shutdown(); err != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := server.ShutdownContext(shutdownCtx); err != nil {
 			select {
 			case errCh <- err:
 			default:
@@ -636,12 +649,21 @@ func restartDNSServer(state *daemon.State, port string) {
 	}
 }
 
+const dnsShutdownWaitTimeout = 20 * time.Second
+
 func stopDNSServer(state *daemon.State) {
 	if !state.ServerStatus() {
 		return
 	}
 	stoppedCh := state.SignalStop()
-	<-stoppedCh
+	select {
+	case <-stoppedCh:
+		// normal shutdown
+	case <-time.After(dnsShutdownWaitTimeout):
+		if dnsLogger != nil {
+			dnsLogger.Warn("DNS server shutdown timed out; proceeding anyway")
+		}
+	}
 	state.SetServerStatus(false)
 	if dnsLogger != nil {
 		dnsLogger.Debug("DNS server stopped")

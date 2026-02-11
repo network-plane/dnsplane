@@ -2359,11 +2359,25 @@ func handleStatisticsRequesters(args []string) {
 		limit = statisticsDefaultLimit
 	}
 	rows = rows[:limit]
-	fmt.Printf("Top %d requesters (by total requests)\n", len(rows))
-	fmt.Println("IP                Total    First seen")
-	fmt.Println("----------------------------------------")
+	wIP := len("IP")
+	wTotal := len("Total")
 	for _, r := range rows {
-		fmt.Printf("%-17s %-8d %s\n", r.ip, r.total, r.first.Format(time.RFC3339))
+		if len(r.ip) > wIP {
+			wIP = len(r.ip)
+		}
+		if n := len(fmt.Sprint(r.total)); n > wTotal {
+			wTotal = n
+		}
+	}
+	tsLen := len("2006-01-02T15:04:05Z07:00")
+	if tsLen < len("First seen") {
+		tsLen = len("First seen")
+	}
+	fmt.Printf("Top %d requesters (by total requests)\n", len(rows))
+	fmt.Printf("%-*s  %*s  %s\n", wIP, "IP", wTotal, "Total", "First seen")
+	fmt.Printf("%s  %s  %s\n", strings.Repeat("-", wIP), strings.Repeat("-", wTotal), strings.Repeat("-", tsLen))
+	for _, r := range rows {
+		fmt.Printf("%-*s  %*d  %s\n", wIP, r.ip, wTotal, r.total, r.first.Format(time.RFC3339))
 	}
 	if !showFull && len(all) > statisticsDefaultLimit {
 		fmt.Printf("... and %d more. Use 'statistics requesters full' to show all.\n", len(all)-statisticsDefaultLimit)
@@ -2407,11 +2421,32 @@ func handleStatisticsDomains(args []string) {
 		limit = statisticsDefaultLimit
 	}
 	rows = rows[:limit]
-	fmt.Printf("Top %d requested domains (domain:type)\n", len(rows))
-	fmt.Println("Domain (name:type)           Count    First seen           Last seen")
-	fmt.Println("------------------------------------------------------------------------")
+	headerDomain := "Domain (name:type)"
+	headerCount := "Count"
+	headerFirst := "First seen"
+	headerLast := "Last seen"
+	wDomain := len(headerDomain)
+	wCount := len(headerCount)
 	for _, r := range rows {
-		fmt.Printf("%-26s %-8d %-19s %s\n", r.key, r.count, r.first.Format(time.RFC3339), r.last.Format(time.RFC3339))
+		if len(r.key) > wDomain {
+			wDomain = len(r.key)
+		}
+		if n := len(fmt.Sprint(r.count)); n > wCount {
+			wCount = n
+		}
+	}
+	tsLen := len("2006-01-02T15:04:05Z07:00")
+	if tsLen < len(headerFirst) {
+		tsLen = len(headerFirst)
+	}
+	if tsLen < len(headerLast) {
+		tsLen = len(headerLast)
+	}
+	fmt.Printf("Top %d requested domains (domain:type)\n", len(rows))
+	fmt.Printf("%-*s  %*s  %-*s  %s\n", wDomain, headerDomain, wCount, headerCount, tsLen, headerFirst, headerLast)
+	fmt.Printf("%s  %s  %s  %s\n", strings.Repeat("-", wDomain), strings.Repeat("-", wCount), strings.Repeat("-", tsLen), strings.Repeat("-", tsLen))
+	for _, r := range rows {
+		fmt.Printf("%-*s  %*d  %-*s  %s\n", wDomain, r.key, wCount, r.count, tsLen, r.first.Format(time.RFC3339), r.last.Format(time.RFC3339))
 	}
 	if !showFull && len(all) > statisticsDefaultLimit {
 		fmt.Printf("... and %d more. Use 'statistics domains full' to show all.\n", len(all)-statisticsDefaultLimit)
