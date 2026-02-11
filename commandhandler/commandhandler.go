@@ -11,7 +11,9 @@ import (
 	"dnsplane/dnsrecordcache"
 	"dnsplane/dnsrecords"
 	"dnsplane/dnsservers"
+	"dnsplane/fullstats"
 	"dnsplane/resolver"
+	"sort"
 	"errors"
 	"fmt"
 	"io"
@@ -42,6 +44,7 @@ var (
 	getServerListenersFunc  func() ServerListenerInfo
 	serverVersionStr        string
 	clientVersionStr        string
+	fullStatsTracker        *fullstats.Tracker
 )
 
 // ServerListenerInfo describes runtime listener configuration for status output.
@@ -82,6 +85,11 @@ func RegisterServerControlHooks(
 func SetVersion(server, client string) {
 	serverVersionStr = server
 	clientVersionStr = client
+}
+
+// SetFullStatsTracker sets the full statistics tracker used by statistics subcommands.
+func SetFullStatsTracker(t *fullstats.Tracker) {
+	fullStatsTracker = t
 }
 
 var captureMu sync.Mutex
@@ -300,6 +308,7 @@ func registerContexts() {
 		{name: "record", description: "- Record Management", tags: []string{"dns", "records"}},
 		{name: "cache", description: "- Cache Management", tags: []string{"cache"}},
 		{name: "dns", description: "- DNS Server Management", tags: []string{"dns", "servers"}},
+		{name: "statistics", description: "- Statistics (full_stats)", tags: []string{"stats", "monitoring"}},
 		{name: "server", description: "- Server Management", tags: []string{"server"}},
 		{name: "tools", description: "- Diagnostic Tools", tags: []string{"tools", "diagnostics"}},
 		{name: "adblock", description: "- Adblock Management", tags: []string{"adblock", "blocking"}},
@@ -1196,6 +1205,35 @@ func RegisterCommands() {
 				{Description: "Show resolver metrics", Command: "stats"},
 			},
 		}, legacyRunner(handleStats)),
+
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "statistics",
+			Name:        "requesters",
+			Summary:     "Top incoming requesters (client IPs)",
+			Description: "Shows top requesters by request count from the full_stats database. Default: top 10. Use 'full' to list all.",
+			Usage:       "statistics requesters [full]",
+			Category:    "Statistics",
+			Tags:        []string{"statistics", "requesters", "full_stats"},
+			Args:        []tui.ArgSpec{{Name: "full", Description: "Show all requesters (optional)", Required: false}},
+			Examples: []tui.Example{
+				{Description: "Top 10 requesters", Command: "statistics requesters"},
+				{Description: "All requesters", Command: "statistics requesters full"},
+			},
+		}, legacyRunner(handleStatisticsRequesters)),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "statistics",
+			Name:        "domains",
+			Summary:     "Top requested domains",
+			Description: "Shows top requested domain:type entries by request count from the full_stats database. Default: top 10. Use 'full' to list all.",
+			Usage:       "statistics domains [full]",
+			Category:    "Statistics",
+			Tags:        []string{"statistics", "domains", "full_stats"},
+			Args:        []tui.ArgSpec{{Name: "full", Description: "Show all domains (optional)", Required: false}},
+			Examples: []tui.Example{
+				{Description: "Top 10 domains", Command: "statistics domains"},
+				{Description: "All domains", Command: "statistics domains full"},
+			},
+		}, legacyRunner(handleStatisticsDomains)),
 
 		newLegacyFactory(tui.CommandSpec{
 			Context:     "record",
@@ -2276,6 +2314,108 @@ func printStatsUsage() {
 	fmt.Println("Usage: stats")
 	fmt.Println("Description: Display runtime statistics for the resolver.")
 	printHelpAliasesHint()
+}
+
+const statisticsDefaultLimit = 10
+
+func handleStatisticsRequesters(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		fmt.Println("Usage: statistics requesters [full]")
+		fmt.Println("Description: Show top incoming requesters (client IPs) by request count. Default: top 10. Use 'full' to show all.")
+		printHelpAliasesHint()
+		return
+	}
+	if fullStatsTracker == nil {
+		fmt.Println("Full statistics are disabled. Enable full_stats in server config (e.g. server set full_stats true) and restart.")
+		return
+	}
+	all, err := fullStatsTracker.GetAllRequesters()
+	if err != nil {
+		fmt.Printf("Error loading requester stats: %v\n", err)
+		return
+	}
+	if len(all) == 0 {
+		fmt.Println("No requester statistics recorded yet.")
+		return
+	}
+	type row struct {
+		ip    string
+		total uint64
+		first time.Time
+		types map[string]uint64
+	}
+	var rows []row
+	for ip, st := range all {
+		var total uint64
+		for _, c := range st.TypeCount {
+			total += c
+		}
+		rows = append(rows, row{ip: ip, total: total, first: st.FirstSeen, types: st.TypeCount})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].total > rows[j].total })
+	showFull := len(args) > 0 && strings.TrimSpace(strings.ToLower(args[0])) == "full"
+	limit := len(rows)
+	if !showFull && limit > statisticsDefaultLimit {
+		limit = statisticsDefaultLimit
+	}
+	rows = rows[:limit]
+	fmt.Printf("Top %d requesters (by total requests)\n", len(rows))
+	fmt.Println("IP                Total    First seen")
+	fmt.Println("----------------------------------------")
+	for _, r := range rows {
+		fmt.Printf("%-17s %-8d %s\n", r.ip, r.total, r.first.Format(time.RFC3339))
+	}
+	if !showFull && len(all) > statisticsDefaultLimit {
+		fmt.Printf("... and %d more. Use 'statistics requesters full' to show all.\n", len(all)-statisticsDefaultLimit)
+	}
+}
+
+func handleStatisticsDomains(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		fmt.Println("Usage: statistics domains [full]")
+		fmt.Println("Description: Show top requested domains (domain:type) by request count. Default: top 10. Use 'full' to show all.")
+		printHelpAliasesHint()
+		return
+	}
+	if fullStatsTracker == nil {
+		fmt.Println("Full statistics are disabled. Enable full_stats in server config (e.g. server set full_stats true) and restart.")
+		return
+	}
+	all, err := fullStatsTracker.GetAllRequests()
+	if err != nil {
+		fmt.Printf("Error loading request stats: %v\n", err)
+		return
+	}
+	if len(all) == 0 {
+		fmt.Println("No domain statistics recorded yet.")
+		return
+	}
+	type row struct {
+		key   string
+		count uint64
+		first time.Time
+		last  time.Time
+	}
+	var rows []row
+	for key, st := range all {
+		rows = append(rows, row{key: key, count: st.Count, first: st.FirstSeen, last: st.LastSeen})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].count > rows[j].count })
+	showFull := len(args) > 0 && strings.TrimSpace(strings.ToLower(args[0])) == "full"
+	limit := len(rows)
+	if !showFull && limit > statisticsDefaultLimit {
+		limit = statisticsDefaultLimit
+	}
+	rows = rows[:limit]
+	fmt.Printf("Top %d requested domains (domain:type)\n", len(rows))
+	fmt.Println("Domain (name:type)           Count    First seen           Last seen")
+	fmt.Println("------------------------------------------------------------------------")
+	for _, r := range rows {
+		fmt.Printf("%-26s %-8d %-19s %s\n", r.key, r.count, r.first.Format(time.RFC3339), r.last.Format(time.RFC3339))
+	}
+	if !showFull && len(all) > statisticsDefaultLimit {
+		fmt.Printf("... and %d more. Use 'statistics domains full' to show all.\n", len(all)-statisticsDefaultLimit)
+	}
 }
 
 func printHelpAliasesHint() {

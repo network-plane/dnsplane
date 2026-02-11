@@ -312,6 +312,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		func() commandhandler.ServerListenerInfo { return currentServerListeners(appState) },
 	)
 	commandhandler.SetVersion(appversion, appversion)
+	commandhandler.SetFullStatsTracker(fullStatsTracker)
 	tui.SetPrompt("dnsplane> ")
 
 	appState.SetDaemonMode(true)
