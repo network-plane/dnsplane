@@ -14,6 +14,8 @@ Type=simple
 ExecStart=/usr/local/dnsplane/dnsplane server --config /etc/dnsplane/dnsplane.json --dnsservers /etc/dnsplane/dnsservers.json --dnsrecords /etc/dnsplane/dnsrecords.json --cache /etc/dnsplane/dnscache.json
 Restart=on-failure
 RestartSec=5
+# Prevent systemd from waiting forever on restart/stop (sends SIGKILL after 30s)
+TimeoutStopSec=30
 
 # Optional: run as unprivileged user (create dnsplane user and set NoNewPrivileges=yes if desired)
 # User=dnsplane
