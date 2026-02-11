@@ -30,18 +30,18 @@ import (
 
 // Function variables for server control
 var (
-	stopDNSServerFunc         func()
-	restartDNSServerFunc      func(string)
-	getServerStatusFunc       func() bool
-	startGinAPIFunc           func(string)
-	stopAPIFunc               func()
-	startClientTCPFunc        func()
-	stopClientTCPFunc         func()
-	isClientTCPRunningFunc    func() bool
-	isCurrentSessionTCPFunc   func() bool
-	getServerListenersFunc    func() ServerListenerInfo
-	serverVersionStr          string
-	clientVersionStr          string
+	stopDNSServerFunc       func()
+	restartDNSServerFunc    func(string)
+	getServerStatusFunc     func() bool
+	startGinAPIFunc         func(string)
+	stopAPIFunc             func()
+	startClientTCPFunc      func()
+	stopClientTCPFunc       func()
+	isClientTCPRunningFunc  func() bool
+	isCurrentSessionTCPFunc func() bool
+	getServerListenersFunc  func() ServerListenerInfo
+	serverVersionStr        string
+	clientVersionStr        string
 )
 
 // ServerListenerInfo describes runtime listener configuration for status output.
@@ -2062,12 +2062,6 @@ func handleStats(args []string) {
 	fmt.Println("Server start time:", dnsData.Stats.ServerStartTime)
 	fmt.Println("Server Up Time:", serverUpTimeFormat(dnsData.Stats.ServerStartTime))
 	fmt.Println()
-	fmt.Println("--- Build ---")
-	fmt.Println("Version:", serverVersionStr)
-	fmt.Println("Go version:", runtime.Version())
-	fmt.Println("OS:", runtime.GOOS)
-	fmt.Println("Arch:", runtime.GOARCH)
-	fmt.Println()
 	fmt.Println("Total Records:", len(dnsData.GetRecords()))
 	fmt.Println("Total DNS Servers:", len(dnsData.GetServers()))
 	fmt.Println("Total Cache Records:", len(dnsData.GetCacheRecords()))
@@ -2084,6 +2078,12 @@ func handleStats(args []string) {
 	fmt.Println("Total queries forwarded:", dnsData.Stats.TotalQueriesForwarded)
 	fmt.Println()
 	printRuntimeStats()
+	fmt.Println("--- Build ---")
+	fmt.Println("Version:", serverVersionStr)
+	fmt.Println("Go version:", runtime.Version())
+	fmt.Println("OS:", runtime.GOOS)
+	fmt.Println("Arch:", runtime.GOARCH)
+	fmt.Println()
 }
 
 // Goroutine state metric names (Go 1.26+, not yet in 1.25.x). If absent, breakdown is skipped.
