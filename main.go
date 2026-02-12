@@ -958,6 +958,14 @@ func connectToInteractiveEndpoint(target string, killOther bool) {
 		return
 	}
 
+	serverVersion := strings.TrimSpace(strings.TrimPrefix(banner, tuiBannerPrefix))
+	if serverVersion != "" && serverVersion != appversion {
+		fmt.Fprintf(os.Stderr, "Warning: version mismatch — server %s, client %s\n", serverVersion, appversion)
+		if clientLogger != nil {
+			clientLogger.Warn("version mismatch", "server", serverVersion, "client", appversion)
+		}
+	}
+
 	if clientLogger != nil {
 		clientLogger.Info("connected", "network", network, "address", address)
 	}
