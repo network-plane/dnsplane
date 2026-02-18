@@ -4,14 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"dnsplane/api"
-	"dnsplane/commandhandler"
-	"dnsplane/config"
-	"dnsplane/daemon"
-	"dnsplane/data"
-	"dnsplane/fullstats"
-	"dnsplane/logger"
-	"dnsplane/resolver"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +17,15 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"dnsplane/api"
+	"dnsplane/commandhandler"
+	"dnsplane/config"
+	"dnsplane/daemon"
+	"dnsplane/data"
+	"dnsplane/fullstats"
+	"dnsplane/logger"
+	"dnsplane/resolver"
 
 	"github.com/chzyer/readline"
 	"github.com/inconshreveable/mousetrap"
@@ -46,7 +47,7 @@ const (
 
 var (
 	appState         = daemon.NewState()
-	appversion       = "0.2.81"
+	appversion       = "1.2.85"
 	dnsResolver      *resolver.Resolver
 	fullStatsTracker *fullstats.Tracker
 	dnsLogger        *slog.Logger

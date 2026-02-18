@@ -34,6 +34,26 @@ func SetFullStatsTracker(t *fullstats.Tracker) {
 	apiFullStatsTracker = t
 }
 
+// getFullStatsCounts returns requesters count, domains count, and whether full_stats is available.
+// Caller must not hold apiServerMu.
+func getFullStatsCounts() (reqCount, domCount int, ok bool) {
+	apiServerMu.Lock()
+	tracker := apiFullStatsTracker
+	apiServerMu.Unlock()
+	if tracker == nil {
+		return 0, 0, false
+	}
+	reqs, _ := tracker.GetAllRequesters()
+	doms, _ := tracker.GetAllRequests()
+	if reqs != nil {
+		reqCount = len(reqs)
+	}
+	if doms != nil {
+		domCount = len(doms)
+	}
+	return reqCount, domCount, true
+}
+
 // RouteRegistrar registers HTTP routes on the supplied Chi router.
 type RouteRegistrar func(chi.Router)
 
@@ -203,20 +223,7 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 		"server_start_time":      stats.ServerStartTime.Format(time.RFC3339),
 	}
 
-	apiServerMu.Lock()
-	tracker := apiFullStatsTracker
-	apiServerMu.Unlock()
-	if tracker != nil {
-		reqs, _ := tracker.GetAllRequesters()
-		doms, _ := tracker.GetAllRequests()
-		reqCount := 0
-		domCount := 0
-		if reqs != nil {
-			reqCount = len(reqs)
-		}
-		if doms != nil {
-			domCount = len(doms)
-		}
+	if reqCount, domCount, ok := getFullStatsCounts(); ok {
 		resp["full_stats"] = map[string]any{
 			"enabled":          true,
 			"requesters_count": reqCount,
@@ -227,6 +234,12 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// prometheusMetric describes a single Prometheus metric for loop-based output.
+type prometheusMetric struct {
+	help, typeName, name string
+	value                any
+}
+
 // metricsHandler returns Prometheus text format (counters/gauges for resolver and optional full_stats).
 func metricsHandler(w http.ResponseWriter, r *http.Request) {
 	dnsData := data.GetInstance()
@@ -235,46 +248,37 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 
-	// Resolver stats as counters
-	fmt.Fprintf(w, "# HELP dnsplane_queries_total Total DNS queries received\n")
-	fmt.Fprintf(w, "# TYPE dnsplane_queries_total counter\n")
-	fmt.Fprintf(w, "dnsplane_queries_total %d\n", stats.TotalQueries)
-	fmt.Fprintf(w, "# HELP dnsplane_cache_hits_total Total cache hits\n")
-	fmt.Fprintf(w, "# TYPE dnsplane_cache_hits_total counter\n")
-	fmt.Fprintf(w, "dnsplane_cache_hits_total %d\n", stats.TotalCacheHits)
-	fmt.Fprintf(w, "# HELP dnsplane_blocks_total Total adblock blocks\n")
-	fmt.Fprintf(w, "# TYPE dnsplane_blocks_total counter\n")
-	fmt.Fprintf(w, "dnsplane_blocks_total %d\n", stats.TotalBlocks)
-	fmt.Fprintf(w, "# HELP dnsplane_queries_forwarded_total Total queries forwarded to upstreams\n")
-	fmt.Fprintf(w, "# TYPE dnsplane_queries_forwarded_total counter\n")
-	fmt.Fprintf(w, "dnsplane_queries_forwarded_total %d\n", stats.TotalQueriesForwarded)
-	fmt.Fprintf(w, "# HELP dnsplane_queries_answered_total Total queries answered\n")
-	fmt.Fprintf(w, "# TYPE dnsplane_queries_answered_total counter\n")
-	fmt.Fprintf(w, "dnsplane_queries_answered_total %d\n", stats.TotalQueriesAnswered)
-	fmt.Fprintf(w, "# HELP dnsplane_server_start_time_seconds Server start time (Unix)\n")
-	fmt.Fprintf(w, "# TYPE dnsplane_server_start_time_seconds gauge\n")
-	fmt.Fprintf(w, "dnsplane_server_start_time_seconds %.0f\n", float64(stats.ServerStartTime.Unix()))
+	metrics := []prometheusMetric{
+		{"Total DNS queries received", "counter", "dnsplane_queries_total", stats.TotalQueries},
+		{"Total cache hits", "counter", "dnsplane_cache_hits_total", stats.TotalCacheHits},
+		{"Total adblock blocks", "counter", "dnsplane_blocks_total", stats.TotalBlocks},
+		{"Total queries forwarded to upstreams", "counter", "dnsplane_queries_forwarded_total", stats.TotalQueriesForwarded},
+		{"Total queries answered", "counter", "dnsplane_queries_answered_total", stats.TotalQueriesAnswered},
+		{"Server start time (Unix)", "gauge", "dnsplane_server_start_time_seconds", float64(stats.ServerStartTime.Unix())},
+	}
+	for _, m := range metrics {
+		fmt.Fprintf(w, "# HELP %s %s\n", m.name, m.help)
+		fmt.Fprintf(w, "# TYPE %s %s\n", m.name, m.typeName)
+		switch v := m.value.(type) {
+		case int:
+			fmt.Fprintf(w, "%s %d\n", m.name, v)
+		case float64:
+			fmt.Fprintf(w, "%s %.0f\n", m.name, v)
+		default:
+			fmt.Fprintf(w, "%s %v\n", m.name, v)
+		}
+	}
 
-	apiServerMu.Lock()
-	tracker := apiFullStatsTracker
-	apiServerMu.Unlock()
-	if tracker != nil {
-		reqs, _ := tracker.GetAllRequesters()
-		doms, _ := tracker.GetAllRequests()
-		reqCount := 0
-		domCount := 0
-		if reqs != nil {
-			reqCount = len(reqs)
+	if reqCount, domCount, ok := getFullStatsCounts(); ok {
+		fullStatsMetrics := []prometheusMetric{
+			{"Number of distinct requesters in full_stats", "gauge", "dnsplane_fullstats_requesters_count", reqCount},
+			{"Number of distinct domain:type entries in full_stats", "gauge", "dnsplane_fullstats_domains_count", domCount},
 		}
-		if doms != nil {
-			domCount = len(doms)
+		for _, m := range fullStatsMetrics {
+			fmt.Fprintf(w, "# HELP %s %s\n", m.name, m.help)
+			fmt.Fprintf(w, "# TYPE %s %s\n", m.name, m.typeName)
+			fmt.Fprintf(w, "%s %d\n", m.name, m.value.(int))
 		}
-		fmt.Fprintf(w, "# HELP dnsplane_fullstats_requesters_count Number of distinct requesters in full_stats\n")
-		fmt.Fprintf(w, "# TYPE dnsplane_fullstats_requesters_count gauge\n")
-		fmt.Fprintf(w, "dnsplane_fullstats_requesters_count %d\n", reqCount)
-		fmt.Fprintf(w, "# HELP dnsplane_fullstats_domains_count Number of distinct domain:type entries in full_stats\n")
-		fmt.Fprintf(w, "# TYPE dnsplane_fullstats_domains_count gauge\n")
-		fmt.Fprintf(w, "dnsplane_fullstats_domains_count %d\n", domCount)
 	}
 }
 
