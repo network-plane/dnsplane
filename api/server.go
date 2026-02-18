@@ -126,6 +126,7 @@ func RegisterDNSRoutes(router chi.Router) {
 	router.Get("/dns/servers", listServersHandler)
 	router.Get("/stats", statsHandler)
 	router.Get("/metrics", metricsHandler)
+	router.Get("/stats/page", statsPageHandler)
 }
 
 // healthHandler returns 200 when the API is up. No dependency on DNS listener.
