@@ -2,6 +2,15 @@
 # Prepare: mkdir -p /etc/dnsplane; first run creates default config and JSON files there if missing
 # Binary: install dnsplane to /usr/local/dnsplane/dnsplane
 # Then: systemctl daemon-reload && systemctl enable --now dnsplane.service
+#
+# Non-root: To run as unprivileged user:
+#   1. Create user: useradd -r -s /bin/false dnsplane
+#   2. Uncomment User= and Group= below
+#   3. Add StateDirectory=dnsplane (creates /var/lib/dnsplane, owned by dnsplane)
+#   4. Use data paths under /var/lib/dnsplane so the service can write without root.
+#   Example ExecStart for non-root (config in /etc, data in /var/lib/dnsplane):
+#   ExecStart=/usr/local/dnsplane/dnsplane server --config /etc/dnsplane/dnsplane.json --server-socket /run/dnsplane/dnsplane.socket --dnsservers /var/lib/dnsplane/dnsservers.json --dnsrecords /var/lib/dnsplane/dnsrecords.json --cache /var/lib/dnsplane/dnscache.json
+#   Ensure /etc/dnsplane (and dnsplane.json) is readable by dnsplane.
 
 [Unit]
 Description=DNS Resolver (dnsplane)
@@ -11,15 +20,16 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/dnsplane/dnsplane server --config /etc/dnsplane/dnsplane.json --dnsservers /etc/dnsplane/dnsservers.json --dnsrecords /etc/dnsplane/dnsrecords.json --cache /etc/dnsplane/dnscache.json
+RuntimeDirectory=dnsplane
+ExecStart=/usr/local/dnsplane/dnsplane server --config /etc/dnsplane/dnsplane.json --server-socket /run/dnsplane/dnsplane.socket --dnsservers /etc/dnsplane/dnsservers.json --dnsrecords /etc/dnsplane/dnsrecords.json --cache /etc/dnsplane/dnscache.json
 Restart=on-failure
 RestartSec=5
-# Prevent systemd from waiting forever on restart/stop (sends SIGKILL after 30s)
 TimeoutStopSec=30
 
-# Optional: run as unprivileged user (create dnsplane user and set NoNewPrivileges=yes if desired)
+# Run as unprivileged user (optional): create user first, then uncomment and use data paths under /var/lib/dnsplane
 # User=dnsplane
 # Group=dnsplane
+# StateDirectory=dnsplane
 
 [Install]
 WantedBy=multi-user.target
