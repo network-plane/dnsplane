@@ -1,4 +1,6 @@
 ## Contributing
 
 Contributions are always welcome!
-All contributions are required to follow the https://google.github.io/styleguide/go/
+
+- **Code style:** Follow the [Google Go Style Guide](https://google.github.io/styleguide/go/).
+- **Before submitting:** Run `make test` and `make vet` (or `make lint`) and fix any issues.

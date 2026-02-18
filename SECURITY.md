@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-The current main is supported with fixes until an LTS version is release
+The current main is supported with fixes until an LTS version is released
 
 | Version | Supported          |
 | ------- | ------------------ |
