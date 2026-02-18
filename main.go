@@ -36,7 +36,6 @@ import (
 )
 
 const (
-	defaultUnixSocketPath  = "/tmp/dnsplane.socket"
 	defaultTCPTerminalAddr = ":8053"
 	defaultClientTCPPort   = "8053"
 	// tuiBannerPrefix is sent by the server on new TUI connections; client must see this or disconnect.
@@ -55,6 +54,9 @@ var (
 	tuiLogger        *slog.Logger
 	clientLogger     *slog.Logger
 	asyncLogQueue    *logger.AsyncLogQueue
+
+	// defaultSocketPath is the default UNIX socket for server and client (set in init from config).
+	defaultSocketPath string
 
 	tcpTUIListenerMu sync.Mutex
 	tcpTUIListener   net.Listener
@@ -120,6 +122,7 @@ func main() {
 
 func init() {
 	rootCmd.AddCommand(serverCmd, clientCmd)
+	defaultSocketPath = config.DefaultClientSocketPath()
 
 	// Server flags
 	serverCmd.Flags().String("config", "", "Path to config file (default: standard search order)")
@@ -129,15 +132,15 @@ func init() {
 	serverCmd.Flags().String("dnsservers", "", "Path to dnsservers.json file (overrides config)")
 	serverCmd.Flags().String("dnsrecords", "", "Path to dnsrecords.json file (overrides config)")
 	serverCmd.Flags().String("cache", "", "Path to dnscache.json file (overrides config)")
-	serverCmd.Flags().String("server-socket", defaultUnixSocketPath, "Path to UNIX domain socket for the daemon listener")
+	serverCmd.Flags().String("server-socket", defaultSocketPath, "Path to UNIX domain socket for the daemon listener")
 	serverCmd.Flags().String("server-tcp", defaultTCPTerminalAddr, "TCP address for remote TUI clients")
 
 	// Client flags
-	clientCmd.Flags().String("client", "", "Socket path or address to connect to (default: "+defaultUnixSocketPath+")")
+	clientCmd.Flags().String("client", "", "Socket path or address to connect to (default: "+defaultSocketPath+")")
 	clientCmd.Flags().String("log-file", "", "Path to log file or directory for client (writes dnsplaneclient.log when set)")
 	clientCmd.Flags().Bool("kill", false, "Disconnect the current TUI client and take over the session")
 	if f := clientCmd.Flags().Lookup("client"); f != nil {
-		f.NoOptDefVal = defaultUnixSocketPath
+		f.NoOptDefVal = defaultSocketPath
 	}
 }
 
@@ -158,7 +161,7 @@ func normalizeTCPAddress(addr string) string {
 func runClient(cmd *cobra.Command, args []string) error {
 	clientTarget, _ := cmd.Flags().GetString("client")
 	if clientTarget == "" {
-		clientTarget = defaultUnixSocketPath
+		clientTarget = defaultSocketPath
 	}
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		clientTarget = args[0]
@@ -722,6 +725,11 @@ func startUnixSocketListener(socketPath string, log *slog.Logger) (net.Listener,
 	if socketPath == "" {
 		return nil, nil
 	}
+	if dir := filepath.Dir(socketPath); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("create socket directory: %w", err)
+		}
+	}
 	if err := syscall.Unlink(socketPath); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("remove unix socket: %w", err)
 	}
@@ -1053,7 +1061,7 @@ func connectToInteractiveEndpoint(target string, killOther bool) {
 func resolveInteractiveTarget(target string) (network, address string) {
 	target = strings.TrimSpace(target)
 	if target == "" {
-		return "unix", defaultUnixSocketPath
+		return "unix", defaultSocketPath
 	}
 	if strings.ContainsAny(target, "/\\") || strings.HasPrefix(target, "@") {
 		return "unix", target

@@ -265,6 +265,10 @@ func writeConfig(path string, cfg *Config) error {
 }
 
 func defaultConfig(baseDir string) *Config {
+	logDir := "/var/log/dnsplane"
+	if !isSystemConfigDir(baseDir) {
+		logDir = filepath.Join(baseDir, "log")
+	}
 	return &Config{
 		FallbackServerIP:   "1.1.1.1",
 		FallbackServerPort: "53",
@@ -287,7 +291,7 @@ func defaultConfig(baseDir string) *Config {
 			ForwardPTRQueries: false,
 		},
 		Log: LogConfig{
-			Dir:            "/var/log/dnsplane",
+			Dir:            logDir,
 			Severity:       "none",
 			Rotation:       LogRotationSize,
 			RotationSizeMB: 100,
@@ -340,7 +344,11 @@ func (c *Config) applyDefaults(configDir string) {
 	}
 
 	if c.Log.Dir == "" {
-		c.Log.Dir = "/var/log/dnsplane"
+		if isSystemConfigDir(configDir) {
+			c.Log.Dir = "/var/log/dnsplane"
+		} else {
+			c.Log.Dir = filepath.Join(configDir, "log")
+		}
 	}
 	if c.Log.Severity == "" {
 		c.Log.Severity = "none"
@@ -377,8 +385,30 @@ func ensureAbsolutePath(configDir, value, fallbackName string) string {
 	return filepath.Join(configDir, value)
 }
 
+// isSystemConfigDir returns true when configDir is the system config location (e.g. /etc or /etc/dnsplane),
+// so log dir and other defaults can use system paths like /var/log/dnsplane.
+func isSystemConfigDir(configDir string) bool {
+	clean := filepath.Clean(configDir)
+	return clean == "/etc" || strings.HasPrefix(clean, "/etc"+string(filepath.Separator))
+}
+
 func defaultSocketPath() string {
+	if runningAsRoot() {
+		return filepath.Join(os.TempDir(), "dnsplane.socket")
+	}
+	if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
+		return filepath.Join(xdg, "dnsplane.socket")
+	}
+	if dir, err := os.UserConfigDir(); err == nil && dir != "" {
+		return filepath.Join(dir, "dnsplane", "dnsplane.socket")
+	}
 	return filepath.Join(os.TempDir(), "dnsplane.socket")
+}
+
+// DefaultClientSocketPath returns the default UNIX socket path for the TUI client and server.
+// When running as non-root it uses XDG_RUNTIME_DIR or the user config dir so each user has their own socket.
+func DefaultClientSocketPath() string {
+	return defaultSocketPath()
 }
 
 func extractLegacyRecordSettings(data []byte) *DNSRecordSettings {
