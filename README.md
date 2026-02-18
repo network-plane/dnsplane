@@ -90,6 +90,8 @@ When you do not pass any path flags, dnsplane looks for an existing `dnsplane.js
 
 If a data file does not exist, dnsplane creates it with default contents at the configured (or overridden) path. When the records source is URL or Git, no local records file is created (records are read-only from the remote source).
 
+**Defaults and non-root:** When the config directory is not under `/etc` (e.g. you run from your home or current directory), the default log directory is `log` next to your config (e.g. `./log` or `~/.config/dnsplane/log`), so you can run without root. The default control socket is user-specific when not running as root: `$XDG_RUNTIME_DIR/dnsplane.socket` if set, otherwise `~/.config/dnsplane/dnsplane.socket`, so each user can run their own server. When running as root or when using a system config under `/etc`, defaults use `/var/log/dnsplane` and a shared socket path.
+
 ### TUI (interactive client)
 
 When you run `dnsplane client` (or connect over TCP), you get an interactive TUI. Main areas:
@@ -221,7 +223,7 @@ A systemd unit file is provided under `systemd/dnsplane.service`. It runs the bi
 3. Create the config directory: `mkdir -p /etc/dnsplane`.
 4. Reload and enable: `systemctl daemon-reload && systemctl enable --now dnsplane.service`.
 
-When the service runs, it will create default `dnsplane.json` and JSON data files in `/etc/dnsplane/` if they are missing, because the unit file passes those paths. Ensure the service user (e.g. root) can write to that directory for the first start.
+When the service runs, it will create default `dnsplane.json` and JSON data files in `/etc/dnsplane/` if they are missing, because the unit file passes those paths. Ensure the service user (e.g. root) can write to that directory for the first start. To run as an unprivileged user, see the comments in `systemd/dnsplane.service`: create a `dnsplane` user, set `User=`/`Group=`, add `StateDirectory=dnsplane`, and use data paths under `/var/lib/dnsplane`.
 
 ## Roadmap
 
