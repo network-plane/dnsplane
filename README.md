@@ -185,7 +185,18 @@ Use `server config` in the TUI to print all current settings, and `server set <s
 
 ### REST API
 
-Enable the REST API with `"api": true` in `dnsplane.json` and set `apiport` (e.g. `8080`). You can start or stop the API listener from the TUI with `server start api` / `server stop api`. The API exposes DNS record and upstream server endpoints (see the API package for routes).
+Enable the REST API with `"api": true` in `dnsplane.json` and set `apiport` (e.g. `8080`). You can start or stop the API listener from the TUI with `server start api` / `server stop api`.
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/health` | Liveness: returns 200 when the API process is up. No dependency on DNS or other listeners. |
+| GET | `/ready` | Readiness: returns 200 when the API and DNS listener are both up, 503 otherwise. Response is JSON with `ready`, `api`, `dns`, `tui_client` (connected, addr, since), and `listeners` (dns_port, api_port, api_enabled, client_socket_path, client_tcp_address). Useful for Kubernetes readiness probes and load balancers. |
+| GET | `/dns/records` | List DNS records (same data as the TUI). Returns JSON with `records` and optional `filter`, `messages`. |
+| POST | `/dns/records` | Add a DNS record. Body: `{"name":"...","type":"A","value":"...","ttl":3600}`. |
+| GET | `/dns/servers` | List configured upstream DNS servers (read-only). Returns JSON `{"servers":[...]}` with address, port, active, local_resolver, adblocker, domain_whitelist, last_used, last_success. |
+| GET | `/stats` | Resolver stats as JSON: total_queries, total_cache_hits, total_blocks, total_queries_forwarded, total_queries_answered, server_start_time. When `full_stats` is enabled in config, includes `full_stats.enabled`, `full_stats.requesters_count`, `full_stats.domains_count`. |
+| GET | `/metrics` | Prometheus text format: counters (e.g. `dnsplane_queries_total`, `dnsplane_cache_hits_total`, `dnsplane_blocks_total`) and gauges (`dnsplane_server_start_time_seconds`). When full_stats is enabled, adds `dnsplane_fullstats_requesters_count` and `dnsplane_fullstats_domains_count`. |
+| GET | `/stats/page` | Read-only stats dashboard (HTML): dark-themed page with panels for resolver stats, data counts, status (API/DNS/TUI client, listeners), and when full_stats is enabled a Full stats panel with requesters/domains counts and top 10 requesters and top 10 domains. Use query `?full=N` (e.g. `?full=20`) to show top N instead of 10. |
 
 ## Logging
 
