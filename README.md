@@ -101,6 +101,7 @@ When you run `dnsplane client` (or connect over TCP), you get an interactive TUI
 - **tools** – **dig** (e.g. `tools dig example.com`, `tools dig example.com @8.8.8.8`).
 - **cache** – List, clear cache.
 - **stats** – Query counts, cache hits, block list size, runtime stats.
+- **statistics** – View aggregated data from the full_stats DB: `statistics requesters [full]` (top requesters by IP, or all with `full`), `statistics domains [full]` (top domains, or all). Requires `full_stats: true` in config.
 
 Use `?` or `help` after a command in the TUI for usage.
 
@@ -218,6 +219,8 @@ When the service runs, it will create default `dnsplane.json` and JSON data file
 - Per-server domain whitelist (implemented; `dns add/update` with `whitelist:example.com,example.org`)
 - Records from URL or Git (implemented; read-only, with refresh interval)
 - Server config/set/save and start/stop (dns, api, client) in TUI (implemented)
+
+0.2.x adds shutdown timeouts for systemd, the **statistics** TUI (requesters/domains from full_stats), and build info (Go version, OS, arch) in `stats`.
 
 ## Dependencies & Documentation
 [![Known Vulnerabilities](https://snyk.io/test/github/network-plane/dnsplane/badge.svg)](https://snyk.io/test/github/network-plane/dnsplane)
