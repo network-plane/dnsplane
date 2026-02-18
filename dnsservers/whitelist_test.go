@@ -86,11 +86,43 @@ func TestGetServersForQuery(t *testing.T) {
 		t.Errorf("GetServersForQuery(global domain) = %v, want [8.8.8.8:53]", got)
 	}
 
-	// Inactive whitelisted server not returned
+	// Inactive whitelisted server not returned when activeOnly true
 	serversInactive := []DNSServer{global, {Address: "192.168.5.5", Port: "53", Active: false, DomainWhitelist: []string{"internal.vodafoneinnovus.com"}}}
 	got = GetServersForQuery(serversInactive, "api.internal.vodafoneinnovus.com", true)
 	if len(got) != 0 {
-		t.Errorf("GetServersForQuery(whitelisted but inactive) = %v, want []", got)
+		t.Errorf("GetServersForQuery(whitelisted but inactive, activeOnly=true) = %v, want []", got)
+	}
+
+	// Empty server list returns nil
+	got = GetServersForQuery(nil, "example.com", true)
+	if got != nil {
+		t.Errorf("GetServersForQuery(nil, ...) = %v, want nil", got)
+	}
+	got = GetServersForQuery([]DNSServer{}, "example.com", true)
+	if got != nil {
+		t.Errorf("GetServersForQuery(empty, ...) = %v, want nil", got)
+	}
+
+	// Multiple whitelist servers matching same query: all returned
+	whitelist2 := DNSServer{Address: "192.168.5.6", Port: "53", Active: true, DomainWhitelist: []string{"internal.vodafoneinnovus.com"}}
+	serversMulti := []DNSServer{global, whitelisted, whitelist2}
+	got = GetServersForQuery(serversMulti, "api.internal.vodafoneinnovus.com", true)
+	if len(got) != 2 {
+		t.Fatalf("GetServersForQuery(two whitelist match) len = %d, want 2", len(got))
+	}
+	// Both whitelist servers should be present (order not specified)
+	seen := make(map[string]bool)
+	for _, addr := range got {
+		seen[addr] = true
+	}
+	if !seen["192.168.5.5:53"] || !seen["192.168.5.6:53"] {
+		t.Errorf("GetServersForQuery(two whitelist match) = %v", got)
+	}
+
+	// activeOnly false: inactive matching server is included
+	got = GetServersForQuery(serversInactive, "api.internal.vodafoneinnovus.com", false)
+	if len(got) != 1 || got[0] != "192.168.5.5:53" {
+		t.Errorf("GetServersForQuery(whitelisted inactive, activeOnly=false) = %v, want [192.168.5.5:53]", got)
 	}
 }
 
