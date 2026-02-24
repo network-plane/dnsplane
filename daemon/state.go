@@ -40,12 +40,12 @@ type State struct {
 
 	apiRunning atomic.Bool
 
-	tuiSessionMu    sync.Mutex
-	tuiClientMu     sync.Mutex
-	tuiClientConn   net.Conn
-	tuiClientAddr   string
-	tuiClientSince  time.Time
-	tuiClientIsTCP  bool
+	tuiSessionMu   sync.Mutex
+	tuiClientMu    sync.Mutex
+	tuiClientConn  net.Conn
+	tuiClientAddr  string
+	tuiClientSince time.Time
+	tuiClientIsTCP bool
 }
 
 // NewState builds a State with initial runtime defaults.

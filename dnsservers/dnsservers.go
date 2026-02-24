@@ -18,14 +18,14 @@ import (
 // api.internal.example.com). Empty or nil means the server is "global" and receives
 // all queries not claimed by a whitelisted server.
 type DNSServer struct {
-	Address          string    `json:"address"`
-	Port             string    `json:"port"`
-	Active           bool      `json:"active"`
-	LocalResolver    bool      `json:"local_resolver"`
-	AdBlocker        bool      `json:"adblocker"`
-	DomainWhitelist  []string  `json:"domain_whitelist,omitempty"`
-	LastUsed         time.Time `json:"last_used,omitempty"`
-	LastSuccess      time.Time `json:"last_success,omitempty"`
+	Address         string    `json:"address"`
+	Port            string    `json:"port"`
+	Active          bool      `json:"active"`
+	LocalResolver   bool      `json:"local_resolver"`
+	AdBlocker       bool      `json:"adblocker"`
+	DomainWhitelist []string  `json:"domain_whitelist,omitempty"`
+	LastUsed        time.Time `json:"last_used,omitempty"`
+	LastSuccess     time.Time `json:"last_success,omitempty"`
 }
 
 var (

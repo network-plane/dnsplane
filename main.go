@@ -311,7 +311,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 		func() { stopAPIAsync(appState) },
 		func() { startClientTCPListener(appState, tuiLogger) },
 		func() { stopClientTCPListener(tuiLogger) },
-		isClientTCPListenerRunning,
 		func() bool { return appState.IsTUIClientTCP() },
 		func() commandhandler.ServerListenerInfo { return currentServerListeners(appState) },
 	)
@@ -759,7 +758,7 @@ func acceptInteractiveSessions(listener net.Listener, log *slog.Logger) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
 				if log != nil {
 					log.Warn("Temporary accept error", "error", err)
 				}
@@ -991,7 +990,9 @@ func connectToInteractiveEndpoint(target string, killOther bool) {
 			oldState = st
 			defer func() {
 				if !restored {
-					term.Restore(stdinFD, oldState)
+					if err := term.Restore(stdinFD, oldState); err == nil {
+						restored = true
+					}
 				}
 			}()
 		}
@@ -1008,7 +1009,9 @@ func connectToInteractiveEndpoint(target string, killOther bool) {
 		go func() {
 			<-sigCh
 			restored = true
-			_ = term.Restore(stdinFD, oldState)
+			if err := term.Restore(stdinFD, oldState); err != nil {
+				_ = err // Terminal may already be gone; exit anyway.
+			}
 			os.Exit(0)
 		}()
 	}

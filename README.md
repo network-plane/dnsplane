@@ -243,12 +243,17 @@ When the service runs, it will create default `dnsplane.json` and JSON data file
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/network-plane/dnsplane/badge)](https://securityscorecards.dev/viewer/?uri=github.com/network-plane/dnsplane)
 [![OpenSSF Baseline](https://www.bestpractices.dev/projects/8887/baseline)](https://www.bestpractices.dev/projects/8887)
 
+![Go CI](https://github.com/network-plane/dnsplane/actions/workflows/go-ci.yml/badge.svg)
+![govulncheck](https://github.com/network-plane/dnsplane/actions/workflows/govulncheck.yml/badge.svg)
+![OSV-Scanner](https://github.com/network-plane/dnsplane/actions/workflows/osv-scanner.yml/badge.svg)
+![ClusterFuzzLite](https://github.com/network-plane/dnsplane/actions/workflows/clusterfuzzlite.yml/badge.svg)
 
 
 [![Go Mod](https://img.shields.io/github/go-mod/go-version/network-plane/dnsplane?style=for-the-badge)]()
 [![Go Reference](https://pkg.go.dev/badge/github.com/network-plane/dnsplane.svg)](https://pkg.go.dev/github.com/network-plane/dnsplane)
 [![Dependancies](https://img.shields.io/librariesio/github/network-plane/dnsplane?style=for-the-badge)](https://libraries.io/github/network-plane/dnsplane)
 
+![SBOM](https://github.com/network-plane/dnsplane/actions/workflows/sbom.yml/badge.svg)
 
 ![GitHub commit activity](https://img.shields.io/github/commit-activity/m/network-plane/dnsplane?style=for-the-badge)
 

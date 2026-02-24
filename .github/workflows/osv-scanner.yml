@@ -1,0 +1,31 @@
+name: OSV-Scanner
+
+on:
+  pull_request:
+    paths:
+      - "go.mod"
+      - "go.sum"
+  schedule:
+    - cron: "44 5 * * 3" # weekly
+
+permissions:
+  contents: read
+
+jobs:
+  osv:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run OSV-Scanner
+        uses: google/osv-scanner-action@764c91816374ff2d8fc2095dab36eecd42d61638 # v1.9.2
+        with:
+          scan-args: |-
+            --lockfile=go.sum

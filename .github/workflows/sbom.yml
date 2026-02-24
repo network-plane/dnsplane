@@ -1,0 +1,35 @@
+name: SBOM (Syft)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "13 4 * * 3" # weekly
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Create SBOM (CycloneDX JSON)
+        uses: anchore/sbom-action@28d71544de8eaf1b958d335707167c5f783590ad # v0.22.2
+        with:
+          format: cyclonedx-json
+          output-file: dnsplane.sbom.cdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: sbom
+          path: dnsplane.sbom.cdx.json
+          retention-days: 30

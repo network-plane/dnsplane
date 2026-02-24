@@ -6,8 +6,10 @@
 # PRs introducing known-vulnerable packages will be blocked from merging.
 #
 # Source repository: https://github.com/actions/dependency-review-action
-name: 'Dependency Review'
-on: [pull_request]
+name: Dependency Review
+
+on:
+  pull_request:
 
 permissions:
   contents: read
@@ -15,13 +17,19 @@ permissions:
 jobs:
   dependency-review:
     runs-on: ubuntu-latest
+
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
         with:
           egress-policy: audit
 
-      - name: 'Checkout Repository'
+      - name: Checkout Repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: 'Dependency Review'
+
+      - name: Dependency Review
         uses: actions/dependency-review-action@05fe4576374b728f0c523d6a13d64c25081e0803 # v4.8.3
+        with:
+          fail-on-severity: high
+          # GPL-2-compatible only; must allow commercial use. No GPL-3, no "or later", no LGPL.
+          allow-licenses: GPL-2.0-only, Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0

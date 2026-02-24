@@ -46,10 +46,10 @@ func (w *safeWriter) Write(p []byte) (n int, err error) {
 
 // throttleRotateWriter wraps lumberjack and only runs a time-based rotation check every 5m.
 type throttleRotateWriter struct {
-	lj          *lj.Logger
-	lastCheck   time.Time
-	mu          sync.Mutex
-	maxAgeDays  int
+	lj           *lj.Logger
+	lastCheck    time.Time
+	mu           sync.Mutex
+	maxAgeDays   int
 	rotateByTime bool
 }
 
@@ -134,10 +134,10 @@ func newFileWriter(logPath string, logCfg config.LogConfig) (io.Writer, error) {
 	var inner io.Writer = rot
 	if logCfg.Rotation == config.LogRotationTime {
 		inner = &throttleRotateWriter{
-			lj:            rot,
-			lastCheck:     time.Time{},
-			maxAgeDays:    logCfg.RotationDays,
-			rotateByTime:  true,
+			lj:           rot,
+			lastCheck:    time.Time{},
+			maxAgeDays:   logCfg.RotationDays,
+			rotateByTime: true,
 		}
 	}
 	return &safeWriter{inner: inner}, nil
@@ -206,8 +206,8 @@ func NewClientLogger(logFilePath string) *slog.Logger {
 // so the caller never blocks on I/O. Used for the DNS reply path: the reply is
 // sent immediately and all logging/stats happen asynchronously.
 type AsyncLogQueue struct {
-	ch       chan func()
-	wg       sync.WaitGroup
+	ch        chan func()
+	wg        sync.WaitGroup
 	closeOnce sync.Once
 }
 
