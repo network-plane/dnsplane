@@ -31,17 +31,5 @@ jobs:
         uses: actions/dependency-review-action@05fe4576374b728f0c523d6a13d64c25081e0803 # v4.8.3
         with:
           fail-on-severity: high
-          # Allow-list is safer: only these SPDX licenses are permitted; all others (e.g. GPL-3.0, AGPL-3.0) are rejected.
-          allow-licenses: |
-            GPL-2.0-only
-            GPL-2.0-or-later
-            LGPL-2.1-only
-            LGPL-2.1-or-later
-            LGPL-3.0-only
-            LGPL-3.0-or-later
-            Apache-2.0
-            MIT
-            BSD-2-Clause
-            BSD-3-Clause
-            ISC
-            MPL-2.0
+          # GPL-2-compatible only; must allow commercial use. No GPL-3, no "or later", no LGPL.
+          allow-licenses: GPL-2.0-only, Apache-2.0, MIT, BSD-2-Clause, BSD-3-Clause, ISC, MPL-2.0
