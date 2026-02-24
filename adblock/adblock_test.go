@@ -73,9 +73,9 @@ func TestBlockList_NilSafe(t *testing.T) {
 	if bl.IsBlocked("x.com") {
 		t.Error("nil IsBlocked should return false")
 	}
-	bl.AddDomain("x.com")   // no-op
+	bl.AddDomain("x.com")    // no-op
 	bl.RemoveDomain("x.com") // no-op
-	bl.Clear()              // no-op
+	bl.Clear()               // no-op
 	if bl.Count() != 0 {
 		t.Error("nil Count should return 0")
 	}

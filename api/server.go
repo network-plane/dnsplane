@@ -21,9 +21,9 @@ import (
 )
 
 var (
-	apiServerMu     sync.Mutex
-	apiServer       *http.Server
-	apiState        *daemon.State
+	apiServerMu         sync.Mutex
+	apiServer           *http.Server
+	apiState            *daemon.State
 	apiFullStatsTracker *fullstats.Tracker
 )
 
@@ -174,18 +174,18 @@ func readyHandler(w http.ResponseWriter, r *http.Request) {
 	if state != nil {
 		ls := state.ListenerSnapshot()
 		listeners = map[string]any{
-			"dns_port":            ls.DNSPort,
-			"api_port":            ls.APIPort,
-			"api_enabled":         ls.APIEnabled,
-			"client_socket_path":  ls.ClientSocketPath,
-			"client_tcp_address":  ls.ClientTCPAddress,
+			"dns_port":           ls.DNSPort,
+			"api_port":           ls.APIPort,
+			"api_enabled":        ls.APIEnabled,
+			"client_socket_path": ls.ClientSocketPath,
+			"client_tcp_address": ls.ClientTCPAddress,
 		}
 	}
 
 	resp := map[string]any{
-		"ready":   ready,
-		"api":     apiUp,
-		"dns":     dnsUp,
+		"ready":     ready,
+		"api":       apiUp,
+		"dns":       dnsUp,
 		"listeners": listeners,
 	}
 	tuiObj := map[string]any{"connected": tuiConnected}
@@ -218,9 +218,9 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 		"total_queries":           stats.TotalQueries,
 		"total_cache_hits":        stats.TotalCacheHits,
 		"total_blocks":            stats.TotalBlocks,
-		"total_queries_forwarded":  stats.TotalQueriesForwarded,
+		"total_queries_forwarded": stats.TotalQueriesForwarded,
 		"total_queries_answered":  stats.TotalQueriesAnswered,
-		"server_start_time":      stats.ServerStartTime.Format(time.RFC3339),
+		"server_start_time":       stats.ServerStartTime.Format(time.RFC3339),
 	}
 
 	if reqCount, domCount, ok := getFullStatsCounts(); ok {

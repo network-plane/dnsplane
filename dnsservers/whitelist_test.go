@@ -6,51 +6,51 @@ import (
 
 func TestServerMatchesQuery(t *testing.T) {
 	tests := []struct {
-		name     string
-		server   DNSServer
-		query    string
+		name      string
+		server    DNSServer
+		query     string
 		wantMatch bool
 	}{
 		{
-			name:     "no whitelist",
-			server:   DNSServer{Address: "1.1.1.1", Port: "53"},
-			query:    "example.com",
+			name:      "no whitelist",
+			server:    DNSServer{Address: "1.1.1.1", Port: "53"},
+			query:     "example.com",
 			wantMatch: false,
 		},
 		{
-			name:     "empty whitelist",
-			server:   DNSServer{Address: "1.1.1.1", Port: "53", DomainWhitelist: []string{}},
-			query:    "example.com",
+			name:      "empty whitelist",
+			server:    DNSServer{Address: "1.1.1.1", Port: "53", DomainWhitelist: []string{}},
+			query:     "example.com",
 			wantMatch: false,
 		},
 		{
-			name:     "exact match",
-			server:   DNSServer{DomainWhitelist: []string{"internal.vodafoneinnovus.com"}},
-			query:    "internal.vodafoneinnovus.com",
+			name:      "exact match",
+			server:    DNSServer{DomainWhitelist: []string{"internal.vodafoneinnovus.com"}},
+			query:     "internal.vodafoneinnovus.com",
 			wantMatch: true,
 		},
 		{
-			name:     "exact match with trailing dot",
-			server:   DNSServer{DomainWhitelist: []string{"internal.vodafoneinnovus.com"}},
-			query:    "internal.vodafoneinnovus.com.",
+			name:      "exact match with trailing dot",
+			server:    DNSServer{DomainWhitelist: []string{"internal.vodafoneinnovus.com"}},
+			query:     "internal.vodafoneinnovus.com.",
 			wantMatch: true,
 		},
 		{
-			name:     "subdomain match",
-			server:   DNSServer{DomainWhitelist: []string{"internal.vodafoneinnovus.com"}},
-			query:    "api.internal.vodafoneinnovus.com",
+			name:      "subdomain match",
+			server:    DNSServer{DomainWhitelist: []string{"internal.vodafoneinnovus.com"}},
+			query:     "api.internal.vodafoneinnovus.com",
 			wantMatch: true,
 		},
 		{
-			name:     "no match",
-			server:   DNSServer{DomainWhitelist: []string{"internal.vodafoneinnovus.com"}},
-			query:    "other.example.com",
+			name:      "no match",
+			server:    DNSServer{DomainWhitelist: []string{"internal.vodafoneinnovus.com"}},
+			query:     "other.example.com",
 			wantMatch: false,
 		},
 		{
-			name:     "multiple whitelist second matches",
-			server:   DNSServer{DomainWhitelist: []string{"a.com", "internal.vodafoneinnovus.com"}},
-			query:    "api.internal.vodafoneinnovus.com",
+			name:      "multiple whitelist second matches",
+			server:    DNSServer{DomainWhitelist: []string{"a.com", "internal.vodafoneinnovus.com"}},
+			query:     "api.internal.vodafoneinnovus.com",
 			wantMatch: true,
 		},
 	}
