@@ -406,10 +406,6 @@ func (r *Resolver) processUpstreamAnswer(question dns.Question, answer *dns.Msg,
 	cacheDNSResponse(r.store, answer.Answer)
 }
 
-func (r *Resolver) processCachedRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
-	r.processCachedRecords(question, []dns.RR{*cachedRecord}, response)
-}
-
 func (r *Resolver) processCachedRecords(question dns.Question, cachedRecords []dns.RR, response *dns.Msg) {
 	if len(cachedRecords) == 0 {
 		return

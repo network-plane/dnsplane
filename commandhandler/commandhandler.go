@@ -39,7 +39,6 @@ var (
 	stopAPIFunc             func()
 	startClientTCPFunc      func()
 	stopClientTCPFunc       func()
-	isClientTCPRunningFunc  func() bool
 	isCurrentSessionTCPFunc func() bool
 	getServerListenersFunc  func() ServerListenerInfo
 	serverVersionStr        string
@@ -66,7 +65,7 @@ func RegisterServerControlHooks(
 	stop func(), restart func(string), status func() bool,
 	startAPI func(string), stopAPI func(),
 	startClientTCP func(), stopClientTCP func(),
-	isClientTCPRunning func() bool, isSessionTCP func() bool,
+	isSessionTCP func() bool,
 	listeners func() ServerListenerInfo,
 ) {
 	stopDNSServerFunc = stop
@@ -76,7 +75,6 @@ func RegisterServerControlHooks(
 	stopAPIFunc = stopAPI
 	startClientTCPFunc = startClientTCP
 	stopClientTCPFunc = stopClientTCP
-	isClientTCPRunningFunc = isClientTCPRunning
 	isCurrentSessionTCPFunc = isSessionTCP
 	getServerListenersFunc = listeners
 }
