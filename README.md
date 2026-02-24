@@ -253,6 +253,7 @@ When the service runs, it will create default `dnsplane.json` and JSON data file
 [![Go Reference](https://pkg.go.dev/badge/github.com/network-plane/dnsplane.svg)](https://pkg.go.dev/github.com/network-plane/dnsplane)
 [![Dependancies](https://img.shields.io/librariesio/github/network-plane/dnsplane?style=for-the-badge)](https://libraries.io/github/network-plane/dnsplane)
 
+![SBOM](https://github.com/network-plane/dnsplane/actions/workflows/sbom.yml/badge.svg)
 
 ![GitHub commit activity](https://img.shields.io/github/commit-activity/m/network-plane/dnsplane?style=for-the-badge)
 
