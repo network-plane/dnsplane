@@ -53,9 +53,8 @@ The daemon keeps the resolver running, exposes the UNIX control socket at `/tmp/
 ### start in client mode (connects to the default unix socket unless overridden)
 ```bash
 ./dnsplane client
-# or specify a custom socket path
+# or specify a custom socket path or address
 ./dnsplane client /tmp/dnsplane.sock
-./dnsplane client --client /tmp/dnsplane.sock
 ```
 
 ### connect to a remote resolver over TCP (default port 8053)

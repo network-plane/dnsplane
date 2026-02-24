@@ -72,8 +72,9 @@ var (
 		RunE:  runServer,
 	}
 	clientCmd = &cobra.Command{
-		Use:   "client",
+		Use:   "client [socket-or-address]",
 		Short: "Connect to a running dnsplane server (TUI client)",
+		Args:  cobra.MaximumNArgs(1),
 		RunE:  runClient,
 	}
 )
@@ -136,12 +137,8 @@ func init() {
 	serverCmd.Flags().String("server-tcp", defaultTCPTerminalAddr, "TCP address for remote TUI clients")
 
 	// Client flags
-	clientCmd.Flags().String("client", "", "Socket path or address to connect to (default: "+defaultSocketPath+")")
 	clientCmd.Flags().String("log-file", "", "Path to log file or directory for client (writes dnsplaneclient.log when set)")
 	clientCmd.Flags().Bool("kill", false, "Disconnect the current TUI client and take over the session")
-	if f := clientCmd.Flags().Lookup("client"); f != nil {
-		f.NoOptDefVal = defaultSocketPath
-	}
 }
 
 func normalizeTCPAddress(addr string) string {
@@ -159,16 +156,9 @@ func normalizeTCPAddress(addr string) string {
 }
 
 func runClient(cmd *cobra.Command, args []string) error {
-	clientTarget, _ := cmd.Flags().GetString("client")
-	if clientTarget == "" {
-		clientTarget = defaultSocketPath
-	}
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		clientTarget = args[0]
-		args = args[1:]
-	}
+	clientTarget := defaultSocketPath
 	if len(args) > 0 {
-		return fmt.Errorf("unexpected arguments: %v", args)
+		clientTarget = args[0]
 	}
 	logFilePath, _ := cmd.Flags().GetString("log-file")
 	if logFilePath != "" {
