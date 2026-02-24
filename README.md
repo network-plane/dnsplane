@@ -243,6 +243,7 @@ When the service runs, it will create default `dnsplane.json` and JSON data file
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/network-plane/dnsplane/badge)](https://securityscorecards.dev/viewer/?uri=github.com/network-plane/dnsplane)
 [![OpenSSF Baseline](https://www.bestpractices.dev/projects/8887/baseline)](https://www.bestpractices.dev/projects/8887)
 
+![Go CI](https://github.com/network-plane/dnsplane/actions/workflows/go-ci.yml/badge.svg)
 
 
 [![Go Mod](https://img.shields.io/github/go-mod/go-version/network-plane/dnsplane?style=for-the-badge)]()
