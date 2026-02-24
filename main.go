@@ -46,7 +46,7 @@ const (
 
 var (
 	appState         = daemon.NewState()
-	appversion       = "1.2.85"
+	appVersion       = "1.2.85"
 	dnsResolver      *resolver.Resolver
 	fullStatsTracker *fullstats.Tracker
 	dnsLogger        *slog.Logger
@@ -113,7 +113,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Please check the configuration in the repo.")
 		os.Exit(1)
 	}
-	rootCmd.Version = fmt.Sprintf("DNS Resolver %s", appversion)
+	rootCmd.Version = fmt.Sprintf("DNS Resolver %s", appVersion)
 	rootCmd.SetVersionTemplate("{{.Version}}\n")
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal(err)
@@ -314,7 +314,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		func() bool { return appState.IsTUIClientTCP() },
 		func() commandhandler.ServerListenerInfo { return currentServerListeners(appState) },
 	)
-	commandhandler.SetVersion(appversion, appversion)
+	commandhandler.SetVersion(appVersion, appVersion)
 	commandhandler.SetFullStatsTracker(fullStatsTracker)
 	api.SetFullStatsTracker(fullStatsTracker)
 	tui.SetPrompt("dnsplane> ")
@@ -817,7 +817,7 @@ func serveInteractiveSession(conn net.Conn, log *slog.Logger) {
 
 	// Send banner so remote client can verify this is a dnsplane server.
 	if err := conn.SetWriteDeadline(time.Now().Add(3 * time.Second)); err == nil {
-		_, _ = fmt.Fprintf(conn, "%s %s\n", tuiBannerPrefix, appversion)
+		_, _ = fmt.Fprintf(conn, "%s %s\n", tuiBannerPrefix, appVersion)
 		_ = conn.SetWriteDeadline(time.Time{})
 	}
 
@@ -968,10 +968,10 @@ func connectToInteractiveEndpoint(target string, killOther bool) {
 	}
 
 	serverVersion := strings.TrimSpace(strings.TrimPrefix(banner, tuiBannerPrefix))
-	if serverVersion != "" && serverVersion != appversion {
-		fmt.Fprintf(os.Stderr, "Warning: version mismatch — server %s, client %s\n", serverVersion, appversion)
+	if serverVersion != "" && serverVersion != appVersion {
+		fmt.Fprintf(os.Stderr, "Warning: version mismatch — server %s, client %s\n", serverVersion, appVersion)
 		if clientLogger != nil {
-			clientLogger.Warn("version mismatch", "server", serverVersion, "client", appversion)
+			clientLogger.Warn("version mismatch", "server", serverVersion, "client", appVersion)
 		}
 	}
 
