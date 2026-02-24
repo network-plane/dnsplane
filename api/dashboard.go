@@ -33,8 +33,8 @@ type dashboardData struct {
 	DNSUp     bool
 	TUIClient struct {
 		Connected bool
-		Addr     string
-		Since    string
+		Addr      string
+		Since     string
 	}
 	Listeners struct {
 		DNSPort          string
@@ -46,9 +46,17 @@ type dashboardData struct {
 
 	FullStatsEnabled bool
 	RequestersCount  int
-	DomainsCount    int
-	TopRequesters   []struct{ IP string; Total uint64; FirstSeen string }
-	TopDomains     []struct{ Key string; Count uint64; FirstSeen, LastSeen string }
+	DomainsCount     int
+	TopRequesters    []struct {
+		IP        string
+		Total     uint64
+		FirstSeen string
+	}
+	TopDomains []struct {
+		Key                 string
+		Count               uint64
+		FirstSeen, LastSeen string
+	}
 }
 
 var statsPageTemplate = template.Must(template.New("stats").Parse(`<!DOCTYPE html>
@@ -246,11 +254,11 @@ func statsPageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	listeners := struct {
-		DNSPort            string
-		APIPort            string
-		APIEnabled         bool
-		ClientSocketPath   string
-		ClientTCPAddress   string
+		DNSPort          string
+		APIPort          string
+		APIEnabled       bool
+		ClientSocketPath string
+		ClientTCPAddress string
 	}{}
 	if state != nil {
 		ls := state.ListenerSnapshot()
@@ -263,20 +271,20 @@ func statsPageHandler(w http.ResponseWriter, r *http.Request) {
 
 	data := dashboardData{
 		TotalQueries:          stats.TotalQueries,
-		TotalCacheHits:         stats.TotalCacheHits,
-		TotalBlocks:            stats.TotalBlocks,
-		TotalQueriesForwarded:  stats.TotalQueriesForwarded,
-		TotalQueriesAnswered:   stats.TotalQueriesAnswered,
-		ServerStartTime:        stats.ServerStartTime.Format(time.RFC3339),
-		Uptime:                 uptime,
-		RecordsCount:           len(dnsData.GetRecords()),
-		ServersCount:           len(dnsData.GetServers()),
-		CacheCount:             len(dnsData.GetCacheRecords()),
-		AdblockCount:           adblockCount,
-		Ready:                  ready,
-		APIUp:                  apiUp,
-		DNSUp:                  dnsUp,
-		Listeners:              listeners,
+		TotalCacheHits:        stats.TotalCacheHits,
+		TotalBlocks:           stats.TotalBlocks,
+		TotalQueriesForwarded: stats.TotalQueriesForwarded,
+		TotalQueriesAnswered:  stats.TotalQueriesAnswered,
+		ServerStartTime:       stats.ServerStartTime.Format(time.RFC3339),
+		Uptime:                uptime,
+		RecordsCount:          len(dnsData.GetRecords()),
+		ServersCount:          len(dnsData.GetServers()),
+		CacheCount:            len(dnsData.GetCacheRecords()),
+		AdblockCount:          adblockCount,
+		Ready:                 ready,
+		APIUp:                 apiUp,
+		DNSUp:                 dnsUp,
+		Listeners:             listeners,
 	}
 	data.TUIClient.Connected = tuiAddr != ""
 	data.TUIClient.Addr = tuiAddr
@@ -311,7 +319,11 @@ func statsPageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func topRequestersForDashboard(all map[string]*fullstats.RequesterStats, limit int) []struct{ IP string; Total uint64; FirstSeen string } {
+func topRequestersForDashboard(all map[string]*fullstats.RequesterStats, limit int) []struct {
+	IP        string
+	Total     uint64
+	FirstSeen string
+} {
 	type row struct {
 		ip    string
 		total uint64
@@ -329,7 +341,11 @@ func topRequestersForDashboard(all map[string]*fullstats.RequesterStats, limit i
 	if len(rows) > limit {
 		rows = rows[:limit]
 	}
-	out := make([]struct{ IP string; Total uint64; FirstSeen string }, len(rows))
+	out := make([]struct {
+		IP        string
+		Total     uint64
+		FirstSeen string
+	}, len(rows))
 	for i, r := range rows {
 		out[i].IP = r.ip
 		out[i].Total = r.total
@@ -338,10 +354,14 @@ func topRequestersForDashboard(all map[string]*fullstats.RequesterStats, limit i
 	return out
 }
 
-func topDomainsForDashboard(all map[string]*fullstats.RequestStats, limit int) []struct{ Key string; Count uint64; FirstSeen, LastSeen string } {
+func topDomainsForDashboard(all map[string]*fullstats.RequestStats, limit int) []struct {
+	Key                 string
+	Count               uint64
+	FirstSeen, LastSeen string
+} {
 	type row struct {
-		key   string
-		count uint64
+		key         string
+		count       uint64
 		first, last time.Time
 	}
 	var rows []row
@@ -352,7 +372,11 @@ func topDomainsForDashboard(all map[string]*fullstats.RequestStats, limit int) [
 	if len(rows) > limit {
 		rows = rows[:limit]
 	}
-	out := make([]struct{ Key string; Count uint64; FirstSeen, LastSeen string }, len(rows))
+	out := make([]struct {
+		Key                 string
+		Count               uint64
+		FirstSeen, LastSeen string
+	}, len(rows))
 	for i, r := range rows {
 		out[i].Key = r.key
 		out[i].Count = r.count

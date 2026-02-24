@@ -57,11 +57,11 @@ const (
 
 // LogConfig holds logging directory, severity, and rotation settings.
 type LogConfig struct {
-	Dir            string         `json:"log_dir"`
-	Severity       string         `json:"log_severity"`
+	Dir            string          `json:"log_dir"`
+	Severity       string          `json:"log_severity"`
 	Rotation       LogRotationMode `json:"log_rotation"`
-	RotationSizeMB int            `json:"log_rotation_size_mb"`
-	RotationDays   int            `json:"log_rotation_time_days"`
+	RotationSizeMB int             `json:"log_rotation_size_mb"`
+	RotationDays   int             `json:"log_rotation_time_days"`
 }
 
 // Config captures all persisted settings for dnsplane.
@@ -82,7 +82,7 @@ type Config struct {
 	DNSRecordSettings  DNSRecordSettings `json:"DNSRecordSettings"`
 	Log                LogConfig         `json:"log"`
 	// AdblockListFiles is a list of paths to adblock list files (e.g. hosts-style). Loaded in order at startup and merged into a single block list.
-	AdblockListFiles   []string          `json:"adblock_list_files,omitempty"`
+	AdblockListFiles []string `json:"adblock_list_files,omitempty"`
 }
 
 // Loaded contains the configuration together with metadata about the source file.
@@ -282,9 +282,9 @@ func defaultConfig(baseDir string) *Config {
 		ClientSocketPath:   defaultSocketPath(),
 		ClientTCPAddress:   "0.0.0.0:8053",
 		FileLocations: FileLocations{
-			DNSServerFile:  filepath.Join(baseDir, "dnsservers.json"),
-			CacheFile:      filepath.Join(baseDir, "dnscache.json"),
-			RecordsSource:   &RecordsSourceConfig{Type: RecordsSourceFile, Location: filepath.Join(baseDir, "dnsrecords.json")},
+			DNSServerFile: filepath.Join(baseDir, "dnsservers.json"),
+			CacheFile:     filepath.Join(baseDir, "dnscache.json"),
+			RecordsSource: &RecordsSourceConfig{Type: RecordsSourceFile, Location: filepath.Join(baseDir, "dnsrecords.json")},
 		},
 		DNSRecordSettings: DNSRecordSettings{
 			AutoBuildPTRFromA: true,

@@ -58,17 +58,17 @@ type whitelistIntegrationStore struct {
 	config  config.Config
 }
 
-func (s *whitelistIntegrationStore) GetResolverSettings() data.DNSResolverSettings { return s.config }
-func (s *whitelistIntegrationStore) GetRecords() []dnsrecords.DNSRecord              { return nil }
-func (s *whitelistIntegrationStore) GetCacheRecords() []dnsrecordcache.CacheRecord  { return nil }
+func (s *whitelistIntegrationStore) GetResolverSettings() data.DNSResolverSettings     { return s.config }
+func (s *whitelistIntegrationStore) GetRecords() []dnsrecords.DNSRecord                { return nil }
+func (s *whitelistIntegrationStore) GetCacheRecords() []dnsrecordcache.CacheRecord     { return nil }
 func (s *whitelistIntegrationStore) UpdateCacheRecords(_ []dnsrecordcache.CacheRecord) {}
-func (s *whitelistIntegrationStore) GetServers() []dnsservers.DNSServer              { return s.servers }
+func (s *whitelistIntegrationStore) GetServers() []dnsservers.DNSServer                { return s.servers }
 func (s *whitelistIntegrationStore) GetBlockList() *adblock.BlockList {
 	return adblock.NewBlockList()
 }
 func (s *whitelistIntegrationStore) IncrementCacheHits()       {}
-func (s *whitelistIntegrationStore) IncrementQueriesAnswered()  {}
-func (s *whitelistIntegrationStore) IncrementTotalBlocks()       {}
+func (s *whitelistIntegrationStore) IncrementQueriesAnswered() {}
+func (s *whitelistIntegrationStore) IncrementTotalBlocks()     {}
 
 // TestWhitelistIntegration verifies that for a query matching a whitelist server only that server
 // is used, and for a query that does not match only the global server is used (integration: resolver + GetServersForQuery).
@@ -135,15 +135,15 @@ type localRecordStore struct {
 	config  config.Config
 }
 
-func (s *localRecordStore) GetResolverSettings() data.DNSResolverSettings { return s.config }
-func (s *localRecordStore) GetRecords() []dnsrecords.DNSRecord              { return s.records }
-func (s *localRecordStore) GetCacheRecords() []dnsrecordcache.CacheRecord   { return nil }
+func (s *localRecordStore) GetResolverSettings() data.DNSResolverSettings     { return s.config }
+func (s *localRecordStore) GetRecords() []dnsrecords.DNSRecord                { return s.records }
+func (s *localRecordStore) GetCacheRecords() []dnsrecordcache.CacheRecord     { return nil }
 func (s *localRecordStore) UpdateCacheRecords(_ []dnsrecordcache.CacheRecord) {}
-func (s *localRecordStore) GetServers() []dnsservers.DNSServer              { return nil }
-func (s *localRecordStore) GetBlockList() *adblock.BlockList                 { return adblock.NewBlockList() }
-func (s *localRecordStore) IncrementCacheHits()                              {}
-func (s *localRecordStore) IncrementQueriesAnswered()                       {}
-func (s *localRecordStore) IncrementTotalBlocks()                           {}
+func (s *localRecordStore) GetServers() []dnsservers.DNSServer                { return nil }
+func (s *localRecordStore) GetBlockList() *adblock.BlockList                  { return adblock.NewBlockList() }
+func (s *localRecordStore) IncrementCacheHits()                               {}
+func (s *localRecordStore) IncrementQueriesAnswered()                         {}
+func (s *localRecordStore) IncrementTotalBlocks()                             {}
 
 // TestResolver_LocalRecordReturnsA is a minimal integration test: resolver with in-memory store
 // holding one A record; one A query returns that record (local wins, no upstream).

@@ -41,11 +41,11 @@ type RequesterStats struct {
 
 // Tracker manages full statistics tracking using bbolt.
 type Tracker struct {
-	db       *bbolt.DB
-	mu       sync.RWMutex
-	enabled  bool
-	asyncCh  chan recordReq
-	asyncWg  sync.WaitGroup
+	db        *bbolt.DB
+	mu        sync.RWMutex
+	enabled   bool
+	asyncCh   chan recordReq
+	asyncWg   sync.WaitGroup
 	closeOnce sync.Once
 }
 
