@@ -246,6 +246,7 @@ When the service runs, it will create default `dnsplane.json` and JSON data file
 ![Go CI](https://github.com/network-plane/dnsplane/actions/workflows/go-ci.yml/badge.svg)
 ![govulncheck](https://github.com/network-plane/dnsplane/actions/workflows/govulncheck.yml/badge.svg)
 ![OSV-Scanner](https://github.com/network-plane/dnsplane/actions/workflows/osv-scanner.yml/badge.svg)
+![ClusterFuzzLite](https://github.com/network-plane/dnsplane/actions/workflows/clusterfuzzlite.yml/badge.svg)
 
 
 [![Go Mod](https://img.shields.io/github/go-mod/go-version/network-plane/dnsplane?style=for-the-badge)]()
