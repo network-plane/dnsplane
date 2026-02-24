@@ -6,9 +6,10 @@ on:
       - main
       - master
   pull_request:
+  schedule:
+    - cron: "21 2 * * 3" # weekly
 
 permissions: read-all
-
 
 jobs:
   fuzzing:
@@ -22,12 +23,12 @@ jobs:
           egress-policy: audit
 
       - name: Check out the repo
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set up Go
         uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
         with:
-          go-version: '1.26.0'
+          go-version-file: go.mod
           cache: true
 
       - name: Install Dependencies
@@ -35,20 +36,29 @@ jobs:
 
       - name: Run Fuzz Tests
         run: |
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            FUZZTIME="5m"
+          else
+            FUZZTIME="12s"
+          fi
+
           # Run each fuzz target (go test -fuzz=. only runs one per package)
-          go test -fuzz=FuzzValidateIP -fuzztime=12s ./ipvalidator/
-          go test -fuzz=FuzzConvertIPToReverseDNS -fuzztime=12s ./converters/
-          go test -fuzz=FuzzConvertReverseDNSToIP -fuzztime=12s ./converters/
-          go test -fuzz=FuzzAddRecord -fuzztime=12s ./dnsrecords/
-          go test -fuzz=FuzzNormalizeRecordNameKey -fuzztime=12s ./dnsrecords/
-          go test -fuzz=FuzzNormalizeRecordTypeAndValue -fuzztime=12s ./dnsrecords/
-          go test -fuzz=FuzzFindAllRecords -fuzztime=12s ./dnsrecords/
-          go test -fuzz=FuzzServerMatchesQuery -fuzztime=12s ./dnsservers/
-          go test -fuzz=FuzzGetServersForQuery -fuzztime=12s ./dnsservers/
+          go test -fuzz=FuzzValidateIP -fuzztime="${FUZZTIME}" ./ipvalidator/
+          go test -fuzz=FuzzConvertIPToReverseDNS -fuzztime="${FUZZTIME}" ./converters/
+          go test -fuzz=FuzzConvertReverseDNSToIP -fuzztime="${FUZZTIME}" ./converters/
+          go test -fuzz=FuzzAddRecord -fuzztime="${FUZZTIME}" ./dnsrecords/
+          go test -fuzz=FuzzNormalizeRecordNameKey -fuzztime="${FUZZTIME}" ./dnsrecords/
+          go test -fuzz=FuzzNormalizeRecordTypeAndValue -fuzztime="${FUZZTIME}" ./dnsrecords/
+          go test -fuzz=FuzzFindAllRecords -fuzztime="${FUZZTIME}" ./dnsrecords/
+          go test -fuzz=FuzzServerMatchesQuery -fuzztime="${FUZZTIME}" ./dnsservers/
+          go test -fuzz=FuzzGetServersForQuery -fuzztime="${FUZZTIME}" ./dnsservers/
 
       - name: Upload Crash Artifacts
         if: failure()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: fuzz-crashers
-          path: fuzz_crashers/
+          path: |
+            **/testdata/fuzz/**
+            **/crashers/**
+            **/corpus/**

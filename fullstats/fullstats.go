@@ -1,7 +1,6 @@
 package fullstats
 
 import (
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -41,11 +40,10 @@ type RequesterStats struct {
 
 // Tracker manages full statistics tracking using bbolt.
 type Tracker struct {
-	db       *bbolt.DB
-	mu       sync.RWMutex
-	enabled  bool
-	asyncCh  chan recordReq
-	asyncWg  sync.WaitGroup
+	db        *bbolt.DB
+	enabled   bool
+	asyncCh   chan recordReq
+	asyncWg   sync.WaitGroup
 	closeOnce sync.Once
 }
 
@@ -301,16 +299,4 @@ func (t *Tracker) Close() error {
 		closeErr = t.db.Close()
 	})
 	return closeErr
-}
-
-// Helper function to convert uint64 to bytes (for bbolt keys if needed)
-func uint64ToBytes(v uint64) []byte {
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, v)
-	return b
-}
-
-// Helper function to convert bytes to uint64
-func bytesToUint64(b []byte) uint64 {
-	return binary.BigEndian.Uint64(b)
 }

@@ -110,10 +110,10 @@ const (
 
 // parResult is sent on the parallel resolution channel; exactly one of local/cache/up is set per kind.
 type parResult struct {
-	kind   parResultKind
-	local  []dns.RR
-	cache  *dns.RR
-	up     *upstreamResult
+	kind  parResultKind
+	local []dns.RR
+	cache *dns.RR
+	up    *upstreamResult
 }
 
 // resolveAParallel runs local, cache, and all upstream+fallback lookups at once; replies by priority:
@@ -406,10 +406,6 @@ func (r *Resolver) processUpstreamAnswer(question dns.Question, answer *dns.Msg,
 	cacheDNSResponse(r.store, answer.Answer)
 }
 
-func (r *Resolver) processCachedRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
-	r.processCachedRecords(question, []dns.RR{*cachedRecord}, response)
-}
-
 func (r *Resolver) processCachedRecords(question dns.Question, cachedRecords []dns.RR, response *dns.Msg) {
 	if len(cachedRecords) == 0 {
 		return
@@ -488,7 +484,7 @@ func (r *Resolver) checkBlocked(question dns.Question) bool {
 	if blockList == nil {
 		return false
 	}
-	
+
 	// Normalize domain name (remove trailing dot)
 	domain := strings.TrimSuffix(question.Name, ".")
 	return blockList.IsBlocked(domain)
@@ -499,13 +495,13 @@ func (r *Resolver) processBlockedDomain(question dns.Question, response *dns.Msg
 	if r == nil || r.store == nil {
 		return
 	}
-	
+
 	r.store.IncrementTotalBlocks()
 	response.Authoritative = true
-	
+
 	var blockedIP string
 	var recordType uint16
-	
+
 	switch question.Qtype {
 	case dns.TypeA:
 		blockedIP = "0.0.0.0"
@@ -519,7 +515,7 @@ func (r *Resolver) processBlockedDomain(question dns.Question, response *dns.Msg
 		r.log("Query: %s, Blocked (adblock), Type: %s\n", question.Name, dns.TypeToString[question.Qtype])
 		return
 	}
-	
+
 	// Create a blocked response record
 	recordString := fmt.Sprintf("%s 300 IN %s %s", question.Name, dns.TypeToString[recordType], blockedIP)
 	rr, err := dns.NewRR(recordString)
@@ -527,7 +523,7 @@ func (r *Resolver) processBlockedDomain(question dns.Question, response *dns.Msg
 		r.log("Query: %s, Error creating blocked response: %v\n", question.Name, err)
 		return
 	}
-	
+
 	response.Answer = append(response.Answer, rr)
 	r.log("Query: %s, Blocked (adblock), Reply: %s\n", question.Name, rr.String())
 }
