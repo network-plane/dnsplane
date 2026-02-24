@@ -1,0 +1,2 @@
+# Ensure Go source uses LF so gofmt is consistent on all platforms (including Windows CI).
+*.go text eol=lf
