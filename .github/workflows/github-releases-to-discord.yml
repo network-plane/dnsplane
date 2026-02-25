@@ -5,7 +5,8 @@ on:
     types: [published]
 
 # Declare default permissions as read only.
-permissions: read-all
+permissions:
+  contents: read
 
 jobs:
   github-releases-to-discord:
