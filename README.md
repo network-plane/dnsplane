@@ -254,15 +254,13 @@ When the service runs, it will create default `dnsplane.json` and JSON data file
 
 ![SBOM](https://github.com/network-plane/dnsplane/actions/workflows/sbom.yml/badge.svg)
 
-![GitHub commit activity](https://img.shields.io/github/commit-activity/m/network-plane/dnsplane?style=for-the-badge)
-
 
 ## Contributing
 
 Contributions are always welcome! All contributions must follow the [Google Go Style Guide](https://google.github.io/styleguide/go/). The project uses the [Developer Certificate of Origin (DCO)](https://developercertificate.org/)—see [CONTRIBUTING.md](CONTRIBUTING.md) for how to sign off your commits. Project governance (roles and decision-making) is described in [GOVERNANCE.md](GOVERNANCE.md).
 
 ## Commit Activity
-![GitHub commit activity](https://img.shields.io/github/commit-activity/y/network-plane/dnsplane)
+![GitHub last commit](https://img.shields.io/github/last-commit/network-plane/dnsplane)
 ![GitHub commits since latest release](https://img.shields.io/github/commits-since/network-plane/dnsplane/latest)
 ![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/network-plane/dnsplane)
 
@@ -277,4 +275,4 @@ Contributions are always welcome! All contributions must follow the [Google Go S
 
 I will always follow the Linux Kernel License as primary, if you require any other OPEN license please let me know and I will try to accomodate it.
 
-[![License](https://img.shields.io/github/license/earentir/gitearelease)](https://opensource.org/license/gpl-2-0)
+[![License](https://img.shields.io/github/license/network-plane/dnsplane)](https://opensource.org/license/gpl-2-0)
