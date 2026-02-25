@@ -39,12 +39,17 @@ type RequesterStats struct {
 }
 
 // Tracker manages full statistics tracking using bbolt.
+// It also keeps in-memory session stats (since process start) for session vs total reporting.
 type Tracker struct {
 	db        *bbolt.DB
 	enabled   bool
 	asyncCh   chan recordReq
 	asyncWg   sync.WaitGroup
 	closeOnce sync.Once
+
+	sessionMu         sync.RWMutex
+	sessionRequests   map[string]*RequestStats  // key -> stats since start
+	sessionRequesters map[string]*RequesterStats // IP -> stats since start
 }
 
 // New creates a new statistics tracker. If enabled is false, returns nil.
@@ -64,9 +69,11 @@ func New(statsDir string, enabled bool) (*Tracker, error) {
 	}
 
 	t := &Tracker{
-		db:      db,
-		enabled: true,
-		asyncCh: make(chan recordReq, asyncQueueSize),
+		db:                db,
+		enabled:           true,
+		asyncCh:            make(chan recordReq, asyncQueueSize),
+		sessionRequests:   make(map[string]*RequestStats),
+		sessionRequesters: make(map[string]*RequesterStats),
 	}
 
 	// Initialize buckets
@@ -123,7 +130,7 @@ func (t *Tracker) recordRequestSync(key string, requesterIP string, recordType s
 	}
 
 	now := time.Now()
-	return t.db.Update(func(tx *bbolt.Tx) error {
+	err := t.db.Update(func(tx *bbolt.Tx) error {
 		// Update request stats
 		reqBucket := tx.Bucket([]byte(requestsBucket))
 		if reqBucket == nil {
@@ -183,6 +190,75 @@ func (t *Tracker) recordRequestSync(key string, requesterIP string, recordType s
 
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	// Update in-memory session stats (since process start).
+	t.sessionMu.Lock()
+	defer t.sessionMu.Unlock()
+	if st, ok := t.sessionRequests[key]; ok {
+		st.LastSeen = now
+		st.Count++
+	} else {
+		t.sessionRequests[key] = &RequestStats{FirstSeen: now, LastSeen: now, Count: 1}
+	}
+	if st, ok := t.sessionRequesters[requesterIP]; ok {
+		if st.TypeCount == nil {
+			st.TypeCount = make(map[string]uint64)
+		}
+		st.TypeCount[recordType]++
+	} else {
+		t.sessionRequesters[requesterIP] = &RequesterStats{
+			FirstSeen: now,
+			TypeCount: map[string]uint64{recordType: 1},
+		}
+	}
+	return nil
+}
+
+func (t *Tracker) getSessionRequestsLocked() map[string]*RequestStats {
+	if t == nil || !t.enabled {
+		return nil
+	}
+	t.sessionMu.RLock()
+	defer t.sessionMu.RUnlock()
+	out := make(map[string]*RequestStats, len(t.sessionRequests))
+	for k, v := range t.sessionRequests {
+		cp := *v
+		out[k] = &cp
+	}
+	return out
+}
+
+func (t *Tracker) getSessionRequestersLocked() map[string]*RequesterStats {
+	if t == nil || !t.enabled {
+		return nil
+	}
+	t.sessionMu.RLock()
+	defer t.sessionMu.RUnlock()
+	out := make(map[string]*RequesterStats, len(t.sessionRequesters))
+	for k, v := range t.sessionRequesters {
+		cp := *v
+		if v.TypeCount != nil {
+			cp.TypeCount = make(map[string]uint64)
+			for kk, vv := range v.TypeCount {
+				cp.TypeCount[kk] = vv
+			}
+		}
+		out[k] = &cp
+	}
+	return out
+}
+
+// GetSessionRequests returns request statistics since process start (session). Caller may modify the returned map.
+func (t *Tracker) GetSessionRequests() (map[string]*RequestStats, error) {
+	return t.getSessionRequestsLocked(), nil
+}
+
+// GetSessionRequesters returns requester statistics since process start (session). Caller may modify the returned map.
+func (t *Tracker) GetSessionRequesters() (map[string]*RequesterStats, error) {
+	return t.getSessionRequestersLocked(), nil
 }
 
 // GetRequestStats retrieves statistics for a specific request.
