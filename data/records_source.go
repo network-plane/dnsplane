@@ -1,4 +1,7 @@
 // Package data - records_source.go loads DNS records from URL or git (read-only sources).
+// Copyright 2024-2026 George (earentir) Pantazis (https://earentir.dev)
+// SPDX-License-Identifier: GPL-2.0-only
+//
 package data
 
 import (
