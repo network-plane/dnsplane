@@ -46,7 +46,7 @@ const (
 
 var (
 	appState         = daemon.NewState()
-	appVersion       = "1.2.85"
+	appVersion       = "1.3.87"
 	dnsResolver      *resolver.Resolver
 	fullStatsTracker *fullstats.Tracker
 	dnsLogger        *slog.Logger
