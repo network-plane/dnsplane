@@ -1,4 +1,6 @@
 // Package dnsrecords contains the functions to add, list, remove, clear and update DNS records.
+// Copyright 2024-2026 George (earentir) Pantazis (https://earentir.dev)
+// SPDX-License-Identifier: GPL-2.0-only
 package dnsrecords
 
 import (
