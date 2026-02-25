@@ -1,7 +1,6 @@
 // Package converters provides functions to convert between different types.
 // Copyright 2024-2026 George (earentir) Pantazis (https://earentir.dev)
 // SPDX-License-Identifier: GPL-2.0-only
-//
 package converters
 
 import (
