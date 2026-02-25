@@ -1,4 +1,6 @@
 // Package commandhandler implements the command handling logic for DNSPlane TUI.
+// Copyright 2024-2026 George (earentir) Pantazis (https://earentir.dev)
+// SPDX-License-Identifier: GPL-2.0-only
 package commandhandler
 
 import (

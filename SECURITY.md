@@ -1,5 +1,9 @@
 # Security Policy
 
+## Assurance case
+
+An assurance case that describes the threat model, trust boundaries, application of secure design principles, and mitigation of common implementation weaknesses is maintained in [docs/ASSURANCE_CASE.md](docs/ASSURANCE_CASE.md).
+
 ## Supported Versions
 
 The current main is supported with fixes until an LTS version is released
