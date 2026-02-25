@@ -47,6 +47,7 @@ type dashboardData struct {
 	FullStatsEnabled bool
 	RequestersCount  int
 	DomainsCount     int
+	StatsLimit       int   // limit used for top requesters/domains (e.g. 10 or 100)
 	TopRequesters    []struct {
 		IP        string
 		Total     uint64
@@ -196,6 +197,9 @@ var statsPageTemplate = template.Must(template.New("stats").Parse(`<!DOCTYPE htm
         <li><span class="key">Requesters</span><span class="val">{{.RequestersCount}}</span></li>
         <li><span class="key">Domain:type entries</span><span class="val">{{.DomainsCount}}</span></li>
       </ul>
+      <p class="muted">
+        {{if le .StatsLimit 10}}<a href="/stats/page?full=100">Show all</a> (up to 100){{else}}<a href="/stats/page">Show top 10</a>{{end}}
+      </p>
       {{if .TopRequesters}}
       <p class="muted">Top {{len .TopRequesters}} requesters by total requests</p>
       <table>
@@ -301,6 +305,7 @@ func statsPageHandler(w http.ResponseWriter, r *http.Request) {
 
 	if tracker != nil {
 		data.FullStatsEnabled = true
+		data.StatsLimit = limit
 		reqs, _ := tracker.GetAllRequesters()
 		doms, _ := tracker.GetAllRequests()
 		if reqs != nil {
