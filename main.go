@@ -744,7 +744,7 @@ func startTCPTerminalListener(address string, log *slog.Logger) (net.Listener, e
 }
 
 func acceptInteractiveSessions(listener net.Listener, log *slog.Logger) {
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -767,7 +767,7 @@ func acceptInteractiveSessions(listener net.Listener, log *slog.Logger) {
 }
 
 func serveInteractiveSession(conn net.Conn, log *slog.Logger) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	addr := formatConnAddr(conn)
 	if log != nil {
@@ -832,17 +832,17 @@ func serveInteractiveSession(conn net.Conn, log *slog.Logger) {
 
 	rl, err := readline.NewEx(&cfg)
 	if err != nil {
-		fmt.Fprintf(conn, "Error initialising session: %v\r\n", err)
+		_, _ = fmt.Fprintf(conn, "Error initialising session: %v\r\n", err)
 		return
 	}
-	defer rl.Close()
+	defer func() { _ = rl.Close() }()
 	defer resetTUIState()
 	resetTUIState()
 
 	if err := tui.Run(rl); err != nil {
-		fmt.Fprintf(conn, "\r\nSession terminated: %v\r\n", err)
+		_, _ = fmt.Fprintf(conn, "\r\nSession terminated: %v\r\n", err)
 	} else {
-		fmt.Fprint(conn, "\rShutting down session.\r\n")
+		_, _ = fmt.Fprint(conn, "\rShutting down session.\r\n")
 	}
 	if cw, ok := conn.(interface{ CloseWrite() error }); ok {
 		_ = cw.CloseWrite()
@@ -907,7 +907,7 @@ func connectToInteractiveEndpoint(target string, killOther bool) {
 		fmt.Fprintf(os.Stderr, "Error connecting to %s: %v\n", address, err)
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// If --kill, tell server to disconnect the current client so we can take over.
 	if killOther {

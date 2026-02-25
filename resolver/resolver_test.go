@@ -28,7 +28,7 @@ func (u *recordingUpstream) Query(ctx context.Context, question dns.Question, se
 	u.mu.Unlock()
 	msg := &dns.Msg{}
 	msg.SetReply(&dns.Msg{Question: []dns.Question{question}})
-	msg.MsgHdr.Rcode = dns.RcodeSuccess
+	msg.Rcode = dns.RcodeSuccess
 	msg.Answer = []dns.RR{
 		&dns.A{
 			Hdr: dns.RR_Header{Name: question.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
