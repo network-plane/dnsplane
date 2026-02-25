@@ -377,12 +377,14 @@ func helpHint() Message {
 
 // ipvToRecordType returns the DNS record type for the given IP version.
 func ipvToRecordType(ipversion int) string {
-	if ipversion == 4 {
+	switch ipversion {
+	case 4:
 		return "A"
-	} else if ipversion == 6 {
+	case 6:
 		return "AAAA"
+	default:
+		return ""
 	}
-	return ""
 }
 
 // validateIPAndDomain attempts to validate the arguments as IP and domain.
