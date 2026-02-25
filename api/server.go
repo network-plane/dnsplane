@@ -34,24 +34,38 @@ func SetFullStatsTracker(t *fullstats.Tracker) {
 	apiFullStatsTracker = t
 }
 
-// getFullStatsCounts returns requesters count, domains count, and whether full_stats is available.
+// fullStatsCounts holds requesters and domains counts for a scope (session or total).
+type fullStatsCounts struct {
+	RequestersCount int `json:"requesters_count"`
+	DomainsCount    int `json:"domains_count"`
+}
+
+// getFullStatsCounts returns total (DB) and session (since process start) full_stats counts.
 // Caller must not hold apiServerMu.
-func getFullStatsCounts() (reqCount, domCount int, ok bool) {
+func getFullStatsCounts() (total, session fullStatsCounts, ok bool) {
 	apiServerMu.Lock()
 	tracker := apiFullStatsTracker
 	apiServerMu.Unlock()
 	if tracker == nil {
-		return 0, 0, false
+		return fullStatsCounts{}, fullStatsCounts{}, false
 	}
-	reqs, _ := tracker.GetAllRequesters()
-	doms, _ := tracker.GetAllRequests()
-	if reqs != nil {
-		reqCount = len(reqs)
+	reqsTotal, _ := tracker.GetAllRequesters()
+	domsTotal, _ := tracker.GetAllRequests()
+	reqsSession, _ := tracker.GetSessionRequesters()
+	domsSession, _ := tracker.GetSessionRequests()
+	if reqsTotal != nil {
+		total.RequestersCount = len(reqsTotal)
 	}
-	if doms != nil {
-		domCount = len(doms)
+	if domsTotal != nil {
+		total.DomainsCount = len(domsTotal)
 	}
-	return reqCount, domCount, true
+	if reqsSession != nil {
+		session.RequestersCount = len(reqsSession)
+	}
+	if domsSession != nil {
+		session.DomainsCount = len(domsSession)
+	}
+	return total, session, true
 }
 
 // RouteRegistrar registers HTTP routes on the supplied Chi router.
@@ -209,29 +223,42 @@ func listServersHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"servers": servers})
 }
 
-// statsHandler returns resolver stats as JSON. When full_stats is enabled, includes requesters/domains counts.
+// resolverStatsMap returns the resolver stats as a map for session/total (both same until persistence exists).
+func resolverStatsMap(stats data.DNSStats) map[string]any {
+	return map[string]any{
+		"total_queries":            stats.TotalQueries,
+		"total_cache_hits":         stats.TotalCacheHits,
+		"total_blocks":             stats.TotalBlocks,
+		"total_queries_forwarded":  stats.TotalQueriesForwarded,
+		"total_queries_answered":   stats.TotalQueriesAnswered,
+		"server_start_time":        stats.ServerStartTime.Format(time.RFC3339),
+	}
+}
+
+// statsHandler returns resolver and full_stats as JSON with session and total scope.
+// Resolver stats are in-memory only (since server start), so session and total are the same for now.
 func statsHandler(w http.ResponseWriter, r *http.Request) {
 	dnsData := data.GetInstance()
 	stats := dnsData.GetStats()
 
-	resp := map[string]any{
-		"total_queries":           stats.TotalQueries,
-		"total_cache_hits":        stats.TotalCacheHits,
-		"total_blocks":            stats.TotalBlocks,
-		"total_queries_forwarded": stats.TotalQueriesForwarded,
-		"total_queries_answered":  stats.TotalQueriesAnswered,
-		"server_start_time":       stats.ServerStartTime.Format(time.RFC3339),
-	}
+	resolver := resolverStatsMap(stats)
+	sessionMap := map[string]any{"resolver": resolver}
+	totalMap := map[string]any{"resolver": resolver}
 
-	if reqCount, domCount, ok := getFullStatsCounts(); ok {
-		resp["full_stats"] = map[string]any{
+	if total, session, ok := getFullStatsCounts(); ok {
+		sessionMap["full_stats"] = map[string]any{
 			"enabled":          true,
-			"requesters_count": reqCount,
-			"domains_count":    domCount,
+			"requesters_count": session.RequestersCount,
+			"domains_count":    session.DomainsCount,
+		}
+		totalMap["full_stats"] = map[string]any{
+			"enabled":          true,
+			"requesters_count": total.RequestersCount,
+			"domains_count":    total.DomainsCount,
 		}
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, map[string]any{"session": sessionMap, "total": totalMap})
 }
 
 // prometheusMetric describes a single Prometheus metric for loop-based output.
@@ -269,10 +296,12 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if reqCount, domCount, ok := getFullStatsCounts(); ok {
+	if total, session, ok := getFullStatsCounts(); ok {
 		fullStatsMetrics := []prometheusMetric{
-			{"Number of distinct requesters in full_stats", "gauge", "dnsplane_fullstats_requesters_count", reqCount},
-			{"Number of distinct domain:type entries in full_stats", "gauge", "dnsplane_fullstats_domains_count", domCount},
+			{"Number of distinct requesters in full_stats (total)", "gauge", "dnsplane_fullstats_requesters_count_total", total.RequestersCount},
+			{"Number of distinct domain:type entries in full_stats (total)", "gauge", "dnsplane_fullstats_domains_count_total", total.DomainsCount},
+			{"Number of distinct requesters in full_stats (session)", "gauge", "dnsplane_fullstats_requesters_count_session", session.RequestersCount},
+			{"Number of distinct domain:type entries in full_stats (session)", "gauge", "dnsplane_fullstats_domains_count_session", session.DomainsCount},
 		}
 		for _, m := range fullStatsMetrics {
 			fmt.Fprintf(w, "# HELP %s %s\n", m.name, m.help)
