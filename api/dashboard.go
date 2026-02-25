@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"dnsplane/data"
@@ -54,7 +55,8 @@ type dashboardData struct {
 		FirstSeen string
 	}
 	TopDomains []struct {
-		Key                 string
+		Domain              string
+		RecordType          string
 		Count               uint64
 		FirstSeen, LastSeen string
 	}
@@ -210,11 +212,11 @@ var statsPageTemplate = template.Must(template.New("stats").Parse(`<!DOCTYPE htm
       </table>
       {{end}}
       {{if .TopDomains}}
-      <p class="muted">Top {{len .TopDomains}} domains (name:type) by request count</p>
+      <p class="muted">Top {{len .TopDomains}} domains by request count</p>
       <table>
-        <thead><tr><th>Domain (name:type)</th><th>Count</th><th>First seen</th><th>Last seen</th></tr></thead>
+        <thead><tr><th>Domain</th><th>Record type</th><th>Count</th><th>First seen</th><th>Last seen</th></tr></thead>
         <tbody>
-          {{range .TopDomains}}<tr><td>{{.Key}}</td><td>{{.Count}}</td><td>{{.FirstSeen}}</td><td>{{.LastSeen}}</td></tr>{{end}}
+          {{range .TopDomains}}<tr><td>{{.Domain}}</td><td>{{.RecordType}}</td><td>{{.Count}}</td><td>{{.FirstSeen}}</td><td>{{.LastSeen}}</td></tr>{{end}}
         </tbody>
       </table>
       {{end}}
@@ -359,31 +361,47 @@ func topRequestersForDashboard(all map[string]*fullstats.RequesterStats, limit i
 	return out
 }
 
+// splitDomainType splits a fullstats key "domain:type" into domain and record type.
+// It splits on the last ":" so that domain names containing ":" still parse correctly.
+func splitDomainType(key string) (domain, recordType string) {
+	if key == "" {
+		return "", ""
+	}
+	if i := strings.LastIndex(key, ":"); i >= 0 {
+		return key[:i], key[i+1:]
+	}
+	return key, ""
+}
+
 func topDomainsForDashboard(all map[string]*fullstats.RequestStats, limit int) []struct {
-	Key                 string
+	Domain              string
+	RecordType          string
 	Count               uint64
 	FirstSeen, LastSeen string
 } {
 	type row struct {
-		key         string
-		count       uint64
-		first, last time.Time
+		domain, rtype string
+		count         uint64
+		first, last   time.Time
 	}
 	var rows []row
 	for key, st := range all {
-		rows = append(rows, row{key: key, count: st.Count, first: st.FirstSeen, last: st.LastSeen})
+		domain, rtype := splitDomainType(key)
+		rows = append(rows, row{domain: domain, rtype: rtype, count: st.Count, first: st.FirstSeen, last: st.LastSeen})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].count > rows[j].count })
 	if len(rows) > limit {
 		rows = rows[:limit]
 	}
 	out := make([]struct {
-		Key                 string
+		Domain              string
+		RecordType          string
 		Count               uint64
 		FirstSeen, LastSeen string
 	}, len(rows))
 	for i, r := range rows {
-		out[i].Key = r.key
+		out[i].Domain = r.domain
+		out[i].RecordType = r.rtype
 		out[i].Count = r.count
 		out[i].FirstSeen = r.first.Format(time.RFC3339)
 		out[i].LastSeen = r.last.Format(time.RFC3339)
