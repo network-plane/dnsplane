@@ -985,7 +985,7 @@ func runToolsDig() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult 
 					answers = append(answers, rr.String())
 				}
 				answer = strings.Join(answers, "; ")
-				if res.response.MsgHdr.Authoritative {
+				if res.response.Authoritative {
 					status = "AUTH"
 				}
 			}

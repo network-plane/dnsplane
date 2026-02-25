@@ -135,7 +135,7 @@ func LoadFromFile(blockList *BlockList, filePath string) error {
 	if err != nil {
 		return fmt.Errorf("open file: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	scanner := bufio.NewScanner(file)
 	lineNum := 0
@@ -180,7 +180,7 @@ func LoadFromURL(blockList *BlockList, url string) error {
 	if err != nil {
 		return fmt.Errorf("fetch URL: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("fetch URL: status %s", resp.Status)

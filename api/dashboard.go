@@ -48,7 +48,7 @@ type dashboardData struct {
 	FullStatsEnabled bool
 	RequestersCount  int
 	DomainsCount     int
-	StatsLimit       int   // limit used for top requesters/domains (e.g. 10 or 100)
+	StatsLimit       int    // limit used for top requesters/domains (e.g. 10 or 100)
 	StatsScope       string // "session" or "total" for full_stats
 	StatsFullSuffix  string // "" or "&full=100" for links that preserve full param
 	TopRequesters    []struct {
