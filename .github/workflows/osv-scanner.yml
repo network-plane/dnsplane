@@ -1,3 +1,7 @@
+# OSV-Scanner: runs scan without uploading to Security tab (no security-events: write).
+# To restore upload to Security > Code scanning, replace this file with the commented block below
+# and ensure permissions include: security-events: write
+
 name: OSV-Scanner
 
 on:
@@ -7,13 +11,61 @@ on:
     - cron: "44 5 * * 3" # weekly Wednesday
 
 permissions:
-  actions: read
-  security-events: write
   contents: read
+  actions: read
 
 jobs:
   osv-scan:
-    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@c5996e0193a3df57d695c1b8a1dec2a4c62e8730 # v2.3.3
-    with:
-      scan-args: |-
-        ./
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run OSV-Scanner
+        id: osv
+        continue-on-error: true
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}":/src \
+            -w /src \
+            ghcr.io/google/osv-scanner:v2.3.3 \
+            --format=json --output=osv-results.json ./
+
+      - name: Check for vulnerabilities
+        run: |
+          if [ "${{ steps.osv.outcome }}" = "failure" ]; then
+            echo "OSV-Scanner failed (vulnerabilities or error)."
+            [ -f osv-results.json ] && jq . osv-results.json 2>/dev/null || true
+            exit 1
+          fi
+          if [ -f osv-results.json ] && [ -s osv-results.json ]; then
+            if jq -e '.results | length > 0' osv-results.json >/dev/null 2>&1; then
+              echo "Vulnerabilities found:"
+              jq . osv-results.json
+              exit 1
+            fi
+          fi
+
+      - name: Upload scan results (artifact)
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: always()
+        with:
+          name: osv-scan-results
+          path: osv-results.json
+          retention-days: 5
+          if-no-files-found: ignore
+
+# --- Restore Security tab upload (current correct way) ---
+# Replace the jobs section above with the block below and add security-events: write to permissions.
+#
+# permissions:
+#   actions: read
+#   security-events: write
+#   contents: read
+#
+# jobs:
+#   osv-scan:
+#     uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@c5996e0193a3df57d695c1b8a1dec2a4c62e8730 # v2.3.3
+#     with:
+#       scan-args: |-
+#         ./
