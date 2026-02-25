@@ -1,7 +1,6 @@
 // Package data provides functions to load and save data from JSON files
 // Copyright 2024-2026 George (earentir) Pantazis (https://earentir.dev)
 // SPDX-License-Identifier: GPL-2.0-only
-//
 package data
 
 import (
