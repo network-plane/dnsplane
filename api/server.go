@@ -284,15 +284,15 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 		{"Server start time (Unix)", "gauge", "dnsplane_server_start_time_seconds", float64(stats.ServerStartTime.Unix())},
 	}
 	for _, m := range metrics {
-		fmt.Fprintf(w, "# HELP %s %s\n", m.name, m.help)
-		fmt.Fprintf(w, "# TYPE %s %s\n", m.name, m.typeName)
+		_, _ = fmt.Fprintf(w, "# HELP %s %s\n", m.name, m.help)
+		_, _ = fmt.Fprintf(w, "# TYPE %s %s\n", m.name, m.typeName)
 		switch v := m.value.(type) {
 		case int:
-			fmt.Fprintf(w, "%s %d\n", m.name, v)
+			_, _ = fmt.Fprintf(w, "%s %d\n", m.name, v)
 		case float64:
-			fmt.Fprintf(w, "%s %.0f\n", m.name, v)
+			_, _ = fmt.Fprintf(w, "%s %.0f\n", m.name, v)
 		default:
-			fmt.Fprintf(w, "%s %v\n", m.name, v)
+			_, _ = fmt.Fprintf(w, "%s %v\n", m.name, v)
 		}
 	}
 
@@ -304,9 +304,9 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 			{"Number of distinct domain:type entries in full_stats (session)", "gauge", "dnsplane_fullstats_domains_count_session", session.DomainsCount},
 		}
 		for _, m := range fullStatsMetrics {
-			fmt.Fprintf(w, "# HELP %s %s\n", m.name, m.help)
-			fmt.Fprintf(w, "# TYPE %s %s\n", m.name, m.typeName)
-			fmt.Fprintf(w, "%s %d\n", m.name, m.value.(int))
+			_, _ = fmt.Fprintf(w, "# HELP %s %s\n", m.name, m.help)
+			_, _ = fmt.Fprintf(w, "# TYPE %s %s\n", m.name, m.typeName)
+			_, _ = fmt.Fprintf(w, "%s %d\n", m.name, m.value.(int))
 		}
 	}
 }

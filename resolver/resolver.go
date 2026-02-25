@@ -208,8 +208,8 @@ func (r *Resolver) resolveAParallel(ctx context.Context, question dns.Question, 
 		case parUpstream:
 			upstreamSeen++
 			if pr.up != nil && pr.up.err == nil && pr.up.msg != nil &&
-				pr.up.msg.MsgHdr.Rcode == dns.RcodeSuccess && len(pr.up.msg.Answer) > 0 {
-				if pr.up.msg.MsgHdr.Authoritative {
+				pr.up.msg.Rcode == dns.RcodeSuccess && len(pr.up.msg.Answer) > 0 {
+				if pr.up.msg.Authoritative {
 					authUpstream = pr.up
 				} else if firstUpstream == nil {
 					firstUpstream = pr.up
@@ -308,10 +308,10 @@ func (r *Resolver) handleDNSServers(ctx context.Context, question dns.Question, 
 		if res.msg == nil {
 			continue
 		}
-		if res.msg.MsgHdr.Rcode != dns.RcodeSuccess || len(res.msg.Answer) == 0 {
+		if res.msg.Rcode != dns.RcodeSuccess || len(res.msg.Answer) == 0 {
 			continue
 		}
-		if res.msg.MsgHdr.Authoritative {
+		if res.msg.Authoritative {
 			r.processUpstreamAnswer(question, res.msg, response)
 			found = true
 			cancel()
@@ -393,8 +393,8 @@ func (r *Resolver) handleFallbackServer(ctx context.Context, question dns.Questi
 // The response's Authoritative and Rcode are set from the upstream message.
 func (r *Resolver) processUpstreamAnswer(question dns.Question, answer *dns.Msg, response *dns.Msg) {
 	response.Answer = append(response.Answer, answer.Answer...)
-	response.Authoritative = answer.MsgHdr.Authoritative
-	response.Rcode = answer.MsgHdr.Rcode
+	response.Authoritative = answer.Authoritative
+	response.Rcode = answer.Rcode
 	if len(answer.Answer) > 0 {
 		record := answer.Answer[0]
 		name := record.Header().Name

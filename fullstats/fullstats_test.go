@@ -25,7 +25,7 @@ func TestNew_Enabled(t *testing.T) {
 	if tracker == nil {
 		t.Fatal("New(enabled) returned nil tracker")
 	}
-	defer tracker.Close()
+	defer func() { _ = tracker.Close() }()
 
 	dbPath := filepath.Join(dir, dbFileName)
 	if _, err := os.Stat(dbPath); err != nil {
