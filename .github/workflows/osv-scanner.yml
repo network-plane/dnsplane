@@ -5,6 +5,8 @@
 name: OSV-Scanner
 
 on:
+  push:
+    branches: [master]
   pull_request:
     branches: [master]
   schedule:
