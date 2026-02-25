@@ -48,7 +48,7 @@ type Tracker struct {
 	closeOnce sync.Once
 
 	sessionMu         sync.RWMutex
-	sessionRequests   map[string]*RequestStats  // key -> stats since start
+	sessionRequests   map[string]*RequestStats   // key -> stats since start
 	sessionRequesters map[string]*RequesterStats // IP -> stats since start
 }
 
@@ -71,7 +71,7 @@ func New(statsDir string, enabled bool) (*Tracker, error) {
 	t := &Tracker{
 		db:                db,
 		enabled:           true,
-		asyncCh:            make(chan recordReq, asyncQueueSize),
+		asyncCh:           make(chan recordReq, asyncQueueSize),
 		sessionRequests:   make(map[string]*RequestStats),
 		sessionRequesters: make(map[string]*RequesterStats),
 	}

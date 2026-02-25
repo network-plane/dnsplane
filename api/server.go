@@ -226,12 +226,12 @@ func listServersHandler(w http.ResponseWriter, r *http.Request) {
 // resolverStatsMap returns the resolver stats as a map for session/total (both same until persistence exists).
 func resolverStatsMap(stats data.DNSStats) map[string]any {
 	return map[string]any{
-		"total_queries":            stats.TotalQueries,
-		"total_cache_hits":         stats.TotalCacheHits,
-		"total_blocks":             stats.TotalBlocks,
-		"total_queries_forwarded":  stats.TotalQueriesForwarded,
-		"total_queries_answered":   stats.TotalQueriesAnswered,
-		"server_start_time":        stats.ServerStartTime.Format(time.RFC3339),
+		"total_queries":           stats.TotalQueries,
+		"total_cache_hits":        stats.TotalCacheHits,
+		"total_blocks":            stats.TotalBlocks,
+		"total_queries_forwarded": stats.TotalQueriesForwarded,
+		"total_queries_answered":  stats.TotalQueriesAnswered,
+		"server_start_time":       stats.ServerStartTime.Format(time.RFC3339),
 	}
 }
 
