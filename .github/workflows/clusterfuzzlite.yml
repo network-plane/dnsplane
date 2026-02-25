@@ -9,13 +9,13 @@ on:
   schedule:
     - cron: "21 2 * * 3" # weekly
 
-permissions: read-all
+permissions:
+  contents: read
+  actions: read
 
 jobs:
   fuzzing:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write  # Override for this step to allow writing crash artifacts
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
