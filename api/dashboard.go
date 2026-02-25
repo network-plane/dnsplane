@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"dnsplane/data"
@@ -47,13 +48,17 @@ type dashboardData struct {
 	FullStatsEnabled bool
 	RequestersCount  int
 	DomainsCount     int
+	StatsLimit       int   // limit used for top requesters/domains (e.g. 10 or 100)
+	StatsScope       string // "session" or "total" for full_stats
+	StatsFullSuffix  string // "" or "&full=100" for links that preserve full param
 	TopRequesters    []struct {
 		IP        string
 		Total     uint64
 		FirstSeen string
 	}
 	TopDomains []struct {
-		Key                 string
+		Domain              string
+		RecordType          string
 		Count               uint64
 		FirstSeen, LastSeen string
 	}
@@ -153,8 +158,9 @@ var statsPageTemplate = template.Must(template.New("stats").Parse(`<!DOCTYPE htm
 </head>
 <body>
   <h1>dnsplane Stats</h1>
+  <p class="muted">JSON: <a href="/stats">/stats</a> · Prometheus: <a href="/metrics">/metrics</a> · <a href="#resolver">Resolver</a>{{if .FullStatsEnabled}} · Full stats: <a href="/stats/page?scope=total{{.StatsFullSuffix}}#full-stats">Total</a> | <a href="/stats/page?scope=session{{.StatsFullSuffix}}#full-stats">Session</a>{{end}}</p>
   <div class="grid">
-    <div class="panel">
+    <div class="panel" id="resolver">
       <h2>Resolver</h2>
       <ul>
         <li><span class="key">Queries</span><span class="val">{{.TotalQueries}}</span></li>
@@ -190,12 +196,16 @@ var statsPageTemplate = template.Must(template.New("stats").Parse(`<!DOCTYPE htm
       </ul>
     </div>
     {{if .FullStatsEnabled}}
-    <div class="panel wide">
+    <div class="panel wide" id="full-stats">
       <h2>Full stats</h2>
+      <p class="muted"><a href="#resolver">Resolver</a> · View: {{if eq .StatsScope "total"}}<strong>Total</strong>{{else}}<a href="/stats/page?scope=total{{.StatsFullSuffix}}#full-stats">Total</a>{{end}} | {{if eq .StatsScope "session"}}<strong>Session</strong>{{else}}<a href="/stats/page?scope=session{{.StatsFullSuffix}}#full-stats">Session</a>{{end}} (since server start)</p>
       <ul>
         <li><span class="key">Requesters</span><span class="val">{{.RequestersCount}}</span></li>
         <li><span class="key">Domain:type entries</span><span class="val">{{.DomainsCount}}</span></li>
       </ul>
+      <p class="muted">
+        {{if le .StatsLimit 10}}<a href="/stats/page?scope={{.StatsScope}}&full=100">Show all</a> (up to 100){{else}}<a href="/stats/page?scope={{.StatsScope}}">Show top 10</a>{{end}}
+      </p>
       {{if .TopRequesters}}
       <p class="muted">Top {{len .TopRequesters}} requesters by total requests</p>
       <table>
@@ -206,18 +216,18 @@ var statsPageTemplate = template.Must(template.New("stats").Parse(`<!DOCTYPE htm
       </table>
       {{end}}
       {{if .TopDomains}}
-      <p class="muted">Top {{len .TopDomains}} domains (name:type) by request count</p>
+      <p class="muted">Top {{len .TopDomains}} domains by request count</p>
       <table>
-        <thead><tr><th>Domain (name:type)</th><th>Count</th><th>First seen</th><th>Last seen</th></tr></thead>
+        <thead><tr><th>Domain</th><th>Record type</th><th>Count</th><th>First seen</th><th>Last seen</th></tr></thead>
         <tbody>
-          {{range .TopDomains}}<tr><td>{{.Key}}</td><td>{{.Count}}</td><td>{{.FirstSeen}}</td><td>{{.LastSeen}}</td></tr>{{end}}
+          {{range .TopDomains}}<tr><td>{{.Domain}}</td><td>{{.RecordType}}</td><td>{{.Count}}</td><td>{{.FirstSeen}}</td><td>{{.LastSeen}}</td></tr>{{end}}
         </tbody>
       </table>
       {{end}}
     </div>
     {{end}}
   </div>
-  <p class="muted">Read-only dashboard · JSON: <a href="/stats">/stats</a> · Prometheus: <a href="/metrics">/metrics</a></p>
+  <p class="muted">Read-only dashboard</p>
 </body>
 </html>
 `))
@@ -299,10 +309,27 @@ func statsPageHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	scope := strings.TrimSpace(strings.ToLower(r.URL.Query().Get("scope")))
+	if scope != "session" && scope != "total" {
+		scope = "total"
+	}
+	data.StatsScope = scope
+	if limit > statsPageLimit {
+		data.StatsFullSuffix = "&full=" + strconv.Itoa(limit)
+	}
+
 	if tracker != nil {
 		data.FullStatsEnabled = true
-		reqs, _ := tracker.GetAllRequesters()
-		doms, _ := tracker.GetAllRequests()
+		data.StatsLimit = limit
+		var reqs map[string]*fullstats.RequesterStats
+		var doms map[string]*fullstats.RequestStats
+		if scope == "session" {
+			reqs, _ = tracker.GetSessionRequesters()
+			doms, _ = tracker.GetSessionRequests()
+		} else {
+			reqs, _ = tracker.GetAllRequesters()
+			doms, _ = tracker.GetAllRequests()
+		}
 		if reqs != nil {
 			data.RequestersCount = len(reqs)
 			data.TopRequesters = topRequestersForDashboard(reqs, limit)
@@ -354,31 +381,47 @@ func topRequestersForDashboard(all map[string]*fullstats.RequesterStats, limit i
 	return out
 }
 
+// splitDomainType splits a fullstats key "domain:type" into domain and record type.
+// It splits on the last ":" so that domain names containing ":" still parse correctly.
+func splitDomainType(key string) (domain, recordType string) {
+	if key == "" {
+		return "", ""
+	}
+	if i := strings.LastIndex(key, ":"); i >= 0 {
+		return key[:i], key[i+1:]
+	}
+	return key, ""
+}
+
 func topDomainsForDashboard(all map[string]*fullstats.RequestStats, limit int) []struct {
-	Key                 string
+	Domain              string
+	RecordType          string
 	Count               uint64
 	FirstSeen, LastSeen string
 } {
 	type row struct {
-		key         string
-		count       uint64
-		first, last time.Time
+		domain, rtype string
+		count         uint64
+		first, last   time.Time
 	}
 	var rows []row
 	for key, st := range all {
-		rows = append(rows, row{key: key, count: st.Count, first: st.FirstSeen, last: st.LastSeen})
+		domain, rtype := splitDomainType(key)
+		rows = append(rows, row{domain: domain, rtype: rtype, count: st.Count, first: st.FirstSeen, last: st.LastSeen})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].count > rows[j].count })
 	if len(rows) > limit {
 		rows = rows[:limit]
 	}
 	out := make([]struct {
-		Key                 string
+		Domain              string
+		RecordType          string
 		Count               uint64
 		FirstSeen, LastSeen string
 	}, len(rows))
 	for i, r := range rows {
-		out[i].Key = r.key
+		out[i].Domain = r.domain
+		out[i].RecordType = r.rtype
 		out[i].Count = r.count
 		out[i].FirstSeen = r.first.Format(time.RFC3339)
 		out[i].LastSeen = r.last.Format(time.RFC3339)
