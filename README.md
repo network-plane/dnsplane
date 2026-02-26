@@ -240,7 +240,7 @@ When the service runs, it will create default `dnsplane.json` and JSON data file
 
 [![OpenSSF Best Practices](https://bestpractices.coreinfrastructure.org/projects/8887/badge)](https://www.bestpractices.dev/projects/8887)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/network-plane/dnsplane/badge)](https://securityscorecards.dev/viewer/?uri=github.com/network-plane/dnsplane)
-[![OpenSSF Baseline](https://www.bestpractices.dev/projects/8887/baseline-3)](https://www.bestpractices.dev/projects/8887)
+[![OpenSSF Baseline](https://www.bestpractices.dev/projects/8887/baseline)](https://www.bestpractices.dev/projects/8887)
 
 ![Go CI](https://github.com/network-plane/dnsplane/actions/workflows/go-ci.yml/badge.svg?branch=master)
 ![govulncheck](https://github.com/network-plane/dnsplane/actions/workflows/govulncheck.yml/badge.svg?branch=master)
