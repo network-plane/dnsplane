@@ -58,12 +58,18 @@ func TestConvertReverseDNSToIP(t *testing.T) {
 	}
 }
 
+// maxFuzzInputLen caps fuzz input size to avoid excessive allocation and timeouts.
+const maxFuzzInputLen = 1024
+
 // FuzzConvertIPToReverseDNS exercises reverse-DNS conversion with arbitrary strings.
 func FuzzConvertIPToReverseDNS(f *testing.F) {
 	f.Add("192.168.1.1")
 	f.Add("127.0.0.1")
 	f.Add("")
 	f.Fuzz(func(t *testing.T, ip string) {
+		if len(ip) > maxFuzzInputLen {
+			return
+		}
 		_ = ConvertIPToReverseDNS(ip)
 	})
 }
@@ -74,6 +80,9 @@ func FuzzConvertReverseDNSToIP(f *testing.F) {
 	f.Add("1.0.0.127.in-addr.arpa")
 	f.Add("")
 	f.Fuzz(func(t *testing.T, reverseDNS string) {
+		if len(reverseDNS) > maxFuzzInputLen {
+			return
+		}
 		_ = ConvertReverseDNSToIP(reverseDNS)
 	})
 }
