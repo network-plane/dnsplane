@@ -17,4 +17,5 @@ This project uses the [Developer Certificate of Origin (DCO)](https://developerc
 By signing off, you certify that you have the right to submit the work under the project’s license (see [LICENSE](LICENSE)).
 
 - **Code style:** Follow the [Google Go Style Guide](https://google.github.io/styleguide/go/).
+- **Tests:** New code should include tests. Run `make test` and `make fuzz` (where applicable) before submitting.
 - **Before submitting:** Run `make test` and `make vet` (or `make lint`) and fix any issues.
