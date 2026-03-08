@@ -24,17 +24,17 @@
 
 No endpoints for dnsplane.json or any config.
 
-- [ ] **Records:** Add `PUT /dns/records` (or PATCH): update by name+type+value. Wire to dnsrecords + data.UpdateRecords.
-- [ ] **Records:** Add `DELETE /dns/records`: identify by name, type, value (query or body). Wire to dnsrecords remove + data.UpdateRecords.
-- [ ] **DNS servers:** Add `POST /dns/servers`: body address, port, active, local_resolver, adblocker, domain_whitelist. Validate via dnsservers; persist via data.SaveDNSServers.
-- [ ] **DNS servers:** Add `PUT /dns/servers/{address}`: update existing server.
-- [ ] **DNS servers:** Add `DELETE /dns/servers/{address}`.
-- [ ] **Adblock:** Add `GET /adblock/domains` (optional: `GET /adblock/sources`).
-- [ ] **Adblock:** Add `POST /adblock/domains`: body single domain or list.
-- [ ] **Adblock:** Add `DELETE /adblock/domains`: body or query domain/list.
-- [ ] **Adblock:** Add `POST /adblock/clear` or `DELETE /adblock/domains` for all.
-- [ ] **Cache:** Add `GET /cache` (read-only).
-- [ ] **Cache:** Add `POST /cache/clear` or `DELETE /cache`.
+- [x] **Records:** Add `PUT /dns/records` (or PATCH): update by name+type+value. Wire to dnsrecords + data.UpdateRecords.
+- [x] **Records:** Add `DELETE /dns/records`: identify by name, type, value (query or body). Wire to dnsrecords remove + data.UpdateRecords.
+- [x] **DNS servers:** Add `POST /dns/servers`: body address, port, active, local_resolver, adblocker, domain_whitelist. Validate via dnsservers; persist via data.SaveDNSServers.
+- [x] **DNS servers:** Add `PUT /dns/servers/{address}`: update existing server.
+- [x] **DNS servers:** Add `DELETE /dns/servers/{address}`.
+- [x] **Adblock:** Add `GET /adblock/domains` (optional: `GET /adblock/sources`).
+- [x] **Adblock:** Add `POST /adblock/domains`: body single domain or list.
+- [x] **Adblock:** Add `DELETE /adblock/domains`: body or query domain/list.
+- [x] **Adblock:** Add `POST /adblock/clear` or `DELETE /adblock/domains` for all.
+- [x] **Cache:** Add `GET /cache` (read-only).
+- [x] **Cache:** Add `POST /cache/clear` or `DELETE /cache`.
 
 ---
 

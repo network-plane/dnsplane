@@ -15,8 +15,11 @@ import (
 
 	"dnsplane/daemon"
 	"dnsplane/data"
+	"dnsplane/dnsrecordcache"
 	"dnsplane/dnsrecords"
+	"dnsplane/dnsservers"
 	"dnsplane/fullstats"
+	"net/url"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -159,7 +162,20 @@ func RegisterDNSRoutes(router chi.Router) {
 	router.Get("/ready", readyHandler)
 	router.Get("/dns/records", listRecordsHandler)
 	router.Post("/dns/records", addRecordHandler)
+	router.Put("/dns/records", updateRecordHandler)
+	router.Delete("/dns/records", deleteRecordHandler)
 	router.Get("/dns/servers", listServersHandler)
+	router.Post("/dns/servers", addServerHandler)
+	router.Put("/dns/servers/{address}", updateServerHandler)
+	router.Delete("/dns/servers/{address}", deleteServerHandler)
+	router.Get("/adblock/domains", listAdblockDomainsHandler)
+	router.Get("/adblock/sources", listAdblockSourcesHandler)
+	router.Post("/adblock/domains", addAdblockDomainsHandler)
+	router.Delete("/adblock/domains", deleteAdblockDomainsHandler)
+	router.Post("/adblock/clear", clearAdblockHandler)
+	router.Get("/cache", getCacheHandler)
+	router.Post("/cache/clear", clearCacheHandler)
+	router.Delete("/cache", clearCacheHandler)
 	router.Get("/stats", statsHandler)
 	router.Get("/metrics", metricsHandler)
 	router.Get("/stats/page", statsPageHandler)
@@ -396,4 +412,335 @@ func extractRecordMessages(msgs []dnsrecords.Message) []string {
 		res = append(res, msg.Text)
 	}
 	return res
+}
+
+func updateRecordHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Body == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid input"})
+		return
+	}
+	dnsData := data.GetInstance()
+	var request AddRecordRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid input"})
+		return
+	}
+	if strings.TrimSpace(request.Name) == "" || strings.TrimSpace(request.Type) == "" || strings.TrimSpace(request.Value) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name, type, and value are required"})
+		return
+	}
+	record := request.toDNSRecord()
+	records := dnsData.GetRecords()
+	updated, messages, err := dnsrecords.AddRecord(record, records, true)
+	if err != nil {
+		status := http.StatusBadRequest
+		if !errors.Is(err, dnsrecords.ErrInvalidArgs) {
+			status = http.StatusInternalServerError
+		}
+		writeJSON(w, status, map[string]any{"error": err.Error(), "messages": extractRecordMessages(messages)})
+		return
+	}
+	dnsData.UpdateRecords(updated)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "record updated", "messages": extractRecordMessages(messages)})
+}
+
+func deleteRecordHandler(w http.ResponseWriter, r *http.Request) {
+	var name, recordType, value string
+	if r.Method == http.MethodDelete && r.URL.RawQuery != "" {
+		q := r.URL.Query()
+		name = q.Get("name")
+		recordType = q.Get("type")
+		value = q.Get("value")
+	}
+	if (name == "" && recordType == "" && value == "") && r.Body != nil {
+		var body struct {
+			Name  string `json:"name"`
+			Type  string `json:"type"`
+			Value string `json:"value"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			if name == "" {
+				name = body.Name
+			}
+			if recordType == "" {
+				recordType = body.Type
+			}
+			if value == "" {
+				value = body.Value
+			}
+		}
+	}
+	name = strings.TrimSpace(name)
+	recordType = strings.TrimSpace(recordType)
+	value = strings.TrimSpace(value)
+	if name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
+		return
+	}
+	var args []string
+	if recordType != "" && value != "" {
+		args = []string{name, recordType, value}
+	} else if value != "" {
+		args = []string{name, value}
+	} else {
+		args = []string{name}
+	}
+	dnsData := data.GetInstance()
+	records := dnsData.GetRecords()
+	updated, messages, err := dnsrecords.Remove(args, records)
+	if err != nil {
+		status := http.StatusBadRequest
+		if !errors.Is(err, dnsrecords.ErrInvalidArgs) {
+			status = http.StatusInternalServerError
+		}
+		writeJSON(w, status, map[string]any{"error": err.Error(), "messages": extractRecordMessages(messages)})
+		return
+	}
+	dnsData.UpdateRecords(updated)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "record deleted", "messages": extractRecordMessages(messages)})
+}
+
+type addServerRequest struct {
+	Address         string   `json:"address"`
+	Port            string   `json:"port"`
+	Active          *bool    `json:"active,omitempty"`
+	LocalResolver   *bool    `json:"local_resolver,omitempty"`
+	AdBlocker       *bool    `json:"adblocker,omitempty"`
+	DomainWhitelist []string `json:"domain_whitelist,omitempty"`
+}
+
+func serverRequestToArgs(req addServerRequest) []string {
+	if req.Port == "" {
+		req.Port = "53"
+	}
+	args := []string{strings.TrimSpace(req.Address), strings.TrimSpace(req.Port)}
+	if req.Active != nil {
+		args = append(args, fmt.Sprintf("active:%v", *req.Active))
+	}
+	if req.LocalResolver != nil {
+		args = append(args, fmt.Sprintf("localresolver:%v", *req.LocalResolver))
+	}
+	if req.AdBlocker != nil {
+		args = append(args, fmt.Sprintf("adblocker:%v", *req.AdBlocker))
+	}
+	if len(req.DomainWhitelist) > 0 {
+		args = append(args, "whitelist:"+strings.Join(req.DomainWhitelist, ","))
+	}
+	return args
+}
+
+func addServerHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Body == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid input"})
+		return
+	}
+	var req addServerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid input"})
+		return
+	}
+	req.Address = strings.TrimSpace(req.Address)
+	if req.Address == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "address is required"})
+		return
+	}
+	dnsData := data.GetInstance()
+	servers := dnsData.GetServers()
+	args := serverRequestToArgs(req)
+	updated, messages, err := dnsservers.Add(args, servers)
+	if err != nil {
+		status := http.StatusBadRequest
+		if !errors.Is(err, dnsservers.ErrInvalidArgs) {
+			status = http.StatusInternalServerError
+		}
+		writeJSON(w, status, map[string]any{"error": err.Error(), "messages": extractServerMessages(messages)})
+		return
+	}
+	dnsData.UpdateServers(updated)
+	writeJSON(w, http.StatusCreated, map[string]any{"status": "server added", "messages": extractServerMessages(messages)})
+}
+
+func updateServerHandler(w http.ResponseWriter, r *http.Request) {
+	address := chi.URLParam(r, "address")
+	if u, err := url.PathUnescape(address); err == nil {
+		address = u
+	}
+	address = strings.TrimSpace(address)
+	if address == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "address is required"})
+		return
+	}
+	var req addServerRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	req.Address = address
+	if req.Port == "" {
+		req.Port = "53"
+	}
+	dnsData := data.GetInstance()
+	servers := dnsData.GetServers()
+	args := serverRequestToArgs(req)
+	updated, messages, err := dnsservers.Update(args, servers)
+	if err != nil {
+		status := http.StatusBadRequest
+		if !errors.Is(err, dnsservers.ErrInvalidArgs) {
+			status = http.StatusInternalServerError
+		}
+		writeJSON(w, status, map[string]any{"error": err.Error(), "messages": extractServerMessages(messages)})
+		return
+	}
+	dnsData.UpdateServers(updated)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "server updated", "messages": extractServerMessages(messages)})
+}
+
+func deleteServerHandler(w http.ResponseWriter, r *http.Request) {
+	address := chi.URLParam(r, "address")
+	if u, err := url.PathUnescape(address); err == nil {
+		address = u
+	}
+	address = strings.TrimSpace(address)
+	if address == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "address is required"})
+		return
+	}
+	dnsData := data.GetInstance()
+	servers := dnsData.GetServers()
+	updated, messages, err := dnsservers.Remove([]string{address}, servers)
+	if err != nil {
+		status := http.StatusBadRequest
+		if !errors.Is(err, dnsservers.ErrInvalidArgs) {
+			status = http.StatusInternalServerError
+		}
+		writeJSON(w, status, map[string]any{"error": err.Error(), "messages": extractServerMessages(messages)})
+		return
+	}
+	dnsData.UpdateServers(updated)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "server removed", "messages": extractServerMessages(messages)})
+}
+
+func extractServerMessages(msgs []dnsservers.Message) []string {
+	if len(msgs) == 0 {
+		return nil
+	}
+	res := make([]string, 0, len(msgs))
+	for _, msg := range msgs {
+		res = append(res, msg.Text)
+	}
+	return res
+}
+
+func listAdblockDomainsHandler(w http.ResponseWriter, r *http.Request) {
+	dnsData := data.GetInstance()
+	bl := dnsData.GetBlockList()
+	if bl == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"domains": []string{}})
+		return
+	}
+	domains := bl.GetAll()
+	writeJSON(w, http.StatusOK, map[string]any{"domains": domains})
+}
+
+func listAdblockSourcesHandler(w http.ResponseWriter, r *http.Request) {
+	dnsData := data.GetInstance()
+	sources := dnsData.GetAdblockSources()
+	if sources == nil {
+		sources = []data.AdblockSource{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sources": sources})
+}
+
+func addAdblockDomainsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Body == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid input"})
+		return
+	}
+	var body struct {
+		Domain  string   `json:"domain"`
+		Domains []string `json:"domains"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid input"})
+		return
+	}
+	dnsData := data.GetInstance()
+	bl := dnsData.GetBlockList()
+	if bl == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "adblock not available"})
+		return
+	}
+	if body.Domain != "" {
+		bl.AddDomain(strings.TrimSpace(body.Domain))
+	}
+	if len(body.Domains) > 0 {
+		for _, d := range body.Domains {
+			if strings.TrimSpace(d) != "" {
+				bl.AddDomain(strings.TrimSpace(d))
+			}
+		}
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"status": "domains added", "count": bl.Count()})
+}
+
+func deleteAdblockDomainsHandler(w http.ResponseWriter, r *http.Request) {
+	var domains []string
+	if r.URL.RawQuery != "" {
+		q := r.URL.Query()
+		if d := q.Get("domain"); d != "" {
+			domains = append(domains, d)
+		}
+		if d := q.Get("domains"); d != "" {
+			for _, s := range strings.Split(d, ",") {
+				domains = append(domains, strings.TrimSpace(s))
+			}
+		}
+	}
+	if r.Body != nil {
+		var body struct {
+			Domain  string   `json:"domain"`
+			Domains []string `json:"domains"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			if body.Domain != "" {
+				domains = append(domains, body.Domain)
+			}
+			domains = append(domains, body.Domains...)
+		}
+	}
+	dnsData := data.GetInstance()
+	bl := dnsData.GetBlockList()
+	if bl == nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "adblock not available"})
+		return
+	}
+	for _, d := range domains {
+		if strings.TrimSpace(d) != "" {
+			bl.RemoveDomain(strings.TrimSpace(d))
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "domains removed", "count": bl.Count()})
+}
+
+func clearAdblockHandler(w http.ResponseWriter, r *http.Request) {
+	dnsData := data.GetInstance()
+	bl := dnsData.GetBlockList()
+	if bl == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"status": "adblock cleared"})
+		return
+	}
+	bl.Clear()
+	dnsData.ClearAdblockSources()
+	writeJSON(w, http.StatusOK, map[string]any{"status": "adblock cleared"})
+}
+
+func getCacheHandler(w http.ResponseWriter, r *http.Request) {
+	dnsData := data.GetInstance()
+	cache := dnsData.GetCacheRecords()
+	writeJSON(w, http.StatusOK, map[string]any{"cache": cache})
+}
+
+func clearCacheHandler(w http.ResponseWriter, r *http.Request) {
+	dnsData := data.GetInstance()
+	dnsData.UpdateCacheRecords([]dnsrecordcache.CacheRecord{})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "cache cleared"})
 }
