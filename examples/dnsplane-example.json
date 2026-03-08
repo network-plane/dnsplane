@@ -1,0 +1,32 @@
+{
+  "fallback_server_ip": "1.1.1.1",
+  "fallback_server_port": "53",
+  "timeout": 2,
+  "port": "53",
+  "apiport": "8080",
+  "api": false,
+  "cache_records": true,
+  "full_stats": false,
+  "full_stats_dir": "./fullstats",
+  "server_socket": "/tmp/dnsplane.socket",
+  "server_tcp": "0.0.0.0:8053",
+  "file_locations": {
+    "dnsservers": "./dnsservers.json",
+    "cache": "./dnscache.json",
+    "records_source": {
+      "type": "file",
+      "location": "./dnsrecords.json"
+    }
+  },
+  "DNSRecordSettings": {
+    "auto_build_ptr_from_a": true,
+    "forward_ptr_queries": false
+  },
+  "log": {
+    "log_dir": "./log",
+    "log_severity": "info",
+    "log_rotation": "size",
+    "log_rotation_size_mb": 100,
+    "log_rotation_time_days": 7
+  }
+}
