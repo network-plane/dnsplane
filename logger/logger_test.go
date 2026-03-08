@@ -70,9 +70,10 @@ func TestClientLogPath(t *testing.T) {
 	}
 
 	// Path to file (non-existent): return path as-is (cleaned)
-	got = ClientLogPath("/some/path/client.log")
-	if got != "/some/path/client.log" {
-		t.Errorf("ClientLogPath(file) = %q, want /some/path/client.log", got)
+	filePath := filepath.Join("some", "path", "client.log")
+	got = ClientLogPath(filePath)
+	if got != filePath {
+		t.Errorf("ClientLogPath(file) = %q, want %q", got, filePath)
 	}
 
 	// Path to existing file: return path as-is
