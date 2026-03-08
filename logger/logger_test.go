@@ -34,7 +34,7 @@ func TestIsSeverityNone(t *testing.T) {
 func TestLevelFromSeverity(t *testing.T) {
 	tests := []struct {
 		severity string
-		want    slog.Level
+		want     slog.Level
 	}{
 		{"none", slog.LevelError + 1000},
 		{"debug", slog.LevelDebug},
@@ -80,7 +80,7 @@ func TestClientLogPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	_ = f.Close()
 	got = ClientLogPath(f.Name())
 	if got != f.Name() {
 		t.Errorf("ClientLogPath(existing file) = %q, want %q", got, f.Name())
@@ -92,9 +92,6 @@ func TestBuildLumberjack(t *testing.T) {
 
 	t.Run("rotation none", func(t *testing.T) {
 		lj := buildLumberjack(logPath, config.LogConfig{Rotation: config.LogRotationNone})
-		if lj == nil {
-			t.Fatal("buildLumberjack returned nil")
-		}
 		if lj.Filename != logPath {
 			t.Errorf("Filename = %q, want %q", lj.Filename, logPath)
 		}
