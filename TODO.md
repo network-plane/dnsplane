@@ -4,10 +4,10 @@
 
 ## 1. Testing and CI
 
-- [ ] Logger tests: unit tests for pure helpers in logger/logger.go (severity, path); mock file I/O.
-- [ ] Commandhandler tests: parsing/validation for TUI commands (server add/update, record add/remove); mirror dnsservers apply_test style.
-- [ ] Integration test: add one more resolver test (e.g. no local/cache/upstream → NXDOMAIN or empty).
-- [ ] CI: workflow .github/workflows/test.yml — `make test`, `make vet` on push/PR. Tests/vet only; no package build/sign in GitHub (use pbuild).
+- [x] Logger tests: unit tests for pure helpers in logger/logger.go (severity, path); mock file I/O.
+- [x] Commandhandler tests: parsing/validation for TUI commands (server add/update, record add/remove); mirror dnsservers apply_test style.
+- [x] Integration test: add one more resolver test (e.g. no local/cache/upstream → NXDOMAIN or empty).
+- [x] CI: workflow .github/workflows/test.yml — `make test`, `make vet` on push/PR. Tests/vet only; no package build/sign in GitHub (use pbuild).
 
 ---
 
