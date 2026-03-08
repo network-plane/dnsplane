@@ -2,96 +2,126 @@
 
 ---
 
-## 1. REST API (data only — no config endpoints)
+## 1. Testing and CI
 
-- **Records**
-  - Add `PUT /dns/records` (or PATCH): update by name+type+value. Wire to dnsrecords + data.UpdateRecords.
-  - Add `DELETE /dns/records`: identify by name, type, value (query or body). Wire to dnsrecords remove + data.UpdateRecords.
-- **DNS servers**
-  - Add `POST /dns/servers`: body address, port, active, local_resolver, adblocker, domain_whitelist. Validate via dnsservers; persist via data.SaveDNSServers.
-  - Add `PUT /dns/servers/{address}`: update existing server.
-  - Add `DELETE /dns/servers/{address}`.
-- **Adblock**
-  - Add `GET /adblock/domains` (optional: `GET /adblock/sources`).
-  - Add `POST /adblock/domains`: body single domain or list.
-  - Add `DELETE /adblock/domains`: body or query domain/list.
-  - Add `POST /adblock/clear` or `DELETE /adblock/domains` for all.
-- **Cache**
-  - Add `GET /cache` (read-only).
-  - Add `POST /cache/clear` or `DELETE /cache`.
+- [ ] Logger tests: unit tests for pure helpers in logger/logger.go (severity, path); mock file I/O.
+- [ ] Commandhandler tests: parsing/validation for TUI commands (server add/update, record add/remove); mirror dnsservers apply_test style.
+- [ ] Integration test: add one more resolver test (e.g. no local/cache/upstream → NXDOMAIN or empty).
+- [ ] CI: workflow .github/workflows/test.yml — `make test`, `make vet` on push/PR. Tests/vet only; no package build/sign in GitHub (use pbuild).
+
+---
+
+## 2. Documentation and dev
+
+- [ ] .gitignore: narrow `*.json` to specific names or use examples/ so example configs can be committed.
+- [ ] Add example config (e.g. examples/dnsplane.json or dnsplane-example.json); ensure not ignored.
+- [ ] CONTRIBUTING: add line that new code should include tests; `make test` and `make fuzz` expected.
+- [ ] README: mention AAAA and PTR in resolution; document DoT/DoH/DNSSEC when implemented.
+
+---
+
+## 3. REST API (data only — no config endpoints)
 
 No endpoints for dnsplane.json or any config.
 
----
-
-## 2. Security
-
-- Optional API auth: config flag (e.g. api_auth_token); middleware in api/server.go; exempt /health (and optionally /ready).
-- Optional rate limiting: per-IP (and optionally per-path) for API and/or DNS; configurable.
-- DoT/DoH upstream: support querying upstreams over TLS (DoT port 853) or HTTPS (DoH); config e.g. server type udp|dot|doh, DoH URL.
-
----
-
-## 3. DoT/DoH server and DNSSEC
-
-- DoT server: listen on configurable port (e.g. 853); config dot_enabled, dot_port, dot_cert_file, dot_key_file; new listener in main.go; reuse DNS handler.
-- DoH server: endpoint (e.g. /dns-query); config doh_enabled, doh_path; TLS required; call same resolver as UDP/TCP/DoT.
-- DNSSEC validation: validate upstream responses; set AD bit when valid; config dnssec_validate; optional strict SERVFAIL.
-- DNSSEC signing (optional): sign local zone (dnsrecords.json); key generation, sign on-the-fly or pre-signed.
+- [ ] **Records:** Add `PUT /dns/records` (or PATCH): update by name+type+value. Wire to dnsrecords + data.UpdateRecords.
+- [ ] **Records:** Add `DELETE /dns/records`: identify by name, type, value (query or body). Wire to dnsrecords remove + data.UpdateRecords.
+- [ ] **DNS servers:** Add `POST /dns/servers`: body address, port, active, local_resolver, adblocker, domain_whitelist. Validate via dnsservers; persist via data.SaveDNSServers.
+- [ ] **DNS servers:** Add `PUT /dns/servers/{address}`: update existing server.
+- [ ] **DNS servers:** Add `DELETE /dns/servers/{address}`.
+- [ ] **Adblock:** Add `GET /adblock/domains` (optional: `GET /adblock/sources`).
+- [ ] **Adblock:** Add `POST /adblock/domains`: body single domain or list.
+- [ ] **Adblock:** Add `DELETE /adblock/domains`: body or query domain/list.
+- [ ] **Adblock:** Add `POST /adblock/clear` or `DELETE /adblock/domains` for all.
+- [ ] **Cache:** Add `GET /cache` (read-only).
+- [ ] **Cache:** Add `POST /cache/clear` or `DELETE /cache`.
 
 ---
 
-## 4. Testing and CI
+## 4. DNS server health checks (upstream)
 
-- Logger tests: unit tests for pure helpers in logger/logger.go (severity, path); mock file I/O.
-- Commandhandler tests: parsing/validation for TUI commands (server add/update, record add/remove); mirror dnsservers apply_test style.
-- Integration test: add one more resolver test (e.g. no local/cache/upstream → NXDOMAIN or empty).
-- CI: workflow .github/workflows/test.yml — `make test`, `make vet` on push/PR. Tests/vet only; no package build/sign in GitHub (use pbuild).
+- [ ] Config: enable/disable (e.g. `upstream_health_check_enabled`), consecutive failures before marking down (e.g. `upstream_health_check_failures`), check interval (e.g. `upstream_health_check_interval`).
+- [ ] Optional proactive health checks: periodically test each DNS server (send test query, check reply).
+- [ ] When a server is unreachable: put on notice, notify user (log and/or TUI/API), disable for forwarding until available again; re-check on interval and re-enable when it responds.
 
 ---
 
 ## 5. Observability
 
-- /metrics: add histograms/summaries for DNS latency; optional label by query type.
-- Structured logging: add fields (query name, type, upstream, duration) in DNS layer.
-- Expose build/version in /stats and optionally /ready or /version (Go version, OS, arch).
+- [ ] /metrics: add histograms/summaries for DNS latency; optional label by query type.
+- [ ] Structured logging: add fields (query name, type, upstream, duration) in DNS layer.
+- [ ] Expose build/version in /stats and optionally /ready or /version (Go version, OS, arch).
 
 ---
 
-## 6. Documentation and dev
+## 6. Security
 
-- .gitignore: narrow `*.json` to specific names or use examples/ so example configs can be committed.
-- Add example config (e.g. examples/dnsplane.json or dnsplane-example.json); ensure not ignored.
-- CONTRIBUTING: add line that new code should include tests; `make test` and `make fuzz` expected.
-
----
-
-## 7. Package building (RPM, DEB)
-
-- Add spec file (e.g. packaging/dnsplane.spec): build binary, install to /usr/bin or /usr/local/dnsplane, install systemd unit, optional conffiles and dnsplane user. Version/Release from tag or VERSION file.
-- Add debian/: control, rules, changelog, compat, optional dnsplane.install; rules builds binary, installs binary and systemd unit.
-- Build and sign with **pbuild** only; do not use GitHub Actions or cloud CI for building/signing (private keys must not be in GitHub). Document in README or docs/packaging.md.
-- Optional: APK (Alpine), Homebrew formula (macOS), Windows MSI/zip.
+- [ ] Optional API auth: config flag (e.g. api_auth_token); middleware in api/server.go; exempt /health (and optionally /ready).
+- [ ] Optional API TLS: HTTPS for REST API (cert/key paths or ACME); required for internet-exposed API.
+- [ ] Optional rate limiting: per-IP (and optionally per-path) for API and/or DNS; configurable.
+- [ ] DoT/DoH upstream: support querying upstreams over TLS (DoT port 853) or HTTPS (DoH); config e.g. server type udp|dot|doh, DoH URL.
+- [ ] DNS over TCP: add TCP listener on port 53 (RFC 7766); reuse same handler as UDP for large/truncated responses.
+- [ ] Amplification mitigation: cap response size vs request and/or require EDNS; avoid replying with much larger payloads to small requests.
+- [ ] Configurable bind address: allow binding DNS (and optionally API) to a specific IP (e.g. config dns_bind, api_bind) instead of 0.0.0.0.
 
 ---
 
-## 8. Later
+## 7. DoT/DoH server and DNSSEC
 
-- Per-server fallback: optional second address when whitelist server fails (resolver + dnsservers).
-- Record PATCH: use identifier (e.g. name+type+value) for update/delete to avoid overwrites.
+- [ ] DoT server: listen on configurable port (e.g. 853); config dot_enabled, dot_port, dot_cert_file, dot_key_file; new listener in main.go; reuse DNS handler.
+- [ ] DoH server: endpoint (e.g. /dns-query); config doh_enabled, doh_path; TLS required; call same resolver as UDP/TCP/DoT.
+- [ ] DNSSEC validation: validate upstream responses; set AD bit when valid; config dnssec_validate; optional strict SERVFAIL.
+- [ ] DNSSEC signing (optional): sign local zone (dnsrecords.json); key generation, sign on-the-fly or pre-signed.
+
+---
+
+## 8. Package building (RPM, DEB)
+
+- [ ] Add spec file (e.g. packaging/dnsplane.spec): build binary, install to /usr/bin or /usr/local/dnsplane, install systemd unit, optional conffiles and dnsplane user. Version/Release from tag or VERSION file.
+- [ ] Add debian/: control, rules, changelog, compat, optional dnsplane.install; rules builds binary, installs binary and systemd unit.
+- [ ] Document in README or docs/packaging.md: build and sign with **pbuild** only; no GitHub Actions/cloud CI for building/signing (private keys must not be in GitHub).
+- [ ] Optional: APK (Alpine), Homebrew formula (macOS), Windows MSI/zip.
 
 ---
 
 ## 9. Other
 
-- Upstream health: expose last success/failure per server in API (e.g. /dns/servers or /dns/upstreams); use LastUsed/LastSuccess from DNSServer; optional in stats dashboard.
-- GET /dns/records: optional query params ?name=, ?type= for filtering; mirror dnsrecords.List.
-- README: mention AAAA and PTR in resolution; document DoT/DoH/DNSSEC when implemented.
+- [ ] Upstream health in API: expose last success/failure per server (e.g. /dns/servers or /dns/upstreams); use LastUsed/LastSuccess from DNSServer; optional in stats dashboard.
+- [ ] GET /dns/records: optional query params ?name=, ?type= for filtering; mirror dnsrecords.List.
 
 ---
 
-## 10. DNS server health checks
+## 10. Later (deferred)
 
-- Optional proactive health checks: periodically test each DNS server (e.g. send a test query and check reply).
-- Config: enable/disable (e.g. `upstream_health_check_enabled`), number of consecutive failures before marking server down (e.g. `upstream_health_check_failures`), check interval (e.g. `upstream_health_check_interval`).
-- When a server is unreachable: put it on notice, notify the user (log and/or TUI/API), and disable it for forwarding until it is available again; re-check on the same interval and re-enable when it responds.
+- [ ] Per-server fallback: optional second address when whitelist server fails (resolver + dnsservers).
+- [ ] Record PATCH: use identifier (e.g. name+type+value) for update/delete to avoid overwrites.
+
+---
+
+## 11. Clustered DNS (multi-node sync)
+
+Goal: multiple dnsplane instances that stay in sync for records (and optionally other data) over a custom protocol.
+
+- [ ] Define data to sync: records (dnsrecords) as primary payload; optionally adblock and upstream list; cache per-node, not synced.
+- [ ] Custom sync protocol: TCP (optionally TLS), configurable listen port and peer list; message types: full dump, delta (add/update/delete since sequence N), heartbeat.
+- [ ] Sequence numbers or version vector per node; authentication: shared secret (cluster_auth_token) or mTLS; wire format: length-prefixed, schema for record + metadata (seq, timestamp).
+- [ ] Topology: primary–replica, or multi-primary with conflict resolution, or single writer with leader election (e.g. raft); configurable.
+- [ ] Discovery: config list cluster_peers; optional DNS SRV for dynamic discovery.
+- [ ] Implementation: sync listener and sync client; apply incoming sync to local store (data.UpdateRecords etc.) and persist; trigger reload. Config: cluster_enabled, cluster_peers, cluster_listen_addr, cluster_auth_token, sync_interval or push-on-change.
+- [ ] Docs: deployment (e.g. 2–3 nodes behind load balancer); only one writer in primary–replica to avoid split-brain.
+
+---
+
+## 12. ISPConfig and cPanel compatibility
+
+Goal: replace BIND/PowerDNS behind ISPConfig or cPanel; panels keep managing zones (DB → zone files → reload), dnsplane serves from those files.
+
+- [ ] BIND zone file parser: parse $ORIGIN, $TTL, SOA, NS, A, AAAA, CNAME, MX, TXT, PTR and other common RR types; relative names and multi-line records; output loadable into dnsplane record store.
+- [ ] Multi-zone / zone-aware loading: merge all zones into one store with FQDN keys, or per-zone store with longest-match lookup; correct NS/SOA per zone.
+- [ ] Zone file source config: records_source type "bind_zones" with location (directory + optional named.conf for zone→file mapping); on startup and reload, scan, parse, load into resolver.
+- [ ] Reload trigger: file watch (inotify/fsnotify) on zone directory; and/or API (e.g. POST /reload) for panel script to call instead of rndc; optionally rndc-compatible daemon (port 953) so rndc reload works unchanged.
+- [ ] Zone transfer: if secondaries pull from this server, add AXFR (and optionally IXFR) so dnsplane can act as primary.
+- [ ] ISPConfig docs: path where ISPConfig writes zones and named.conf.local (e.g. /etc/bind); records_source + file watch or reload-API script.
+- [ ] cPanel docs: zone path (e.g. /var/named/), reload flow (rndc or script); point dnsplane at path + watch or wrapper script; note WHM Nameserver selection and PowerDNS variant.
+- [ ] Optional: RFC 2136 dynamic updates (nsupdate) for panels/users that use them.
+- [ ] README: add "Using dnsplane with ISPConfig" and "Using dnsplane with cPanel" (config example, reload method, wrapper scripts).
