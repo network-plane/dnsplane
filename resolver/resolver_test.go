@@ -182,3 +182,47 @@ func TestResolver_LocalRecordReturnsA(t *testing.T) {
 		t.Errorf("A record value = %s, want 1.2.3.4", a.A.String())
 	}
 }
+
+// emptyStore has no local records, no cache, no upstream servers, no fallback.
+// Used to test resolution when nothing can answer (expect empty or NXDOMAIN-like response).
+type emptyStore struct {
+	config config.Config
+}
+
+func (s *emptyStore) GetResolverSettings() data.DNSResolverSettings     { return s.config }
+func (s *emptyStore) GetRecords() []dnsrecords.DNSRecord                { return nil }
+func (s *emptyStore) GetCacheRecords() []dnsrecordcache.CacheRecord     { return nil }
+func (s *emptyStore) UpdateCacheRecords(_ []dnsrecordcache.CacheRecord) {}
+func (s *emptyStore) GetServers() []dnsservers.DNSServer                { return nil }
+func (s *emptyStore) GetBlockList() *adblock.BlockList                  { return adblock.NewBlockList() }
+func (s *emptyStore) IncrementCacheHits()                               {}
+func (s *emptyStore) IncrementQueriesAnswered()                         {}
+func (s *emptyStore) IncrementTotalBlocks()                             {}
+
+// TestResolver_NoLocalCacheUpstream_ReturnsEmpty verifies that when the store has no local
+// records, no cache, and no upstream servers (and no fallback), the resolver returns
+// an empty response (no answer). Integration test for no local/cache/upstream path.
+func TestResolver_NoLocalCacheUpstream_ReturnsEmpty(t *testing.T) {
+	store := &emptyStore{config: config.Config{}}
+	rec := &recordingUpstream{}
+	r := New(Config{
+		Store:           store,
+		Upstream:        rec,
+		UpstreamTimeout: 2 * time.Second,
+	})
+	ctx := context.Background()
+
+	question := dns.Question{Name: "unknown.example.com.", Qtype: dns.TypeA, Qclass: dns.ClassINET}
+	response := &dns.Msg{}
+	response.SetQuestion(question.Name, question.Qtype)
+	r.HandleQuestion(ctx, question, response)
+
+	if len(response.Answer) != 0 {
+		t.Errorf("expected no answers when no local/cache/upstream, got %d", len(response.Answer))
+	}
+	// Upstream should never be called (no servers configured)
+	got := rec.recorded()
+	if len(got) != 0 {
+		t.Errorf("expected no upstream queries (no servers), got %d", len(got))
+	}
+}
