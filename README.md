@@ -5,7 +5,7 @@ A non-standard DNS server with multiple management interfaces (TUI, API). It que
 
 ## Resolution behavior
 
-- **Parallel lookups:** For each A-record query, dnsplane runs **at the same time**: local records (dnsrecords.json), cache (dnscache.json), and every configured upstream—plus the fallback server when it is different from the upstreams. The reply is chosen by priority; there is no second round of queries.
+- **Parallel lookups:** For each A or AAAA query, dnsplane runs **at the same time**: local records (dnsrecords.json), cache (dnscache.json), and every configured upstream—plus the fallback server when it is different from the upstreams. The reply is chosen by priority; there is no second round of queries. **AAAA** is resolved the same way as A (local, then cache, then upstreams). **PTR** (reverse DNS) is supported: use the TUI `dns` command or API to query by IP; with `auto_build_ptr_from_a` the server can derive PTR from local A records.
 - **Priority:** (1) Local records, (2) cache, (3) any upstream that returned an **authoritative** answer, (4) the **first** successful answer from any upstream. If fallback is the same as an upstream, it is not queried twice; that server’s reply is used like any other upstream.
 - **Recursive resolvers:** Answers from resolvers like 1.1.1.1 (which are not authoritative for the domain) are accepted as “first success”; the server no longer waits for an authoritative reply and then re-querying fallback, so latency stays low (e.g. ~5–7 ms when the upstream is fast).
 - **Reply path:** The DNS reply is sent as soon as it is ready. Logging, stats, and cache persistence run asynchronously so they do not block the response.
@@ -38,7 +38,7 @@ flowchart TD
 - **Server selection:** `GetServersForQuery` picks upstreams for this name: servers with a matching domain whitelist, or (if none match) only global servers. Whitelisted domains are resolved only via their servers.
 - **Upstreams + fallback:** Selected servers are queried in parallel; priority is authoritative answer, then first success. Fallback is used only when the selected list is “global” and no authoritative answer was returned.
 
-
+**Planned:** DoT (DNS over TLS), DoH (DNS over HTTPS), and DNSSEC validation will be documented here once implemented (see [TODO](TODO.md)).
 
 ## Usage/Examples
 

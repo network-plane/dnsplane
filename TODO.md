@@ -13,10 +13,10 @@
 
 ## 2. Documentation and dev
 
-- [ ] .gitignore: narrow `*.json` to specific names or use examples/ so example configs can be committed.
-- [ ] Add example config (e.g. examples/dnsplane.json or dnsplane-example.json); ensure not ignored.
-- [ ] CONTRIBUTING: add line that new code should include tests; `make test` and `make fuzz` expected.
-- [ ] README: mention AAAA and PTR in resolution; document DoT/DoH/DNSSEC when implemented.
+- [x] .gitignore: narrow `*.json` to specific names or use examples/ so example configs can be committed.
+- [x] Add example config (e.g. examples/dnsplane.json or dnsplane-example.json); ensure not ignored.
+- [x] CONTRIBUTING: add line that new code should include tests; `make test` and `make fuzz` expected.
+- [x] README: mention AAAA and PTR in resolution; document DoT/DoH/DNSSEC when implemented.
 
 ---
 
