@@ -4,6 +4,7 @@ package resolver
 
 import (
 	"context"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -31,12 +32,21 @@ func (u *recordingUpstream) Query(ctx context.Context, question dns.Question, se
 	msg := &dns.Msg{}
 	msg.SetReply(&dns.Msg{Question: []dns.Question{question}})
 	msg.Rcode = dns.RcodeSuccess
-	msg.Answer = []dns.RR{
-		&dns.A{
-			Hdr: dns.RR_Header{Name: question.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
-			A:   []byte{1, 2, 3, 4},
-		},
+	hdr := func() dns.RR_Header {
+		return dns.RR_Header{Name: question.Name, Rrtype: question.Qtype, Class: dns.ClassINET, Ttl: 60}
 	}
+	var ans dns.RR
+	switch question.Qtype {
+	case dns.TypeAAAA:
+		ans = &dns.AAAA{Hdr: hdr(), AAAA: net.IPv6loopback}
+	case dns.TypeMX:
+		ans = &dns.MX{Hdr: hdr(), Preference: 10, Mx: "mail.example.com."}
+	case dns.TypePTR:
+		ans = &dns.PTR{Hdr: hdr(), Ptr: "resolved.example.com."}
+	default:
+		ans = &dns.A{Hdr: hdr(), A: []byte{1, 2, 3, 4}}
+	}
+	msg.Answer = []dns.RR{ans}
 	return msg, nil
 }
 
@@ -75,6 +85,8 @@ func (s *whitelistIntegrationStore) GetBlockList() *adblock.BlockList {
 func (s *whitelistIntegrationStore) IncrementCacheHits()       {}
 func (s *whitelistIntegrationStore) IncrementQueriesAnswered() {}
 func (s *whitelistIntegrationStore) IncrementTotalBlocks()     {}
+func (s *whitelistIntegrationStore) HasAnyLocalRecords() bool  { return len(s.GetRecords()) > 0 }
+func (s *whitelistIntegrationStore) HasAnyCachedRecords() bool { return len(s.GetCacheRecords()) > 0 }
 
 // TestWhitelistIntegration verifies that for a query matching a whitelist server only that server
 // is used, and for a query that does not match only the global server is used (integration: resolver + GetServersForQuery).
@@ -154,6 +166,8 @@ func (s *localRecordStore) GetBlockList() *adblock.BlockList                  { 
 func (s *localRecordStore) IncrementCacheHits()                               {}
 func (s *localRecordStore) IncrementQueriesAnswered()                         {}
 func (s *localRecordStore) IncrementTotalBlocks()                             {}
+func (s *localRecordStore) HasAnyLocalRecords() bool                          { return len(s.records) > 0 }
+func (s *localRecordStore) HasAnyCachedRecords() bool                         { return false }
 
 // TestResolver_LocalRecordReturnsA is a minimal integration test: resolver with in-memory store
 // holding one A record; one A query returns that record (local wins, no upstream).
@@ -208,6 +222,8 @@ func (s *emptyStore) GetBlockList() *adblock.BlockList                  { return
 func (s *emptyStore) IncrementCacheHits()                               {}
 func (s *emptyStore) IncrementQueriesAnswered()                         {}
 func (s *emptyStore) IncrementTotalBlocks()                             {}
+func (s *emptyStore) HasAnyLocalRecords() bool                          { return false }
+func (s *emptyStore) HasAnyCachedRecords() bool                         { return false }
 
 // TestResolver_NoLocalCacheUpstream_ReturnsEmpty verifies that when the store has no local
 // records, no cache, and no upstream servers (and no fallback), the resolver returns
@@ -234,5 +250,86 @@ func TestResolver_NoLocalCacheUpstream_ReturnsEmpty(t *testing.T) {
 	got := rec.recorded()
 	if len(got) != 0 {
 		t.Errorf("expected no upstream queries (no servers), got %d", len(got))
+	}
+}
+
+// upstreamOnlyStore: no local records/cache, one global upstream (for fast-path QTYPE tests).
+type upstreamOnlyStore struct {
+	servers []dnsservers.DNSServer
+	config  config.Config
+}
+
+func (s *upstreamOnlyStore) GetResolverSettings() data.DNSResolverSettings     { return s.config }
+func (s *upstreamOnlyStore) GetRecords() []dnsrecords.DNSRecord                { return nil }
+func (s *upstreamOnlyStore) GetCacheRecords() []dnsrecordcache.CacheRecord     { return nil }
+func (s *upstreamOnlyStore) LookupLocalRRs(string, string, bool) []dns.RR      { return nil }
+func (s *upstreamOnlyStore) LookupCacheRR(string, string) *dns.RR              { return nil }
+func (s *upstreamOnlyStore) UpdateCacheRecords(_ []dnsrecordcache.CacheRecord) {}
+func (s *upstreamOnlyStore) GetServers() []dnsservers.DNSServer                { return s.servers }
+func (s *upstreamOnlyStore) GetBlockList() *adblock.BlockList                  { return adblock.NewBlockList() }
+func (s *upstreamOnlyStore) IncrementCacheHits()                               {}
+func (s *upstreamOnlyStore) IncrementQueriesAnswered()                         {}
+func (s *upstreamOnlyStore) IncrementTotalBlocks()                             {}
+func (s *upstreamOnlyStore) HasAnyLocalRecords() bool                          { return false }
+func (s *upstreamOnlyStore) HasAnyCachedRecords() bool                         { return false }
+
+func TestResolver_AAAA_upstreamFastPath(t *testing.T) {
+	srv := dnsservers.DNSServer{Address: "8.8.8.8", Port: "53", Active: true}
+	store := &upstreamOnlyStore{servers: []dnsservers.DNSServer{srv}, config: config.Config{}}
+	rec := &recordingUpstream{}
+	r := New(Config{Store: store, Upstream: rec, UpstreamTimeout: 2 * time.Second})
+	q := dns.Question{Name: "wide.example.com.", Qtype: dns.TypeAAAA, Qclass: dns.ClassINET}
+	msg := &dns.Msg{}
+	msg.SetQuestion(q.Name, q.Qtype)
+	r.HandleQuestion(context.Background(), q, msg)
+	if len(msg.Answer) != 1 {
+		t.Fatalf("want 1 answer, got %d", len(msg.Answer))
+	}
+	if _, ok := msg.Answer[0].(*dns.AAAA); !ok {
+		t.Fatalf("want AAAA, got %T", msg.Answer[0])
+	}
+	if len(rec.recorded()) != 1 || rec.recorded()[0].server != "8.8.8.8:53" {
+		t.Fatalf("upstream: %+v", rec.recorded())
+	}
+}
+
+func TestResolver_MX_upstreamFastPath(t *testing.T) {
+	srv := dnsservers.DNSServer{Address: "1.1.1.1", Port: "53", Active: true}
+	store := &upstreamOnlyStore{servers: []dnsservers.DNSServer{srv}, config: config.Config{}}
+	rec := &recordingUpstream{}
+	r := New(Config{Store: store, Upstream: rec, UpstreamTimeout: 2 * time.Second})
+	q := dns.Question{Name: "mail.example.com.", Qtype: dns.TypeMX, Qclass: dns.ClassINET}
+	msg := &dns.Msg{}
+	msg.SetQuestion(q.Name, q.Qtype)
+	r.HandleQuestion(context.Background(), q, msg)
+	if len(msg.Answer) != 1 {
+		t.Fatalf("want 1 answer, got %d", len(msg.Answer))
+	}
+	if _, ok := msg.Answer[0].(*dns.MX); !ok {
+		t.Fatalf("want MX, got %T", msg.Answer[0])
+	}
+}
+
+func TestResolver_PTR_miss_usesUpstreamFastPath(t *testing.T) {
+	srv := dnsservers.DNSServer{Address: "9.9.9.9", Port: "53", Active: true}
+	store := &upstreamOnlyStore{servers: []dnsservers.DNSServer{srv}, config: config.Config{}}
+	rec := &recordingUpstream{}
+	r := New(Config{Store: store, Upstream: rec, UpstreamTimeout: 2 * time.Second})
+	q := dns.Question{Name: "4.3.2.1.in-addr.arpa.", Qtype: dns.TypePTR, Qclass: dns.ClassINET}
+	msg := &dns.Msg{}
+	msg.SetQuestion(q.Name, q.Qtype)
+	r.HandleQuestion(context.Background(), q, msg)
+	if len(msg.Answer) != 1 {
+		t.Fatalf("want 1 PTR answer, got %d", len(msg.Answer))
+	}
+	ptr, ok := msg.Answer[0].(*dns.PTR)
+	if !ok {
+		t.Fatalf("want PTR, got %T", msg.Answer[0])
+	}
+	if ptr.Ptr != "resolved.example.com." {
+		t.Errorf("PTR target = %q", ptr.Ptr)
+	}
+	if len(rec.recorded()) < 1 {
+		t.Fatal("expected upstream query for PTR miss")
 	}
 }
