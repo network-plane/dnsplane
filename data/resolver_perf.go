@@ -26,11 +26,11 @@ var (
 	perfOutcomeUpstream atomic.Uint64
 	perfOutcomeNone     atomic.Uint64
 
-	perfSumTotalNs       atomic.Uint64
-	perfSumPrepNs      atomic.Uint64
+	perfSumTotalNs        atomic.Uint64
+	perfSumPrepNs         atomic.Uint64
 	perfSumUpstreamWaitNs atomic.Uint64 // max(upstream) - prep when outcome upstream; else 0
-	perfSumMaxUpstreamNs atomic.Uint64 // slowest upstream completion (since t0), upstream path only
-	perfMaxTotalNs       atomic.Uint64
+	perfSumMaxUpstreamNs  atomic.Uint64 // slowest upstream completion (since t0), upstream path only
+	perfMaxTotalNs        atomic.Uint64
 
 	// Histogram of total resolve time (nanoseconds), 8 buckets (ms ranges).
 	perfHistTotal [8]atomic.Uint64
@@ -38,7 +38,7 @@ var (
 	perfHistUpstream [8]atomic.Uint64
 
 	perfUpstreamCountSum atomic.Uint64 // sum of len(serversToQuery) per upstream outcome
-	perfFirstRecord      atomic.Int64   // unix nano of first A-resolve (for uptime of perf window)
+	perfFirstRecord      atomic.Int64  // unix nano of first A-resolve (for uptime of perf window)
 )
 
 func perfBucketIndex(totalNs uint64) int {
@@ -136,18 +136,18 @@ type ResolverPerfReport struct {
 	SinceFirst  string `json:"since_first_resolve,omitempty"`
 
 	AResolve struct {
-		Total            uint64  `json:"total"`
-		OutcomeLocal     uint64  `json:"outcome_local"`
-		OutcomeCache     uint64  `json:"outcome_cache"`
-		OutcomeUpstream  uint64  `json:"outcome_upstream"`
-		OutcomeNone      uint64  `json:"outcome_none"`
-		AvgTotalMs       float64 `json:"avg_total_ms"`
-		AvgPrepMs        float64 `json:"avg_prep_ms"`
-		MaxTotalMs       float64 `json:"max_total_ms"`
-		AvgUpstreamWaitMs float64 `json:"avg_upstream_wait_ms,omitempty"` // upstream outcomes only
-		AvgMaxUpstreamMs float64 `json:"avg_max_upstream_ms,omitempty"`
+		Total              uint64  `json:"total"`
+		OutcomeLocal       uint64  `json:"outcome_local"`
+		OutcomeCache       uint64  `json:"outcome_cache"`
+		OutcomeUpstream    uint64  `json:"outcome_upstream"`
+		OutcomeNone        uint64  `json:"outcome_none"`
+		AvgTotalMs         float64 `json:"avg_total_ms"`
+		AvgPrepMs          float64 `json:"avg_prep_ms"`
+		MaxTotalMs         float64 `json:"max_total_ms"`
+		AvgUpstreamWaitMs  float64 `json:"avg_upstream_wait_ms,omitempty"` // upstream outcomes only
+		AvgMaxUpstreamMs   float64 `json:"avg_max_upstream_ms,omitempty"`
 		AvgUpstreamServers float64 `json:"avg_upstream_servers,omitempty"`
-		HistTotalMs      []struct {
+		HistTotalMs        []struct {
 			Label string `json:"label"`
 			Count uint64 `json:"count"`
 		} `json:"histogram_total_ms"`
