@@ -45,20 +45,20 @@ type AdblockSource struct {
 
 // DNSResolverData holds all the data for the DNS resolver
 type DNSResolverData struct {
-	Settings         DNSResolverSettings
-	Stats            DNSStats
-	DNSServers       []dnsservers.DNSServer
-	DNSRecords       []dnsrecords.DNSRecord
-	CacheRecords     []dnsrecordcache.CacheRecord
-	cacheRecordIdx   map[string][]int // normalized name|type -> CacheRecords indices
-	dnsRecordIdx     map[string][]int // normalized name|type -> DNSRecords indices (non-PTR)
-	BlockList        *adblock.BlockList
-	AdblockSources   []AdblockSource // loaded files/URLs and count per source (order preserved)
-	mu               sync.RWMutex
-	persistCh        chan struct{}
-	persistWg        sync.WaitGroup
-	persistCloseOnce sync.Once
-	upstreamHealth   *UpstreamHealthTracker
+	Settings             DNSResolverSettings
+	Stats                DNSStats
+	DNSServers           []dnsservers.DNSServer
+	DNSRecords           []dnsrecords.DNSRecord
+	CacheRecords         []dnsrecordcache.CacheRecord
+	cacheRecordIdx       map[string][]int // normalized name|type -> CacheRecords indices
+	dnsRecordIdx         map[string][]int // normalized name|type -> DNSRecords indices (non-PTR)
+	BlockList            *adblock.BlockList
+	AdblockSources       []AdblockSource // loaded files/URLs and count per source (order preserved)
+	mu                   sync.RWMutex
+	persistCh            chan struct{}
+	persistWg            sync.WaitGroup
+	persistCloseOnce     sync.Once
+	upstreamHealth       *UpstreamHealthTracker
 	statsCacheHits       atomic.Int64
 	statsQueriesAnswered atomic.Int64
 }

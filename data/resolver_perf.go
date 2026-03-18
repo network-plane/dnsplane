@@ -37,19 +37,19 @@ var (
 	// Histogram for upstream-path resolves only.
 	perfHistUpstream [8]atomic.Uint64
 	// Per-outcome histograms (same buckets) — use these to see tails on cache vs upstream.
-	perfHistLocal  [8]atomic.Uint64
-	perfHistCache  [8]atomic.Uint64
-	perfHistNone   [8]atomic.Uint64
+	perfHistLocal [8]atomic.Uint64
+	perfHistCache [8]atomic.Uint64
+	perfHistNone  [8]atomic.Uint64
 
 	perfUpstreamCountSum atomic.Uint64 // sum of len(serversToQuery) per upstream outcome
 	perfFirstRecord      atomic.Int64  // unix nano of first resolve (for uptime of perf window)
 
-	perfMaxTotalLocalNs  atomic.Uint64
-	perfMaxTotalCacheNs  atomic.Uint64
-	perfMaxTotalNoneNs   atomic.Uint64
-	perfSumTotalLocalNs  atomic.Uint64
-	perfSumTotalCacheNs  atomic.Uint64
-	perfSumTotalNoneNs   atomic.Uint64
+	perfMaxTotalLocalNs atomic.Uint64
+	perfMaxTotalCacheNs atomic.Uint64
+	perfMaxTotalNoneNs  atomic.Uint64
+	perfSumTotalLocalNs atomic.Uint64
+	perfSumTotalCacheNs atomic.Uint64
+	perfSumTotalNoneNs  atomic.Uint64
 
 	perfQT sync.Map // qtype string -> *perfQTStats
 )
