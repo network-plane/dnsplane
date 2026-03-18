@@ -60,9 +60,13 @@ type whitelistIntegrationStore struct {
 	config  config.Config
 }
 
-func (s *whitelistIntegrationStore) GetResolverSettings() data.DNSResolverSettings     { return s.config }
-func (s *whitelistIntegrationStore) GetRecords() []dnsrecords.DNSRecord                { return nil }
-func (s *whitelistIntegrationStore) GetCacheRecords() []dnsrecordcache.CacheRecord     { return nil }
+func (s *whitelistIntegrationStore) GetResolverSettings() data.DNSResolverSettings { return s.config }
+func (s *whitelistIntegrationStore) GetRecords() []dnsrecords.DNSRecord            { return nil }
+func (s *whitelistIntegrationStore) GetCacheRecords() []dnsrecordcache.CacheRecord { return nil }
+func (s *whitelistIntegrationStore) LookupLocalRRs(name, recordType string, autoBuildPTR bool) []dns.RR {
+	return dnsrecords.FindAllRecords(s.GetRecords(), name, recordType, autoBuildPTR)
+}
+func (s *whitelistIntegrationStore) LookupCacheRR(string, string) *dns.RR              { return nil }
 func (s *whitelistIntegrationStore) UpdateCacheRecords(_ []dnsrecordcache.CacheRecord) {}
 func (s *whitelistIntegrationStore) GetServers() []dnsservers.DNSServer                { return s.servers }
 func (s *whitelistIntegrationStore) GetBlockList() *adblock.BlockList {
@@ -137,9 +141,13 @@ type localRecordStore struct {
 	config  config.Config
 }
 
-func (s *localRecordStore) GetResolverSettings() data.DNSResolverSettings     { return s.config }
-func (s *localRecordStore) GetRecords() []dnsrecords.DNSRecord                { return s.records }
-func (s *localRecordStore) GetCacheRecords() []dnsrecordcache.CacheRecord     { return nil }
+func (s *localRecordStore) GetResolverSettings() data.DNSResolverSettings { return s.config }
+func (s *localRecordStore) GetRecords() []dnsrecords.DNSRecord            { return s.records }
+func (s *localRecordStore) GetCacheRecords() []dnsrecordcache.CacheRecord { return nil }
+func (s *localRecordStore) LookupLocalRRs(name, recordType string, autoBuildPTR bool) []dns.RR {
+	return dnsrecords.FindAllRecords(s.records, name, recordType, autoBuildPTR)
+}
+func (s *localRecordStore) LookupCacheRR(string, string) *dns.RR              { return nil }
 func (s *localRecordStore) UpdateCacheRecords(_ []dnsrecordcache.CacheRecord) {}
 func (s *localRecordStore) GetServers() []dnsservers.DNSServer                { return nil }
 func (s *localRecordStore) GetBlockList() *adblock.BlockList                  { return adblock.NewBlockList() }
@@ -192,6 +200,8 @@ type emptyStore struct {
 func (s *emptyStore) GetResolverSettings() data.DNSResolverSettings     { return s.config }
 func (s *emptyStore) GetRecords() []dnsrecords.DNSRecord                { return nil }
 func (s *emptyStore) GetCacheRecords() []dnsrecordcache.CacheRecord     { return nil }
+func (s *emptyStore) LookupLocalRRs(string, string, bool) []dns.RR      { return nil }
+func (s *emptyStore) LookupCacheRR(string, string) *dns.RR              { return nil }
 func (s *emptyStore) UpdateCacheRecords(_ []dnsrecordcache.CacheRecord) {}
 func (s *emptyStore) GetServers() []dnsservers.DNSServer                { return nil }
 func (s *emptyStore) GetBlockList() *adblock.BlockList                  { return adblock.NewBlockList() }

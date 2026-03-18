@@ -5,12 +5,14 @@ package resolver
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/miekg/dns"
-	"golang.org/x/sync/errgroup"
 
 	"dnsplane/adblock"
 	"dnsplane/data"
@@ -27,6 +29,8 @@ type Store interface {
 	GetResolverSettings() data.DNSResolverSettings
 	GetRecords() []dnsrecords.DNSRecord
 	GetCacheRecords() []dnsrecordcache.CacheRecord
+	LookupLocalRRs(name, recordType string, autoBuildPTRFromA bool) []dns.RR
+	LookupCacheRR(name, recordType string) *dns.RR
 	UpdateCacheRecords([]dnsrecordcache.CacheRecord)
 	GetServers() []dnsservers.DNSServer
 	GetBlockList() *adblock.BlockList
@@ -85,46 +89,57 @@ func (r *Resolver) HandleQuestion(ctx context.Context, question dns.Question, re
 	switch question.Qtype {
 	case dns.TypePTR:
 		r.handlePTRQuestion(ctx, question, response)
-	case dns.TypeA:
-		r.handleAQuestion(ctx, question, response)
 	default:
-		r.handleDNSServers(ctx, question, response)
+		r.resolveFastPath(ctx, question, response)
 	}
 	r.store.IncrementQueriesAnswered()
 }
 
-func (r *Resolver) handleAQuestion(ctx context.Context, question dns.Question, response *dns.Msg) {
-	if r.checkBlocked(question) {
-		r.processBlockedDomain(question, response)
-		return
-	}
-	r.resolveAParallel(ctx, question, response)
+type upstreamResult struct {
+	server string
+	msg    *dns.Msg
+	err    error
 }
 
-// parResultKind identifies the source of a parallel resolution result.
-type parResultKind int
+type parKind int
 
 const (
-	parLocal parResultKind = iota
-	parCache
-	parUpstream
+	parKindLocal parKind = iota
+	parKindCache
+	parKindUpstream
 )
 
-// parResult is sent on the parallel resolution channel; exactly one of local/cache/up is set per kind.
-type parResult struct {
-	kind    parResultKind
+type parMsg struct {
+	kind    parKind
 	local   []dns.RR
 	cache   *dns.RR
 	up      *upstreamResult
-	elapsed time.Duration // time since resolveAParallel start when this worker finished
+	elapsed time.Duration // local/cache: scan time; upstream: since query start
 }
 
-// resolveAParallel runs local, cache, and all upstream+fallback lookups at once; replies by priority:
-// local wins, then cache, then any upstream authoritative, then first upstream success.
-// Server selection uses domain whitelist: if the query name matches a server's whitelist, only those servers are used (no fallback).
-// Fallback is only used when the selected servers are "global" (no whitelist match).
-func (r *Resolver) resolveAParallel(ctx context.Context, question dns.Question, response *dns.Msg) {
+func perfQTypeString(q dns.Question) string {
+	if s := dns.TypeToString[q.Qtype]; s != "" {
+		return s
+	}
+	return "T" + strconv.Itoa(int(q.Qtype))
+}
+
+// resolveFastPath runs local, cache, and all upstreams at once for any QTYPE. Priority: local > cache > first upstream success.
+func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, response *dns.Msg) {
+	if question.Qtype == dns.TypeA || question.Qtype == dns.TypeAAAA {
+		if r.checkBlocked(question) {
+			r.processBlockedDomain(question, response)
+			return
+		}
+	}
+	t0 := time.Now()
 	settings := r.store.GetResolverSettings()
+	recordType := dns.TypeToString[question.Qtype]
+	if recordType == "" {
+		recordType = perfQTypeString(question)
+	}
+	qtypeKey := perfQTypeString(question)
+
 	allServers := r.store.GetServers()
 	dnsServers := dnsservers.GetServersForQuery(allServers, question.Name, true)
 	useWhitelist := false
@@ -138,8 +153,6 @@ func (r *Resolver) resolveAParallel(ctx context.Context, question dns.Question, 
 	if !useWhitelist && settings.FallbackServerIP != "" && settings.FallbackServerPort != "" {
 		fallback = fmt.Sprintf("%s:%s", settings.FallbackServerIP, settings.FallbackServerPort)
 	}
-
-	// Query all upstreams and fallback simultaneously; if fallback equals an upstream, query it only once
 	serversToQuery := dnsServers
 	if fallback != "" {
 		already := false
@@ -153,304 +166,137 @@ func (r *Resolver) resolveAParallel(ctx context.Context, question dns.Question, 
 			serversToQuery = append(append([]string(nil), dnsServers...), fallback)
 		}
 	}
+	nUp := len(serversToQuery)
 
 	ctx, cancel := context.WithTimeout(ctx, r.upstreamTimeout)
 	defer cancel()
 
-	cap := 2 + len(serversToQuery)
-	ch := make(chan parResult, cap)
-	t0 := time.Now()
+	capCh := 2 + nUp
+	ch := make(chan parMsg, capCh)
 
-	// Local: one goroutine
 	go func() {
-		records := r.store.GetRecords()
-		recordType := dns.TypeToString[question.Qtype]
-		cachedRecords := dnsrecords.FindAllRecords(records, question.Name, recordType, settings.DNSRecordSettings.AutoBuildPTRFromA)
-		ch <- parResult{kind: parLocal, local: cachedRecords, elapsed: time.Since(t0)}
+		t1 := time.Now()
+		lr := r.store.LookupLocalRRs(question.Name, recordType, settings.DNSRecordSettings.AutoBuildPTRFromA)
+		ch <- parMsg{kind: parKindLocal, local: lr, elapsed: time.Since(t1)}
 	}()
-
-	// Cache: one goroutine
 	go func() {
-		cache := r.store.GetCacheRecords()
-		recordType := dns.TypeToString[question.Qtype]
-		cached := findCacheRecord(cache, question.Name, recordType, r.errorLogger)
-		ch <- parResult{kind: parCache, cache: cached, elapsed: time.Since(t0)}
+		if !settings.CacheRecords {
+			ch <- parMsg{kind: parKindCache, elapsed: 0}
+			return
+		}
+		t1 := time.Now()
+		cr := r.store.LookupCacheRR(question.Name, recordType)
+		ch <- parMsg{kind: parKindCache, cache: cr, elapsed: time.Since(t1)}
 	}()
-
-	// Upstream + fallback: one goroutine per server (fallback already included when distinct)
-	for _, server := range serversToQuery {
-		server := server
+	for _, srv := range serversToQuery {
+		srv := srv
 		go func() {
-			resp, err := r.upstream.Query(ctx, question, server)
-			elapsed := time.Since(t0)
+			resp, err := r.upstream.Query(ctx, question, srv)
+			if err != nil && r != nil && ctx.Err() == nil && !errors.Is(err, context.Canceled) {
+				r.log("Query: %s, Error querying DNS server (%s): %v\n", question.Name, srv, err)
+			}
+			up := &upstreamResult{server: srv, msg: resp, err: err}
 			select {
-			case ch <- parResult{kind: parUpstream, up: &upstreamResult{server: server, msg: resp, err: err}, elapsed: elapsed}:
+			case ch <- parMsg{kind: parKindUpstream, up: up, elapsed: time.Since(t0)}:
 			case <-ctx.Done():
 			}
 		}()
 	}
 
 	var localDone, cacheDone bool
-	var localHit []dns.RR
-	var cacheHit *dns.RR
-	var authUpstream, firstUpstream *upstreamResult
-	upstreamSeen := 0
-	upstreamTotal := len(serversToQuery)
-
 	var localNs, cacheNs uint64
+	var cacheHit *dns.RR
+	var firstUp *upstreamResult
 	var maxUpNs uint64
-	upstreamCount := len(serversToQuery)
+	var upMu sync.Mutex
+	upstreamSeen := 0
+	upstreamTotal := nUp
 
-	recordPerf := func(outcome int, totalNs, prepNs, maxUpstreamNs, upstreamWaitNs uint64) {
-		data.RecordResolverAResolve(outcome, totalNs, prepNs, maxUpstreamNs, upstreamWaitNs, upstreamCount)
+	recordPerf := func(outcome int, totalNs, prepNs, maxUpstreamNs, waitNs uint64) {
+		data.RecordResolverAResolve(outcome, totalNs, prepNs, maxUpstreamNs, waitNs, nUp, qtypeKey)
 	}
 
-	for i := 0; i < cap; i++ {
+	for i := 0; i < capCh; i++ {
 		pr := <-ch
 		switch pr.kind {
-		case parLocal:
+		case parKindLocal:
 			localDone = true
 			localNs = uint64(pr.elapsed)
 			if len(pr.local) > 0 {
-				localHit = pr.local
+				cancel()
+				r.processCachedRecords(question, pr.local, response)
+				prep := localNs
+				if cacheDone && cacheNs > prep {
+					prep = cacheNs
+				}
+				recordPerf(data.PerfOutcomeLocal, uint64(time.Since(t0)), prep, 0, 0)
+				return
 			}
-		case parCache:
+		case parKindCache:
 			cacheDone = true
 			cacheNs = uint64(pr.elapsed)
 			if pr.cache != nil {
 				cacheHit = pr.cache
 			}
-		case parUpstream:
+		case parKindUpstream:
 			upstreamSeen++
 			if uint64(pr.elapsed) > maxUpNs {
 				maxUpNs = uint64(pr.elapsed)
 			}
 			if pr.up != nil && pr.up.err == nil && pr.up.msg != nil &&
 				pr.up.msg.Rcode == dns.RcodeSuccess && len(pr.up.msg.Answer) > 0 {
-				if pr.up.msg.Authoritative {
-					authUpstream = pr.up
-				} else if firstUpstream == nil {
-					firstUpstream = pr.up
+				upMu.Lock()
+				if firstUp == nil {
+					firstUp = pr.up
 				}
-			} else if pr.up != nil && pr.up.err != nil {
-				r.log("Query: %s, Error querying DNS server (%s): %v\n", question.Name, pr.up.server, pr.up.err)
+				upMu.Unlock()
 			}
 		}
 
 		prepNs := func() uint64 {
-			switch {
-			case localDone && cacheDone:
-				if localNs > cacheNs {
-					return localNs
-				}
-				return cacheNs
-			case localDone:
-				return localNs
-			case cacheDone:
-				return cacheNs
-			default:
-				return 0
-			}
-		}
-
-		totalNs := uint64(time.Since(t0))
-
-		// Local wins: return as soon as we have a local hit
-		if len(localHit) > 0 {
-			cancel()
-			r.processCachedRecords(question, localHit, response)
 			p := localNs
-			if cacheDone && cacheNs > p {
+			if cacheNs > p {
 				p = cacheNs
 			}
-			recordPerf(data.PerfOutcomeLocal, totalNs, p, 0, 0)
-			return
+			return p
 		}
-
-		// Cache wins once local and cache are done and we know local missed
 		if localDone && cacheDone && cacheHit != nil {
 			cancel()
 			r.store.IncrementCacheHits()
 			r.processCacheRecord(question, cacheHit, response)
 			p := prepNs()
-			recordPerf(data.PerfOutcomeCache, totalNs, p, 0, 0)
+			recordPerf(data.PerfOutcomeCache, uint64(time.Since(t0)), p, maxUpNs, 0)
 			return
 		}
-
-		// Upstream (and fallback when distinct): once local and cache are done, prefer authoritative then first success
-		if localDone && cacheDone && upstreamSeen == upstreamTotal {
+		if localDone && cacheDone && cacheHit == nil && firstUp != nil {
 			cancel()
+			r.processUpstreamAnswer(question, firstUp.msg, response)
 			p := prepNs()
-			var waitNs uint64
+			var w uint64
 			if maxUpNs > p {
-				waitNs = maxUpNs - p
+				w = maxUpNs - p
 			}
-			if authUpstream != nil {
-				r.processUpstreamAnswer(question, authUpstream.msg, response)
-				recordPerf(data.PerfOutcomeUpstream, totalNs, p, maxUpNs, waitNs)
-				return
-			}
-			if firstUpstream != nil {
-				r.processUpstreamAnswer(question, firstUpstream.msg, response)
-				recordPerf(data.PerfOutcomeUpstream, totalNs, p, maxUpNs, waitNs)
-				return
-			}
+			recordPerf(data.PerfOutcomeUpstream, uint64(time.Since(t0)), p, maxUpNs, w)
+			return
+		}
+		if localDone && cacheDone && cacheHit == nil && upstreamSeen == upstreamTotal && firstUp == nil {
+			cancel()
 			r.log("Query: %s, No response\n", question.Name)
-			recordPerf(data.PerfOutcomeNone, totalNs, p, maxUpNs, waitNs)
+			recordPerf(data.PerfOutcomeNone, uint64(time.Since(t0)), prepNs(), maxUpNs, 0)
 			return
 		}
 	}
-	// Should not reach here if cap is correct
-	r.log("Query: %s, No response\n", question.Name)
-	var pEnd uint64
-	if localDone && cacheDone {
-		if localNs > cacheNs {
-			pEnd = localNs
-		} else {
-			pEnd = cacheNs
-		}
-	} else if localDone {
-		pEnd = localNs
-	} else if cacheDone {
-		pEnd = cacheNs
-	}
-	recordPerf(data.PerfOutcomeNone, uint64(time.Since(t0)), pEnd, maxUpNs, 0)
 }
 
 func (r *Resolver) handlePTRQuestion(ctx context.Context, question dns.Question, response *dns.Msg) {
 	settings := r.store.GetResolverSettings()
-	records := r.store.GetRecords()
-	recordType := dns.TypeToString[question.Qtype]
-
-	ptrRecords := dnsrecords.FindAllRecords(records, question.Name, recordType, settings.DNSRecordSettings.AutoBuildPTRFromA)
+	ptrRecords := r.store.LookupLocalRRs(question.Name, "PTR", settings.DNSRecordSettings.AutoBuildPTRFromA)
 	if len(ptrRecords) > 0 {
 		r.processCachedRecords(question, ptrRecords, response)
 		return
 	}
-
 	r.log("PTR record not found in dnsrecords.json\n")
-	r.handleDNSServers(ctx, question, response)
-}
-
-func (r *Resolver) handleDNSServers(ctx context.Context, question dns.Question, response *dns.Msg) {
-	// Check if domain is blocked by adblock before querying upstream
-	if r.checkBlocked(question) {
-		r.processBlockedDomain(question, response)
-		return
-	}
-
-	allServers := r.store.GetServers()
-	dnsServers := dnsservers.GetServersForQuery(allServers, question.Name, true)
-	useWhitelist := false
-	for _, s := range allServers {
-		if s.Active && dnsservers.ServerMatchesQuery(s, question.Name) {
-			useWhitelist = true
-			break
-		}
-	}
-	fallback := ""
-	if !useWhitelist {
-		settings := r.store.GetResolverSettings()
-		if settings.FallbackServerIP != "" && settings.FallbackServerPort != "" {
-			fallback = fmt.Sprintf("%s:%s", settings.FallbackServerIP, settings.FallbackServerPort)
-		}
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, r.upstreamTimeout)
-	defer cancel()
-
-	// Prefer an authoritative answer when multiple servers respond; otherwise use the
-	// first successful answer. Recursive resolvers (e.g. 1.1.1.1) set Authoritative=false,
-	// so we must accept non-authoritative answers to avoid a second round-trip.
-	var firstSuccess *upstreamResult
-	found := false
-	for res := range r.queryAllDNSServers(ctx, question, dnsServers) {
-		if res.err != nil {
-			r.log("Query: %s, Error querying DNS server (%s): %v\n", question.Name, res.server, res.err)
-			continue
-		}
-		if res.msg == nil {
-			continue
-		}
-		if res.msg.Rcode != dns.RcodeSuccess || len(res.msg.Answer) == 0 {
-			continue
-		}
-		if res.msg.Authoritative {
-			r.processUpstreamAnswer(question, res.msg, response)
-			found = true
-			cancel()
-			break
-		}
-		if firstSuccess == nil {
-			firstSuccess = &upstreamResult{server: res.server, msg: res.msg, err: res.err}
-		}
-	}
-	if !found && firstSuccess != nil {
-		r.processUpstreamAnswer(question, firstSuccess.msg, response)
-		found = true
-	}
-	if !found {
-		r.handleFallbackServer(ctx, question, fallback, response)
-	}
-}
-
-type upstreamResult struct {
-	server string
-	msg    *dns.Msg
-	err    error
-}
-
-func (r *Resolver) queryAllDNSServers(ctx context.Context, question dns.Question, servers []string) <-chan upstreamResult {
-	if len(servers) == 0 || r.upstream == nil {
-		results := make(chan upstreamResult)
-		close(results)
-		return results
-	}
-	// Buffered channel so workers can send without blocking when the consumer
-	// breaks out early (e.g. after first authoritative answer). Prevents
-	// goroutine leak that would otherwise exhaust resources over time.
-	results := make(chan upstreamResult, len(servers))
-
-	g, ctx := errgroup.WithContext(ctx)
-	for _, server := range servers {
-		server := server
-		g.Go(func() error {
-			resp, err := r.upstream.Query(ctx, question, server)
-			select {
-			case results <- upstreamResult{server: server, msg: resp, err: err}:
-			case <-ctx.Done():
-			}
-			return nil
-		})
-	}
-
-	go func() {
-		_ = g.Wait()
-		close(results)
-	}()
-
-	return results
-}
-
-func (r *Resolver) handleFallbackServer(ctx context.Context, question dns.Question, fallbackServer string, response *dns.Msg) {
-	if fallbackServer == "" || r.upstream == nil {
-		r.log("Query: %s, No response\n", question.Name)
-		return
-	}
-
-	resp, err := r.upstream.Query(ctx, question, fallbackServer)
-	if err != nil {
-		r.log("Query: %s, Error querying fallback DNS server (%s): %v\n", question.Name, fallbackServer, err)
-		return
-	}
-	if resp == nil || len(resp.Answer) == 0 {
-		r.log("Query: %s, No response\n", question.Name)
-		return
-	}
-
-	response.Answer = append(response.Answer, resp.Answer...)
-	r.log("Query: %s, Reply: %s, Method: Fallback DNS server: %s\n", question.Name, resp.Answer[0].String(), fallbackServer)
-	cacheDNSResponse(r.store, resp.Answer)
+	r.resolveFastPath(ctx, question, response)
 }
 
 // processUpstreamAnswer appends the upstream answer to the response and caches it.
@@ -504,32 +350,6 @@ func cacheDNSResponse(store Store, rrs []dns.RR) {
 		cache = dnsrecordcache.Add(cache, &rr)
 	}
 	store.UpdateCacheRecords(cache)
-}
-
-func findCacheRecord(cacheRecords []dnsrecordcache.CacheRecord, name string, recordType string, errorLog ErrorLogger) *dns.RR {
-	now := time.Now()
-	for _, record := range cacheRecords {
-		if dnsrecords.NormalizeRecordNameKey(record.DNSRecord.Name) == dnsrecords.NormalizeRecordNameKey(name) &&
-			dnsrecords.NormalizeRecordType(record.DNSRecord.Type) == dnsrecords.NormalizeRecordType(recordType) {
-			if now.Before(record.Expiry) {
-				remainingTTL := uint32(record.Expiry.Sub(now).Seconds())
-				return dnsRecordToRR(&record.DNSRecord, remainingTTL, errorLog)
-			}
-		}
-	}
-	return nil
-}
-
-func dnsRecordToRR(dnsRecord *dnsrecords.DNSRecord, ttl uint32, errorLog ErrorLogger) *dns.RR {
-	recordString := fmt.Sprintf("%s %d IN %s %s", dnsRecord.Name, ttl, dnsRecord.Type, dnsRecord.Value)
-	rr, err := dns.NewRR(recordString)
-	if err != nil {
-		if errorLog != nil {
-			errorLog("resolver: error converting DNSRecord to RR", "error", err)
-		}
-		return nil
-	}
-	return &rr
 }
 
 func (r *Resolver) log(format string, args ...interface{}) {
