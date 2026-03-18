@@ -120,3 +120,17 @@ func (d *DNSResolverData) WarmIndexes() {
 	d.rebuildDNSRecordIndexLocked()
 	d.rebuildCacheIndexLocked()
 }
+
+// HasAnyLocalRecords reports whether any local DNS records exist (cheap; for resolver short-circuit).
+func (d *DNSResolverData) HasAnyLocalRecords() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return len(d.DNSRecords) > 0
+}
+
+// HasAnyCachedRecords reports whether the cache has any entries (cheap; skip cache lookup when empty).
+func (d *DNSResolverData) HasAnyCachedRecords() bool {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return len(d.CacheRecords) > 0
+}

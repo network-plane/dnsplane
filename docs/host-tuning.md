@@ -42,6 +42,15 @@ LimitNOFILE=65535
 
 Usually leave `GOMAXPROCS` default. Pinning CPUs rarely helps unless you have measured scheduler contention.
 
+## Benchmarking dnsplane (after host or code changes)
+
+1. `POST /stats/perf/reset` (or use the button on the perf HTML page) to zero counters.
+2. Run your steady query load (e.g. `dig` loop or `dnsperf`) for a few minutes.
+3. `GET /stats/perf` (JSON) or open the perf page: compare **`avg_prep_ms`**, **`avg_total_ms`**, and histograms; use **`by_query_type`** to see A vs AAAA vs other types.
+4. Repeat with the same workload after sysctl/governor changes so comparisons are fair.
+
+Optional follow-up (usually unnecessary once indexes + short-circuits are in place): reducing `dns.NewRR` allocations on cache hits via pooling—only worth it if profiling still shows allocation pressure.
+
 ## macOS / Windows
 
 Little to tune for a small DNS server; focus on code and network path.

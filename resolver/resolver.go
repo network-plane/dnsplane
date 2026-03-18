@@ -37,6 +37,9 @@ type Store interface {
 	IncrementCacheHits()
 	IncrementQueriesAnswered()
 	IncrementTotalBlocks()
+	// HasAnyLocalRecords / HasAnyCachedRecords enable short-circuits without copying slices.
+	HasAnyLocalRecords() bool
+	HasAnyCachedRecords() bool
 }
 
 // UpstreamClient issues DNS queries to upstream resolvers.
@@ -174,20 +177,26 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 	capCh := 2 + nUp
 	ch := make(chan parMsg, capCh)
 
-	go func() {
-		t1 := time.Now()
-		lr := r.store.LookupLocalRRs(question.Name, recordType, settings.DNSRecordSettings.AutoBuildPTRFromA)
-		ch <- parMsg{kind: parKindLocal, local: lr, elapsed: time.Since(t1)}
-	}()
-	go func() {
-		if !settings.CacheRecords {
-			ch <- parMsg{kind: parKindCache, elapsed: 0}
-			return
-		}
-		t1 := time.Now()
-		cr := r.store.LookupCacheRR(question.Name, recordType)
-		ch <- parMsg{kind: parKindCache, cache: cr, elapsed: time.Since(t1)}
-	}()
+	if r.store.HasAnyLocalRecords() {
+		go func() {
+			t1 := time.Now()
+			lr := r.store.LookupLocalRRs(question.Name, recordType, settings.DNSRecordSettings.AutoBuildPTRFromA)
+			ch <- parMsg{kind: parKindLocal, local: lr, elapsed: time.Since(t1)}
+		}()
+	} else {
+		ch <- parMsg{kind: parKindLocal, elapsed: 0}
+	}
+	if !settings.CacheRecords {
+		ch <- parMsg{kind: parKindCache, elapsed: 0}
+	} else if r.store.HasAnyCachedRecords() {
+		go func() {
+			t1 := time.Now()
+			cr := r.store.LookupCacheRR(question.Name, recordType)
+			ch <- parMsg{kind: parKindCache, cache: cr, elapsed: time.Since(t1)}
+		}()
+	} else {
+		ch <- parMsg{kind: parKindCache, elapsed: 0}
+	}
 	for _, srv := range serversToQuery {
 		srv := srv
 		go func() {
