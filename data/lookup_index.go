@@ -10,6 +10,7 @@ import (
 
 	"github.com/miekg/dns"
 
+	"dnsplane/dnsrecordcache"
 	"dnsplane/dnsrecords"
 )
 
@@ -17,33 +18,42 @@ func dnsCacheIdxKey(name, recordType string) string {
 	return dnsrecords.NormalizeRecordNameKey(name) + "\x00" + dnsrecords.NormalizeRecordType(recordType)
 }
 
-func (d *DNSResolverData) rebuildCacheIndexLocked() {
-	d.cacheRecordIdx = make(map[string][]int)
-	for i := range d.CacheRecords {
-		cr := &d.CacheRecords[i]
-		k := dnsCacheIdxKey(cr.DNSRecord.Name, cr.DNSRecord.Type)
-		d.cacheRecordIdx[k] = append(d.cacheRecordIdx[k], i)
+// buildDNSRecordIndex builds the local-records lookup map (caller must not hold d.mu during build).
+func buildDNSRecordIndex(records []dnsrecords.DNSRecord) map[string][]int {
+	idx := make(map[string][]int)
+	for i := range records {
+		rec := &records[i]
+		k := dnsCacheIdxKey(rec.Name, rec.Type)
+		idx[k] = append(idx[k], i)
 	}
+	return idx
+}
+
+// buildCacheRecordIndex builds the cache lookup map (caller must not hold d.mu during build).
+func buildCacheRecordIndex(records []dnsrecordcache.CacheRecord) map[string][]int {
+	idx := make(map[string][]int)
+	for i := range records {
+		cr := &records[i]
+		k := dnsCacheIdxKey(cr.DNSRecord.Name, cr.DNSRecord.Type)
+		idx[k] = append(idx[k], i)
+	}
+	return idx
+}
+
+func (d *DNSResolverData) rebuildCacheIndexLocked() {
+	d.cacheRecordIdx = buildCacheRecordIndex(d.CacheRecords)
 }
 
 func (d *DNSResolverData) rebuildDNSRecordIndexLocked() {
-	d.dnsRecordIdx = make(map[string][]int)
-	for i := range d.DNSRecords {
-		rec := &d.DNSRecords[i]
-		k := dnsCacheIdxKey(rec.Name, rec.Type)
-		d.dnsRecordIdx[k] = append(d.dnsRecordIdx[k], i)
-	}
+	d.dnsRecordIdx = buildDNSRecordIndex(d.DNSRecords)
 }
 
-// LookupCacheRR returns the first non-expired cached RR for name+type, or nil.
-func (d *DNSResolverData) LookupCacheRR(qname, recordType string) *dns.RR {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
+// lookupCacheRRLocked requires d.mu RLock held.
+func (d *DNSResolverData) lookupCacheRRLocked(qname, recordType string, now time.Time) *dns.RR {
 	if len(d.CacheRecords) == 0 {
 		return nil
 	}
 	k := dnsCacheIdxKey(qname, recordType)
-	now := time.Now()
 	for _, i := range d.cacheRecordIdx[k] {
 		if i < 0 || i >= len(d.CacheRecords) {
 			continue
@@ -70,14 +80,15 @@ func (d *DNSResolverData) LookupCacheRR(qname, recordType string) *dns.RR {
 	return nil
 }
 
-// LookupLocalRRs returns local RRs for name+type. PTR (and auto-build PTR) uses a full scan.
-func (d *DNSResolverData) LookupLocalRRs(qname, recordType string, autoBuildPTRFromA bool) []dns.RR {
+// LookupCacheRR returns the first non-expired cached RR for name+type, or nil.
+func (d *DNSResolverData) LookupCacheRR(qname, recordType string) *dns.RR {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	rt := strings.ToUpper(strings.TrimSpace(recordType))
-	if rt == "PTR" {
-		return dnsrecords.FindAllRecords(d.DNSRecords, qname, recordType, autoBuildPTRFromA)
-	}
+	return d.lookupCacheRRLocked(qname, recordType, time.Now())
+}
+
+// lookupLocalNonPTRLocked requires d.mu RLock held; not for PTR qtype.
+func (d *DNSResolverData) lookupLocalNonPTRLocked(qname, recordType string) []dns.RR {
 	if len(d.DNSRecords) == 0 {
 		return nil
 	}
@@ -99,6 +110,40 @@ func (d *DNSResolverData) LookupLocalRRs(qname, recordType string, autoBuildPTRF
 		}
 	}
 	return out
+}
+
+// TryFastLocalOrCache does local-then-cache under a single RLock. For PTR queries returns handled=false.
+func (d *DNSResolverData) TryFastLocalOrCache(qname, recordType string, qtypePTR bool) (handled bool, local []dns.RR, cache *dns.RR) {
+	if qtypePTR {
+		return false, nil, nil
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	if len(d.DNSRecords) > 0 {
+		local = d.lookupLocalNonPTRLocked(qname, recordType)
+		if len(local) > 0 {
+			return true, local, nil
+		}
+	}
+	if !d.Settings.CacheRecords || len(d.CacheRecords) == 0 {
+		return false, nil, nil
+	}
+	cache = d.lookupCacheRRLocked(qname, recordType, time.Now())
+	if cache != nil {
+		return true, nil, cache
+	}
+	return false, nil, nil
+}
+
+// LookupLocalRRs returns local RRs for name+type. PTR (and auto-build PTR) uses a full scan.
+func (d *DNSResolverData) LookupLocalRRs(qname, recordType string, autoBuildPTRFromA bool) []dns.RR {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	rt := strings.ToUpper(strings.TrimSpace(recordType))
+	if rt == "PTR" {
+		return dnsrecords.FindAllRecords(d.DNSRecords, qname, recordType, autoBuildPTRFromA)
+	}
+	return d.lookupLocalNonPTRLocked(qname, recordType)
 }
 
 func dnsRecordToRRForLookup(dr *dnsrecords.DNSRecord, ttl uint32, errLog func(msg string, kv ...any)) *dns.RR {
