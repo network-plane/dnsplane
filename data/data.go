@@ -254,8 +254,8 @@ func (d *DNSResolverData) GetResolverSettings() DNSResolverSettings {
 // UpdateSettings updates the DNS server settings
 func (d *DNSResolverData) UpdateSettings(settings DNSResolverSettings) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.Settings = settings
+	d.mu.Unlock()
 	SaveSettings(settings)
 }
 
@@ -290,11 +290,10 @@ func (d *DNSResolverData) GetServers() []dnsservers.DNSServer {
 // UpdateServers updates the DNS servers
 func (d *DNSResolverData) UpdateServers(servers []dnsservers.DNSServer) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.DNSServers = servers
-	err := SaveDNSServers(servers)
-	if err != nil {
-		fmt.Println("Failed to save cache records:", err)
+	d.mu.Unlock()
+	if err := SaveDNSServers(servers); err != nil {
+		fmt.Println("Failed to save DNS servers:", err)
 	}
 }
 
