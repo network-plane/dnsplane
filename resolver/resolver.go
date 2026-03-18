@@ -112,10 +112,11 @@ const (
 
 // parResult is sent on the parallel resolution channel; exactly one of local/cache/up is set per kind.
 type parResult struct {
-	kind  parResultKind
-	local []dns.RR
-	cache *dns.RR
-	up    *upstreamResult
+	kind    parResultKind
+	local   []dns.RR
+	cache   *dns.RR
+	up      *upstreamResult
+	elapsed time.Duration // time since resolveAParallel start when this worker finished
 }
 
 // resolveAParallel runs local, cache, and all upstream+fallback lookups at once; replies by priority:
@@ -158,13 +159,14 @@ func (r *Resolver) resolveAParallel(ctx context.Context, question dns.Question, 
 
 	cap := 2 + len(serversToQuery)
 	ch := make(chan parResult, cap)
+	t0 := time.Now()
 
 	// Local: one goroutine
 	go func() {
 		records := r.store.GetRecords()
 		recordType := dns.TypeToString[question.Qtype]
 		cachedRecords := dnsrecords.FindAllRecords(records, question.Name, recordType, settings.DNSRecordSettings.AutoBuildPTRFromA)
-		ch <- parResult{kind: parLocal, local: cachedRecords}
+		ch <- parResult{kind: parLocal, local: cachedRecords, elapsed: time.Since(t0)}
 	}()
 
 	// Cache: one goroutine
@@ -172,7 +174,7 @@ func (r *Resolver) resolveAParallel(ctx context.Context, question dns.Question, 
 		cache := r.store.GetCacheRecords()
 		recordType := dns.TypeToString[question.Qtype]
 		cached := findCacheRecord(cache, question.Name, recordType, r.errorLogger)
-		ch <- parResult{kind: parCache, cache: cached}
+		ch <- parResult{kind: parCache, cache: cached, elapsed: time.Since(t0)}
 	}()
 
 	// Upstream + fallback: one goroutine per server (fallback already included when distinct)
@@ -180,8 +182,9 @@ func (r *Resolver) resolveAParallel(ctx context.Context, question dns.Question, 
 		server := server
 		go func() {
 			resp, err := r.upstream.Query(ctx, question, server)
+			elapsed := time.Since(t0)
 			select {
-			case ch <- parResult{kind: parUpstream, up: &upstreamResult{server: server, msg: resp, err: err}}:
+			case ch <- parResult{kind: parUpstream, up: &upstreamResult{server: server, msg: resp, err: err}, elapsed: elapsed}:
 			case <-ctx.Done():
 			}
 		}()
@@ -194,21 +197,34 @@ func (r *Resolver) resolveAParallel(ctx context.Context, question dns.Question, 
 	upstreamSeen := 0
 	upstreamTotal := len(serversToQuery)
 
+	var localNs, cacheNs uint64
+	var maxUpNs uint64
+	upstreamCount := len(serversToQuery)
+
+	recordPerf := func(outcome int, totalNs, prepNs, maxUpstreamNs, upstreamWaitNs uint64) {
+		data.RecordResolverAResolve(outcome, totalNs, prepNs, maxUpstreamNs, upstreamWaitNs, upstreamCount)
+	}
+
 	for i := 0; i < cap; i++ {
 		pr := <-ch
 		switch pr.kind {
 		case parLocal:
 			localDone = true
+			localNs = uint64(pr.elapsed)
 			if len(pr.local) > 0 {
 				localHit = pr.local
 			}
 		case parCache:
 			cacheDone = true
+			cacheNs = uint64(pr.elapsed)
 			if pr.cache != nil {
 				cacheHit = pr.cache
 			}
 		case parUpstream:
 			upstreamSeen++
+			if uint64(pr.elapsed) > maxUpNs {
+				maxUpNs = uint64(pr.elapsed)
+			}
 			if pr.up != nil && pr.up.err == nil && pr.up.msg != nil &&
 				pr.up.msg.Rcode == dns.RcodeSuccess && len(pr.up.msg.Answer) > 0 {
 				if pr.up.msg.Authoritative {
@@ -221,10 +237,33 @@ func (r *Resolver) resolveAParallel(ctx context.Context, question dns.Question, 
 			}
 		}
 
+		prepNs := func() uint64 {
+			switch {
+			case localDone && cacheDone:
+				if localNs > cacheNs {
+					return localNs
+				}
+				return cacheNs
+			case localDone:
+				return localNs
+			case cacheDone:
+				return cacheNs
+			default:
+				return 0
+			}
+		}
+
+		totalNs := uint64(time.Since(t0))
+
 		// Local wins: return as soon as we have a local hit
 		if len(localHit) > 0 {
 			cancel()
 			r.processCachedRecords(question, localHit, response)
+			p := localNs
+			if cacheDone && cacheNs > p {
+				p = cacheNs
+			}
+			recordPerf(data.PerfOutcomeLocal, totalNs, p, 0, 0)
 			return
 		}
 
@@ -233,26 +272,49 @@ func (r *Resolver) resolveAParallel(ctx context.Context, question dns.Question, 
 			cancel()
 			r.store.IncrementCacheHits()
 			r.processCacheRecord(question, cacheHit, response)
+			p := prepNs()
+			recordPerf(data.PerfOutcomeCache, totalNs, p, 0, 0)
 			return
 		}
 
 		// Upstream (and fallback when distinct): once local and cache are done, prefer authoritative then first success
 		if localDone && cacheDone && upstreamSeen == upstreamTotal {
 			cancel()
+			p := prepNs()
+			var waitNs uint64
+			if maxUpNs > p {
+				waitNs = maxUpNs - p
+			}
 			if authUpstream != nil {
 				r.processUpstreamAnswer(question, authUpstream.msg, response)
+				recordPerf(data.PerfOutcomeUpstream, totalNs, p, maxUpNs, waitNs)
 				return
 			}
 			if firstUpstream != nil {
 				r.processUpstreamAnswer(question, firstUpstream.msg, response)
+				recordPerf(data.PerfOutcomeUpstream, totalNs, p, maxUpNs, waitNs)
 				return
 			}
 			r.log("Query: %s, No response\n", question.Name)
+			recordPerf(data.PerfOutcomeNone, totalNs, p, maxUpNs, waitNs)
 			return
 		}
 	}
 	// Should not reach here if cap is correct
 	r.log("Query: %s, No response\n", question.Name)
+	var pEnd uint64
+	if localDone && cacheDone {
+		if localNs > cacheNs {
+			pEnd = localNs
+		} else {
+			pEnd = cacheNs
+		}
+	} else if localDone {
+		pEnd = localNs
+	} else if cacheDone {
+		pEnd = cacheNs
+	}
+	recordPerf(data.PerfOutcomeNone, uint64(time.Since(t0)), pEnd, maxUpNs, 0)
 }
 
 func (r *Resolver) handlePTRQuestion(ctx context.Context, question dns.Question, response *dns.Msg) {
