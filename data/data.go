@@ -49,6 +49,8 @@ type DNSResolverData struct {
 	DNSServers       []dnsservers.DNSServer
 	DNSRecords       []dnsrecords.DNSRecord
 	CacheRecords     []dnsrecordcache.CacheRecord
+	cacheRecordIdx   map[string][]int // normalized name|type -> CacheRecords indices
+	dnsRecordIdx     map[string][]int // normalized name|type -> DNSRecords indices (non-PTR)
 	BlockList        *adblock.BlockList
 	AdblockSources   []AdblockSource // loaded files/URLs and count per source (order preserved)
 	mu               sync.RWMutex
@@ -157,6 +159,8 @@ func (d *DNSResolverData) Initialize() error {
 	d.DNSServers = servers
 	d.DNSRecords = records
 	d.CacheRecords = cache
+	d.rebuildDNSRecordIndexLocked()
+	d.rebuildCacheIndexLocked()
 	d.BlockList = adblock.NewBlockList()
 	d.AdblockSources = nil
 
@@ -314,6 +318,28 @@ func (d *DNSResolverData) GetCacheRecords() []dnsrecordcache.CacheRecord {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return copyCacheRecords(d.CacheRecords)
+}
+
+// ReadDNSRecords runs fn with the live DNS record slice held under RLock.
+// Do not retain the slice after fn returns.
+func (d *DNSResolverData) ReadDNSRecords(fn func([]dnsrecords.DNSRecord)) {
+	if fn == nil {
+		return
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	fn(d.DNSRecords)
+}
+
+// ReadCacheRecords runs fn with the live cache slice held under RLock.
+// Do not retain the slice after fn returns.
+func (d *DNSResolverData) ReadCacheRecords(fn func([]dnsrecordcache.CacheRecord)) {
+	if fn == nil {
+		return
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	fn(d.CacheRecords)
 }
 
 // UpdateCacheRecords updates the cache records
@@ -529,8 +555,9 @@ func SaveCacheRecords(cacheRecords []dnsrecordcache.CacheRecord) error {
 
 func (d *DNSResolverData) storeRecords(records []dnsrecords.DNSRecord, persist bool) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.DNSRecords = records
+	d.rebuildDNSRecordIndexLocked()
+	d.mu.Unlock()
 	if persist {
 		if err := SaveDNSRecords(records); err != nil {
 			fmt.Println("Failed to save DNS records:", err)
@@ -541,6 +568,7 @@ func (d *DNSResolverData) storeRecords(records []dnsrecords.DNSRecord, persist b
 func (d *DNSResolverData) storeCacheRecords(records []dnsrecordcache.CacheRecord, persist bool) {
 	d.mu.Lock()
 	d.CacheRecords = records
+	d.rebuildCacheIndexLocked()
 	d.mu.Unlock()
 	if persist && d.persistCh != nil {
 		select {

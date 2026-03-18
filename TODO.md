@@ -98,7 +98,31 @@ No endpoints for dnsplane.json or any config.
 
 ---
 
-## 11. Clustered DNS (multi-node sync)
+## 11. Resolver performance plan (fast path + indexes)
+
+_Tracked here because the Cursor plan file is not in-repo._
+
+**Phase 1 — host + data path**
+
+- [x] Optional Linux host tuning doc: [`docs/host-tuning.md`](docs/host-tuning.md)
+- [x] In-memory indexes for cache + local records (`LookupCacheRR`, `LookupLocalRRs`, rebuild on load/store)
+- [x] Short-circuits (empty slices, cache disabled branch)
+- [x] Bench / verify latency improvement (measured ~1ms+ gain)
+
+**Phase 2 — unified resolution + observability**
+
+- [x] Single fast path for all QTYPEs: parallel local + cache + upstreams; priority local > cache > first upstream
+- [x] PTR: local-first (incl. A→PTR), then fast path on miss
+- [x] Resolver perf by query type (`by_query_type` in JSON + perf HTML page)
+- [x] README resolution diagram + link to host-tuning
+
+**Optional later**
+
+- [ ] Extra micro-opts if profiling shows a clear target
+
+---
+
+## 12. Clustered DNS (multi-node sync)
 
 Goal: multiple dnsplane instances that stay in sync for records (and optionally other data) over a custom protocol.
 
@@ -112,7 +136,7 @@ Goal: multiple dnsplane instances that stay in sync for records (and optionally 
 
 ---
 
-## 12. ISPConfig and cPanel compatibility
+## 13. ISPConfig and cPanel compatibility
 
 Goal: replace BIND/PowerDNS behind ISPConfig or cPanel; panels keep managing zones (DB → zone files → reload), dnsplane serves from those files.
 
