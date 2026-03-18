@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -58,6 +59,8 @@ type DNSResolverData struct {
 	persistWg        sync.WaitGroup
 	persistCloseOnce sync.Once
 	upstreamHealth   *UpstreamHealthTracker
+	statsCacheHits       atomic.Int64
+	statsQueriesAnswered atomic.Int64
 }
 
 // DNSStats holds the data for the DNS statistics
@@ -269,15 +272,20 @@ func (d *DNSResolverData) UpdateSettingsInMemory(settings DNSResolverSettings) {
 // GetStats returns the current DNS statistics
 func (d *DNSResolverData) GetStats() DNSStats {
 	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return d.Stats
+	s := d.Stats
+	d.mu.RUnlock()
+	s.TotalCacheHits = int(d.statsCacheHits.Load())
+	s.TotalQueriesAnswered = int(d.statsQueriesAnswered.Load())
+	return s
 }
 
 // UpdateStats updates the DNS statistics
 func (d *DNSResolverData) UpdateStats(stats DNSStats) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.Stats = stats
+	d.mu.Unlock()
+	d.statsCacheHits.Store(int64(stats.TotalCacheHits))
+	d.statsQueriesAnswered.Store(int64(stats.TotalQueriesAnswered))
 }
 
 // GetServers returns the current DNS servers
@@ -362,9 +370,7 @@ func (d *DNSResolverData) IncrementTotalQueries() {
 
 // IncrementCacheHits increments the cache hits count
 func (d *DNSResolverData) IncrementCacheHits() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.Stats.TotalCacheHits++
+	d.statsCacheHits.Add(1)
 }
 
 // IncrementTotalBlocks increments the total blocks count
@@ -383,9 +389,7 @@ func (d *DNSResolverData) IncrementQueriesForwarded() {
 
 // IncrementQueriesAnswered increments the queries answered count
 func (d *DNSResolverData) IncrementQueriesAnswered() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.Stats.TotalQueriesAnswered++
+	d.statsQueriesAnswered.Add(1)
 }
 
 // GetBlockList returns the adblock list
@@ -555,9 +559,10 @@ func SaveCacheRecords(cacheRecords []dnsrecordcache.CacheRecord) error {
 }
 
 func (d *DNSResolverData) storeRecords(records []dnsrecords.DNSRecord, persist bool) {
+	dnsIdx := buildDNSRecordIndex(records)
 	d.mu.Lock()
 	d.DNSRecords = records
-	d.rebuildDNSRecordIndexLocked()
+	d.dnsRecordIdx = dnsIdx
 	d.mu.Unlock()
 	if persist {
 		if err := SaveDNSRecords(records); err != nil {
@@ -567,9 +572,10 @@ func (d *DNSResolverData) storeRecords(records []dnsrecords.DNSRecord, persist b
 }
 
 func (d *DNSResolverData) storeCacheRecords(records []dnsrecordcache.CacheRecord, persist bool) {
+	cacheIdx := buildCacheRecordIndex(records)
 	d.mu.Lock()
 	d.CacheRecords = records
-	d.rebuildCacheIndexLocked()
+	d.cacheRecordIdx = cacheIdx
 	d.mu.Unlock()
 	if persist && d.persistCh != nil {
 		select {

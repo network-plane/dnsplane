@@ -42,6 +42,8 @@ type Store interface {
 	HasAnyCachedRecords() bool
 	FilterHealthyUpstreamAddresses(addrs []string) []string
 	RecordUpstreamForwardSuccess(addressPort string)
+	// TryFastLocalOrCache: single-lock local-then-cache for non-PTR; returns handled if answered from RAM.
+	TryFastLocalOrCache(qname, recordType string, qtypePTR bool) (handled bool, local []dns.RR, cache *dns.RR)
 }
 
 // UpstreamClient issues DNS queries to upstream resolvers.
@@ -145,17 +147,24 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 	}
 	qtypeKey := perfQTypeString(question)
 
-	// No local zone: one cache lookup; hit returns immediately without upstream goroutines (stable low ms).
-	cacheProbedNoLocal := false
-	if !r.store.HasAnyLocalRecords() && settings.CacheRecords && r.store.HasAnyCachedRecords() {
-		if rr := r.store.LookupCacheRR(question.Name, recordType); rr != nil {
-			r.store.IncrementCacheHits()
-			r.processCacheRecord(question, rr, response)
-			prep := uint64(time.Since(t0))
-			data.RecordResolverAResolve(data.PerfOutcomeCache, prep, prep, 0, 0, 0, qtypeKey)
-			return
+	isPTR := question.Qtype == dns.TypePTR
+	if !isPTR {
+		handled, loc, crr := r.store.TryFastLocalOrCache(question.Name, recordType, false)
+		if handled {
+			if len(loc) > 0 {
+				r.processCachedRecords(question, loc, response)
+				prep := uint64(time.Since(t0))
+				data.RecordResolverAResolve(data.PerfOutcomeLocal, prep, prep, 0, 0, 0, qtypeKey)
+				return
+			}
+			if crr != nil {
+				r.store.IncrementCacheHits()
+				r.processCacheRecord(question, crr, response)
+				prep := uint64(time.Since(t0))
+				data.RecordResolverAResolve(data.PerfOutcomeCache, prep, prep, 0, 0, 0, qtypeKey)
+				return
+			}
 		}
-		cacheProbedNoLocal = true
 	}
 
 	allServers := r.store.GetServers()
@@ -193,26 +202,26 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 	capCh := 2 + nUp
 	ch := make(chan parMsg, capCh)
 
-	if r.store.HasAnyLocalRecords() {
+	if isPTR {
 		go func() {
 			t1 := time.Now()
 			lr := r.store.LookupLocalRRs(question.Name, recordType, settings.DNSRecordSettings.AutoBuildPTRFromA)
 			ch <- parMsg{kind: parKindLocal, local: lr, elapsed: time.Since(t1)}
 		}()
+		if !settings.CacheRecords {
+			ch <- parMsg{kind: parKindCache, elapsed: 0}
+		} else if r.store.HasAnyCachedRecords() {
+			go func() {
+				t1 := time.Now()
+				cr := r.store.LookupCacheRR(question.Name, recordType)
+				ch <- parMsg{kind: parKindCache, cache: cr, elapsed: time.Since(t1)}
+			}()
+		} else {
+			ch <- parMsg{kind: parKindCache, elapsed: 0}
+		}
 	} else {
+		// Local and cache already ruled out under one lock; only upstream matters.
 		ch <- parMsg{kind: parKindLocal, elapsed: 0}
-	}
-	if !settings.CacheRecords {
-		ch <- parMsg{kind: parKindCache, elapsed: 0}
-	} else if cacheProbedNoLocal {
-		ch <- parMsg{kind: parKindCache, elapsed: 0}
-	} else if r.store.HasAnyCachedRecords() {
-		go func() {
-			t1 := time.Now()
-			cr := r.store.LookupCacheRR(question.Name, recordType)
-			ch <- parMsg{kind: parKindCache, cache: cr, elapsed: time.Since(t1)}
-		}()
-	} else {
 		ch <- parMsg{kind: parKindCache, elapsed: 0}
 	}
 	for _, srv := range serversToQuery {

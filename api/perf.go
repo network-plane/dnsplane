@@ -82,20 +82,30 @@ var perfPageTemplate = template.Must(template.New("perf").Parse(`<!DOCTYPE html>
         h += row('Avg prep (ms)', (a.avg_prep_ms != null ? a.avg_prep_ms.toFixed(3) : '—'));
         h += row('Max total (ms)', (a.max_total_ms != null ? a.max_total_ms.toFixed(3) : '—'));
         h += '</table></div>';
-        if (a.outcome_upstream > 0) {
-          h += '<div class="panel"><h2>Upstream path only</h2><table>';
-          h += row('Avg upstream wait (ms)', a.avg_upstream_wait_ms.toFixed(3));
-          h += row('Avg slowest upstream (ms)', a.avg_max_upstream_ms.toFixed(3));
-          h += row('Avg servers queried', a.avg_upstream_servers.toFixed(2));
-          h += '</table></div>';
-        }
-        h += '<div class="panel"><h2>Histogram — total time (ms)</h2><table><thead><tr><th>Bucket</th><th class="num">Count</th></tr></thead><tbody>';
-        (a.histogram_total_ms || []).forEach(function(b) {
+        h += '<div class="panel"><h2>Cache-only path (dnscache hit)</h2><table>';
+        h += row('Count', a.outcome_cache);
+        h += row('Avg total (ms)', (a.avg_total_ms_cache_only != null ? a.avg_total_ms_cache_only.toFixed(3) : '—'));
+        h += row('Max total (ms)', (a.max_total_ms_cache_only != null ? a.max_total_ms_cache_only.toFixed(3) : '—'));
+        h += '</table><p class="muted" style="margin:0.5rem 0 0 0;font-size:0.8rem">If tail latency in dig is here, resolver/cache path. If flat here but dig spikes, compare Upstream count.</p>';
+        h += '<table style="margin-top:0.75rem"><thead><tr><th>Bucket</th><th class="num">Count</th></tr></thead><tbody>';
+        (a.histogram_cache_only_ms || []).forEach(function(b) {
           h += '<tr><td>' + esc(b.label) + '</td><td class="num">' + b.count + '</td></tr>';
         });
         h += '</tbody></table></div>';
-        h += '<div class="panel"><h2>Histogram — upstream-miss path only</h2><table><thead><tr><th>Bucket</th><th class="num">Count</th></tr></thead><tbody>';
-        (a.histogram_upstream_ms || []).forEach(function(b) {
+        if (a.outcome_upstream > 0) {
+          h += '<div class="panel"><h2>Upstream path (any)</h2><table>';
+          h += row('Count', a.outcome_upstream);
+          h += row('Avg upstream wait (ms)', a.avg_upstream_wait_ms.toFixed(3));
+          h += row('Avg slowest upstream (ms)', a.avg_max_upstream_ms.toFixed(3));
+          h += row('Avg servers queried', a.avg_upstream_servers.toFixed(2));
+          h += '</table><table style="margin-top:0.75rem"><thead><tr><th>Bucket</th><th class="num">Count</th></tr></thead><tbody>';
+          (a.histogram_upstream_ms || []).forEach(function(b) {
+            h += '<tr><td>' + esc(b.label) + '</td><td class="num">' + b.count + '</td></tr>';
+          });
+          h += '</tbody></table></div>';
+        }
+        h += '<div class="panel"><h2>Histogram — all outcomes (mixed)</h2><table><thead><tr><th>Bucket</th><th class="num">Count</th></tr></thead><tbody>';
+        (a.histogram_total_ms || []).forEach(function(b) {
           h += '<tr><td>' + esc(b.label) + '</td><td class="num">' + b.count + '</td></tr>';
         });
         h += '</tbody></table></div>';

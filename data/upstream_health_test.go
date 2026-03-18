@@ -5,9 +5,36 @@ package data
 
 import (
 	"testing"
+	"time"
 
 	"dnsplane/config"
+	"dnsplane/dnsrecordcache"
+	"dnsplane/dnsrecords"
 )
+
+func TestTryFastLocalOrCache_CacheHitWithLocalZoneElsewhere(t *testing.T) {
+	d := &DNSResolverData{
+		DNSRecords: []dnsrecords.DNSRecord{
+			{Name: "other.internal.", Type: "A", Value: "10.0.0.1", TTL: 60},
+		},
+		Settings: config.Config{CacheRecords: true},
+		CacheRecords: []dnsrecordcache.CacheRecord{
+			{
+				DNSRecord: dnsrecords.DNSRecord{Name: "example.com.", Type: "A", Value: "93.184.216.34", TTL: 60},
+				Expiry:    time.Now().Add(time.Hour),
+			},
+		},
+	}
+	d.mu.Lock()
+	d.rebuildDNSRecordIndexLocked()
+	d.rebuildCacheIndexLocked()
+	d.mu.Unlock()
+
+	ok, loc, crr := d.TryFastLocalOrCache("example.com.", "A", false)
+	if !ok || len(loc) != 0 || crr == nil {
+		t.Fatalf("want cache hit, got ok=%v loc=%d crr=%v", ok, len(loc), crr != nil)
+	}
+}
 
 func TestUpstreamHealthTracker_Filter(t *testing.T) {
 	tr := NewUpstreamHealthTracker()
