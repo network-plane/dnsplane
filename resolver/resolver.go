@@ -140,14 +140,15 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 		}
 	}
 	t0 := time.Now()
-	settings := r.store.GetResolverSettings()
 	recordType := dns.TypeToString[question.Qtype]
 	if recordType == "" {
 		recordType = perfQTypeString(question)
 	}
 	qtypeKey := perfQTypeString(question)
-
 	isPTR := question.Qtype == dns.TypePTR
+
+	// Local/cache first without loading settings — one RLock (TryFastLocalOrCache) instead of
+	// GetResolverSettings + TryFastLocalOrCache; matches the old dedicated A/cache hot path.
 	if !isPTR {
 		handled, loc, crr := r.store.TryFastLocalOrCache(question.Name, recordType, false)
 		if handled {
@@ -167,6 +168,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 		}
 	}
 
+	settings := r.store.GetResolverSettings()
 	allServers := r.store.GetServers()
 	dnsServers := dnsservers.GetServersForQuery(allServers, question.Name, true)
 	useWhitelist := false
