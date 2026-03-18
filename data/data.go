@@ -57,6 +57,7 @@ type DNSResolverData struct {
 	persistCh        chan struct{}
 	persistWg        sync.WaitGroup
 	persistCloseOnce sync.Once
+	upstreamHealth   *UpstreamHealthTracker
 }
 
 // DNSStats holds the data for the DNS statistics
@@ -161,6 +162,7 @@ func (d *DNSResolverData) Initialize() error {
 	d.CacheRecords = cache
 	d.rebuildDNSRecordIndexLocked()
 	d.rebuildCacheIndexLocked()
+	d.upstreamHealth = NewUpstreamHealthTracker()
 	d.BlockList = adblock.NewBlockList()
 	d.AdblockSources = nil
 

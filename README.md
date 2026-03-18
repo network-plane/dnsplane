@@ -41,6 +41,7 @@ flowchart TD
 | Doc | What it covers |
 |-----|----------------|
 | **[docs/host-tuning.md](docs/host-tuning.md)** | Optional **Linux OS / host tuning** for DNS latency: UDP buffer sizes, open-file limits, CPU governor, containers, and how to measure. |
+| **[docs/upstream-health.md](docs/upstream-health.md)** | **Upstream health checks**: periodic probes, marking servers down, config keys, logs, and **curl** examples. |
 
 **Planned:** DoT (DNS over TLS), DoH (DNS over HTTPS), and DNSSEC validation will be documented here once implemented (see [TODO](TODO.md)).
 
@@ -183,6 +184,7 @@ Besides `file_locations` (and `records_source`, `adblock_list_files`), the confi
 - **API:** `api` (bool), `apiport`
 - **Client access:** `server_socket` (UNIX socket), `server_tcp` (TCP address for remote TUI clients)
 - **Behaviour:** `cache_records`, `full_stats`, `full_stats_dir`
+- **Upstream health (optional):** `upstream_health_check_enabled`, `upstream_health_check_failures` (default 3), `upstream_health_check_interval_seconds` (default 30), `upstream_health_check_query_name` (default `google.com.`). When enabled, failed upstreams are skipped for forwarding until they pass a probe or a query succeeds. See [docs/upstream-health.md](docs/upstream-health.md).
 - **DNSRecordSettings:** `auto_build_ptr_from_a`, `forward_ptr_queries`, `add_updates_records`
 - **Log:** `log_dir`, `log_severity`, `log_rotation`, `log_rotation_size_mb`, `log_rotation_time_days`
 
@@ -198,13 +200,35 @@ Enable the REST API with `"api": true` in `dnsplane.json` and set `apiport` (e.g
 | GET | `/ready` | Readiness: returns 200 when the API and DNS listener are both up, 503 otherwise. Response is JSON with `ready`, `api`, `dns`, `tui_client` (connected, addr, since), and `listeners` (dns_port, api_port, api_enabled, client_socket_path, client_tcp_address). Useful for Kubernetes readiness probes and load balancers. |
 | GET | `/dns/records` | List DNS records (same data as the TUI). Returns JSON with `records` and optional `filter`, `messages`. |
 | POST | `/dns/records` | Add a DNS record. Body: `{"name":"...","type":"A","value":"...","ttl":3600}`. |
-| GET | `/dns/servers` | List configured upstream DNS servers (read-only). Returns JSON `{"servers":[...]}` with address, port, active, local_resolver, adblocker, domain_whitelist, last_used, last_success. |
+| GET | `/dns/servers` | List upstreams plus health: `servers`, `upstream_health_check_enabled`, interval/failures hints, and `upstream_health` per `address_port` (unhealthy, consecutive_failures, last_probe_*, last_success_at). |
+| GET | `/dns/upstreams/health` | Same health slice and check settings without full server config. See [docs/upstream-health.md](docs/upstream-health.md). |
 | GET | `/stats` | Resolver stats as JSON: total_queries, total_cache_hits, total_blocks, total_queries_forwarded, total_queries_answered, server_start_time. When `full_stats` is enabled in config, includes `full_stats.enabled`, `full_stats.requesters_count`, `full_stats.domains_count`. |
 | GET | `/metrics` | Prometheus text format: counters (e.g. `dnsplane_queries_total`, `dnsplane_cache_hits_total`, `dnsplane_blocks_total`) and gauges (`dnsplane_server_start_time_seconds`). When full_stats is enabled, adds `dnsplane_fullstats_requesters_count` and `dnsplane_fullstats_domains_count`. |
 | GET | `/stats/page` | Read-only stats dashboard (HTML): dark-themed page with panels for resolver stats, data counts, status (API/DNS/TUI client, listeners), and when full_stats is enabled a Full stats panel with requesters/domains counts and top 10 requesters and top 10 domains. Use query `?full=N` (e.g. `?full=20`) to show top N instead of 10. |
 | GET | `/stats/perf` | A-record resolve performance: outcome counts (local / cache / upstream / none), avg and max latency, histograms, upstream-only averages. Counters accumulate until `POST /stats/perf/reset`. |
 | GET | `/stats/perf/page` | HTML dashboard for `/stats/perf` (auto-refresh every 2s, reset button). |
 | POST | `/stats/perf/reset` | Clears A-resolve perf counters (use before a benchmark run). |
+
+### curl examples (upstream health)
+
+With API on port **8080** (set `apiport` in config):
+
+```bash
+# Full upstream health JSON
+curl -sS http://127.0.0.1:8080/dns/upstreams/health | jq .
+
+# Servers plus embedded health
+curl -sS http://127.0.0.1:8080/dns/servers | jq '{servers: .servers, checks_enabled: .upstream_health_check_enabled, upstream_health: .upstream_health}'
+```
+
+Enable checks in `dnsplane.json`, then restart server:
+
+```json
+"upstream_health_check_enabled": true,
+"upstream_health_check_failures": 3,
+"upstream_health_check_interval_seconds": 30,
+"upstream_health_check_query_name": "google.com."
+```
 
 ## Logging
 
