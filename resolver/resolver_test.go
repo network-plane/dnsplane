@@ -87,6 +87,8 @@ func (s *whitelistIntegrationStore) IncrementQueriesAnswered() {}
 func (s *whitelistIntegrationStore) IncrementTotalBlocks()     {}
 func (s *whitelistIntegrationStore) HasAnyLocalRecords() bool  { return len(s.GetRecords()) > 0 }
 func (s *whitelistIntegrationStore) HasAnyCachedRecords() bool { return len(s.GetCacheRecords()) > 0 }
+func (s *whitelistIntegrationStore) FilterHealthyUpstreamAddresses(a []string) []string { return a }
+func (s *whitelistIntegrationStore) RecordUpstreamForwardSuccess(string)                 {}
 
 // TestWhitelistIntegration verifies that for a query matching a whitelist server only that server
 // is used, and for a query that does not match only the global server is used (integration: resolver + GetServersForQuery).
@@ -168,6 +170,8 @@ func (s *localRecordStore) IncrementQueriesAnswered()                         {}
 func (s *localRecordStore) IncrementTotalBlocks()                             {}
 func (s *localRecordStore) HasAnyLocalRecords() bool                          { return len(s.records) > 0 }
 func (s *localRecordStore) HasAnyCachedRecords() bool                         { return false }
+func (s *localRecordStore) FilterHealthyUpstreamAddresses(a []string) []string { return a }
+func (s *localRecordStore) RecordUpstreamForwardSuccess(string)                 {}
 
 // TestResolver_LocalRecordReturnsA is a minimal integration test: resolver with in-memory store
 // holding one A record; one A query returns that record (local wins, no upstream).
@@ -224,6 +228,8 @@ func (s *emptyStore) IncrementQueriesAnswered()                         {}
 func (s *emptyStore) IncrementTotalBlocks()                             {}
 func (s *emptyStore) HasAnyLocalRecords() bool                          { return false }
 func (s *emptyStore) HasAnyCachedRecords() bool                         { return false }
+func (s *emptyStore) FilterHealthyUpstreamAddresses(a []string) []string { return a }
+func (s *emptyStore) RecordUpstreamForwardSuccess(string)                 {}
 
 // TestResolver_NoLocalCacheUpstream_ReturnsEmpty verifies that when the store has no local
 // records, no cache, and no upstream servers (and no fallback), the resolver returns
@@ -272,6 +278,8 @@ func (s *upstreamOnlyStore) IncrementQueriesAnswered()                         {
 func (s *upstreamOnlyStore) IncrementTotalBlocks()                             {}
 func (s *upstreamOnlyStore) HasAnyLocalRecords() bool                          { return false }
 func (s *upstreamOnlyStore) HasAnyCachedRecords() bool                         { return false }
+func (s *upstreamOnlyStore) FilterHealthyUpstreamAddresses(a []string) []string { return a }
+func (s *upstreamOnlyStore) RecordUpstreamForwardSuccess(string)              {}
 
 func TestResolver_AAAA_upstreamFastPath(t *testing.T) {
 	srv := dnsservers.DNSServer{Address: "8.8.8.8", Port: "53", Active: true}

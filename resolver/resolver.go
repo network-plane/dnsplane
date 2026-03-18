@@ -40,6 +40,8 @@ type Store interface {
 	// HasAnyLocalRecords / HasAnyCachedRecords enable short-circuits without copying slices.
 	HasAnyLocalRecords() bool
 	HasAnyCachedRecords() bool
+	FilterHealthyUpstreamAddresses(addrs []string) []string
+	RecordUpstreamForwardSuccess(addressPort string)
 }
 
 // UpstreamClient issues DNS queries to upstream resolvers.
@@ -169,6 +171,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 			serversToQuery = append(append([]string(nil), dnsServers...), fallback)
 		}
 	}
+	serversToQuery = r.store.FilterHealthyUpstreamAddresses(serversToQuery)
 	nUp := len(serversToQuery)
 
 	ctx, cancel := context.WithTimeout(ctx, r.upstreamTimeout)
@@ -279,6 +282,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 		}
 		if localDone && cacheDone && cacheHit == nil && firstUp != nil {
 			cancel()
+			r.store.RecordUpstreamForwardSuccess(firstUp.server)
 			r.processUpstreamAnswer(question, firstUp.msg, response)
 			p := prepNs()
 			var w uint64

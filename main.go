@@ -369,6 +369,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	monitorDNSErrors()
 
+	go runUpstreamHealthProbeLoop(dnsData, dnsLogger)
+
 	appState.SetReadlineConfig(readline.Config{
 		Prompt:                 "> ",
 		HistoryFile:            "/tmp/dnsplane.history",

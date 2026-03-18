@@ -85,6 +85,14 @@ type Config struct {
 	Log                LogConfig         `json:"log"`
 	// AdblockListFiles is a list of paths to adblock list files (e.g. hosts-style). Loaded in order at startup and merged into a single block list.
 	AdblockListFiles []string `json:"adblock_list_files,omitempty"`
+	// UpstreamHealthCheckEnabled runs periodic probes and excludes failing upstreams from forwarding until they recover.
+	UpstreamHealthCheckEnabled bool `json:"upstream_health_check_enabled,omitempty"`
+	// UpstreamHealthCheckFailures is consecutive probe failures before marking an upstream unhealthy (default 3).
+	UpstreamHealthCheckFailures int `json:"upstream_health_check_failures,omitempty"`
+	// UpstreamHealthCheckIntervalSeconds is seconds between probe rounds (default 30).
+	UpstreamHealthCheckIntervalSeconds int `json:"upstream_health_check_interval_seconds,omitempty"`
+	// UpstreamHealthCheckQueryName is the QNAME for probes (default "google.com.").
+	UpstreamHealthCheckQueryName string `json:"upstream_health_check_query_name,omitempty"`
 }
 
 // Loaded contains the configuration together with metadata about the source file.
@@ -326,6 +334,12 @@ func (c *Config) applyDefaults(configDir string) {
 		c.FullStatsDir = filepath.Join(configDir, "fullstats")
 	} else {
 		c.FullStatsDir = ensureAbsolutePath(configDir, c.FullStatsDir, "fullstats")
+	}
+	if c.UpstreamHealthCheckFailures < 0 {
+		c.UpstreamHealthCheckFailures = 0
+	}
+	if c.UpstreamHealthCheckIntervalSeconds < 0 {
+		c.UpstreamHealthCheckIntervalSeconds = 0
 	}
 
 	c.FileLocations.DNSServerFile = ensureAbsolutePath(configDir, c.FileLocations.DNSServerFile, "dnsservers.json")
