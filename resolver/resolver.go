@@ -145,6 +145,19 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 	}
 	qtypeKey := perfQTypeString(question)
 
+	// No local zone: one cache lookup; hit returns immediately without upstream goroutines (stable low ms).
+	cacheProbedNoLocal := false
+	if !r.store.HasAnyLocalRecords() && settings.CacheRecords && r.store.HasAnyCachedRecords() {
+		if rr := r.store.LookupCacheRR(question.Name, recordType); rr != nil {
+			r.store.IncrementCacheHits()
+			r.processCacheRecord(question, rr, response)
+			prep := uint64(time.Since(t0))
+			data.RecordResolverAResolve(data.PerfOutcomeCache, prep, prep, 0, 0, 0, qtypeKey)
+			return
+		}
+		cacheProbedNoLocal = true
+	}
+
 	allServers := r.store.GetServers()
 	dnsServers := dnsservers.GetServersForQuery(allServers, question.Name, true)
 	useWhitelist := false
@@ -190,6 +203,8 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 		ch <- parMsg{kind: parKindLocal, elapsed: 0}
 	}
 	if !settings.CacheRecords {
+		ch <- parMsg{kind: parKindCache, elapsed: 0}
+	} else if cacheProbedNoLocal {
 		ch <- parMsg{kind: parKindCache, elapsed: 0}
 	} else if r.store.HasAnyCachedRecords() {
 		go func() {
