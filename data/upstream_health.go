@@ -13,8 +13,8 @@ import (
 
 // UpstreamHealthTracker tracks per-upstream probe/forward outcomes when health checks are enabled.
 type UpstreamHealthTracker struct {
-	mu  sync.RWMutex
-	by  map[string]*upstreamHealthEntry
+	mu sync.RWMutex
+	by map[string]*upstreamHealthEntry
 }
 
 type upstreamHealthEntry struct {
@@ -112,11 +112,11 @@ func (t *UpstreamHealthTracker) IsUnhealthy(key string) bool {
 // UpstreamHealthStatus is JSON for API responses.
 type UpstreamHealthStatus struct {
 	AddressPort         string `json:"address_port"`
-	Unhealthy         bool   `json:"unhealthy"`
+	Unhealthy           bool   `json:"unhealthy"`
 	ConsecutiveFailures int    `json:"consecutive_failures"`
-	LastProbeAt       string `json:"last_probe_at,omitempty"`
-	LastProbeError    string `json:"last_probe_error,omitempty"`
-	LastSuccessAt     string `json:"last_success_at,omitempty"`
+	LastProbeAt         string `json:"last_probe_at,omitempty"`
+	LastProbeError      string `json:"last_probe_error,omitempty"`
+	LastSuccessAt       string `json:"last_success_at,omitempty"`
 }
 
 // Snapshot returns one row per configured active upstream key seen in probes or forwards.

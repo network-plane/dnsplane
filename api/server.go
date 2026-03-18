@@ -253,11 +253,11 @@ func listServersHandler(w http.ResponseWriter, r *http.Request) {
 		failures = 3
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"servers":                         servers,
-		"upstream_health_check_enabled":   enabled,
+		"servers":                                servers,
+		"upstream_health_check_enabled":          enabled,
 		"upstream_health_check_interval_seconds": interval,
-		"upstream_health_check_failures":  failures,
-		"upstream_health":                 health,
+		"upstream_health_check_failures":         failures,
+		"upstream_health":                        health,
 	})
 }
 
@@ -279,11 +279,11 @@ func upstreamHealthHandler(w http.ResponseWriter, r *http.Request) {
 		q = "google.com."
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"upstream_health_check_enabled":   enabled,
+		"upstream_health_check_enabled":          enabled,
 		"upstream_health_check_interval_seconds": interval,
-		"upstream_health_check_failures":  failures,
-		"upstream_health_check_query_name": q,
-		"upstreams":                       health,
+		"upstream_health_check_failures":         failures,
+		"upstream_health_check_query_name":       q,
+		"upstreams":                              health,
 	})
 }
 
