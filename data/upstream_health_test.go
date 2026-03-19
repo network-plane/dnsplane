@@ -30,7 +30,7 @@ func TestTryFastLocalOrCache_CacheHitWithLocalZoneElsewhere(t *testing.T) {
 	d.rebuildCacheIndexLocked()
 	d.mu.Unlock()
 
-	ok, loc, crr := d.TryFastLocalOrCache("example.com.", "A", false)
+	ok, loc, crr, _ := d.TryFastLocalOrCache("example.com.", "A", false)
 	if !ok || len(loc) != 0 || crr == nil {
 		t.Fatalf("want cache hit, got ok=%v loc=%d crr=%v", ok, len(loc), crr != nil)
 	}

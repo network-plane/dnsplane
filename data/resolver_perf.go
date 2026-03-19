@@ -17,6 +17,9 @@ const (
 	PerfOutcomeNone
 )
 
+// resolverPerfRecordingEnabled: set true to populate /stats/perf (adds work on every resolve).
+const resolverPerfRecordingEnabled = true
+
 var (
 	perfMu sync.Mutex
 
@@ -94,6 +97,9 @@ func perfBucketIndex(totalNs uint64) int {
 // upstreamServers: len(serversToQuery) for upstream outcome.
 // qtype: dns.TypeToString e.g. "A", "AAAA"; empty skips per-type rollup.
 func RecordResolverAResolve(outcome int, totalNs, prepNs, maxUpstreamNs, upstreamWaitNs uint64, upstreamServers int, qtype string) {
+	if !resolverPerfRecordingEnabled {
+		return
+	}
 	if perfFirstRecord.Load() == 0 {
 		perfFirstRecord.CompareAndSwap(0, time.Now().UnixNano())
 	}

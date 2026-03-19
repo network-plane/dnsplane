@@ -45,22 +45,25 @@ type AdblockSource struct {
 
 // DNSResolverData holds all the data for the DNS resolver
 type DNSResolverData struct {
-	Settings             DNSResolverSettings
-	Stats                DNSStats
-	DNSServers           []dnsservers.DNSServer
-	DNSRecords           []dnsrecords.DNSRecord
-	CacheRecords         []dnsrecordcache.CacheRecord
-	cacheRecordIdx       map[string][]int // normalized name|type -> CacheRecords indices
-	dnsRecordIdx         map[string][]int // normalized name|type -> DNSRecords indices (non-PTR)
-	BlockList            *adblock.BlockList
-	AdblockSources       []AdblockSource // loaded files/URLs and count per source (order preserved)
-	mu                   sync.RWMutex
-	persistCh            chan struct{}
-	persistWg            sync.WaitGroup
-	persistCloseOnce     sync.Once
-	upstreamHealth       *UpstreamHealthTracker
-	statsCacheHits       atomic.Int64
-	statsQueriesAnswered atomic.Int64
+	Settings              DNSResolverSettings
+	Stats                 DNSStats
+	DNSServers            []dnsservers.DNSServer
+	DNSRecords            []dnsrecords.DNSRecord
+	CacheRecords          []dnsrecordcache.CacheRecord
+	cacheRecordIdx        map[string][]int // normalized name|type -> CacheRecords indices
+	dnsRecordIdx          map[string][]int // normalized name|type -> DNSRecords indices (non-PTR)
+	BlockList             *adblock.BlockList
+	AdblockSources        []AdblockSource // loaded files/URLs and count per source (order preserved)
+	mu                    sync.RWMutex
+	persistCh             chan struct{}
+	persistWg             sync.WaitGroup
+	persistCloseOnce      sync.Once
+	upstreamHealth        *UpstreamHealthTracker
+	statsCacheHits        atomic.Int64
+	statsQueriesAnswered  atomic.Int64
+	statsTotalQueries     atomic.Int64
+	statsTotalBlocks      atomic.Int64
+	statsQueriesForwarded atomic.Int64
 }
 
 // DNSStats holds the data for the DNS statistics
@@ -274,7 +277,10 @@ func (d *DNSResolverData) GetStats() DNSStats {
 	d.mu.RLock()
 	s := d.Stats
 	d.mu.RUnlock()
+	s.TotalQueries = int(d.statsTotalQueries.Load())
 	s.TotalCacheHits = int(d.statsCacheHits.Load())
+	s.TotalBlocks = int(d.statsTotalBlocks.Load())
+	s.TotalQueriesForwarded = int(d.statsQueriesForwarded.Load())
 	s.TotalQueriesAnswered = int(d.statsQueriesAnswered.Load())
 	return s
 }
@@ -284,7 +290,10 @@ func (d *DNSResolverData) UpdateStats(stats DNSStats) {
 	d.mu.Lock()
 	d.Stats = stats
 	d.mu.Unlock()
+	d.statsTotalQueries.Store(int64(stats.TotalQueries))
 	d.statsCacheHits.Store(int64(stats.TotalCacheHits))
+	d.statsTotalBlocks.Store(int64(stats.TotalBlocks))
+	d.statsQueriesForwarded.Store(int64(stats.TotalQueriesForwarded))
 	d.statsQueriesAnswered.Store(int64(stats.TotalQueriesAnswered))
 }
 
@@ -363,9 +372,7 @@ func (d *DNSResolverData) UpdateCacheRecordsInMemory(records []dnsrecordcache.Ca
 
 // IncrementTotalQueries increments the total queries count
 func (d *DNSResolverData) IncrementTotalQueries() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.Stats.TotalQueries++
+	d.statsTotalQueries.Add(1)
 }
 
 // IncrementCacheHits increments the cache hits count
@@ -375,16 +382,12 @@ func (d *DNSResolverData) IncrementCacheHits() {
 
 // IncrementTotalBlocks increments the total blocks count
 func (d *DNSResolverData) IncrementTotalBlocks() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.Stats.TotalBlocks++
+	d.statsTotalBlocks.Add(1)
 }
 
 // IncrementQueriesForwarded increments the queries forwarded count
 func (d *DNSResolverData) IncrementQueriesForwarded() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.Stats.TotalQueriesForwarded++
+	d.statsQueriesForwarded.Add(1)
 }
 
 // IncrementQueriesAnswered increments the queries answered count

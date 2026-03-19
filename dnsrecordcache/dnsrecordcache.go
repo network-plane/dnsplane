@@ -27,8 +27,9 @@ var (
 	ErrInvalidArgs   = errors.New("invalid arguments")
 )
 
-// Add a new record to the cache
-func Add(cacheRecordsData []CacheRecord, record *dns.RR) []CacheRecord {
+// Add a new record to the cache. minTTL overrides short upstream TTLs:
+// the cache entry lives for max(original TTL, minTTL) seconds.
+func Add(cacheRecordsData []CacheRecord, record *dns.RR, minTTL uint32) []CacheRecord {
 	var value string
 
 	switch r := (*record).(type) {
@@ -50,14 +51,19 @@ func Add(cacheRecordsData []CacheRecord, record *dns.RR) []CacheRecord {
 		value = (*record).String()
 	}
 
+	ttl := (*record).Header().Ttl
+	if minTTL > 0 && ttl < minTTL {
+		ttl = minTTL
+	}
+
 	cacheRecord := CacheRecord{
 		DNSRecord: dnsrecords.DNSRecord{
 			Name:  (*record).Header().Name,
 			Type:  dns.TypeToString[(*record).Header().Rrtype],
 			Value: value,
-			TTL:   (*record).Header().Ttl,
+			TTL:   ttl,
 		},
-		Expiry:    time.Now().Add(time.Duration((*record).Header().Ttl) * time.Second),
+		Expiry:    time.Now().Add(time.Duration(ttl) * time.Second),
 		Timestamp: time.Now(),
 	}
 

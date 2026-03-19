@@ -674,6 +674,7 @@ func getServerStatus(state *daemon.State) bool {
 
 // DNS
 func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
+	t0 := time.Now()
 	response := new(dns.Msg)
 	response.SetReply(request)
 	response.Authoritative = false
@@ -693,8 +694,18 @@ func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
 			dnsResolver.HandleQuestion(ctx, question, response)
 		}
 	}
+	resolveDone := time.Since(t0)
 
 	err := writer.WriteMsg(response)
+	total := time.Since(t0)
+
+	if total > 10*time.Millisecond {
+		qname := ""
+		if len(request.Question) > 0 {
+			qname = request.Question[0].Name
+		}
+		fmt.Printf("[SLOW] %s resolve=%s write=%s total=%s\n", qname, resolveDone, total-resolveDone, total)
+	}
 
 	// Everything after the reply is async so the client never waits on logging or stats.
 	go func() {

@@ -19,7 +19,7 @@ func TestAdd_List(t *testing.T) {
 		A:   []byte{1, 2, 3, 4},
 	}
 	var rr dns.RR = a
-	cache = Add(cache, &rr)
+	cache = Add(cache, &rr, 0)
 	if len(cache) != 1 {
 		t.Fatalf("Add len = %d, want 1", len(cache))
 	}
@@ -40,8 +40,8 @@ func TestAdd_Dedupe(t *testing.T) {
 		A:   []byte{10, 0, 0, 1},
 	}
 	var rr dns.RR = a
-	cache = Add(cache, &rr)
-	cache = Add(cache, &rr)
+	cache = Add(cache, &rr, 0)
+	cache = Add(cache, &rr, 0)
 	if len(cache) != 1 {
 		t.Errorf("Add same record twice should dedupe: len = %d", len(cache))
 	}
