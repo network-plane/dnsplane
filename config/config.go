@@ -99,6 +99,11 @@ type Config struct {
 	// StaleWhileRevalidate when true serves expired cache entries immediately (with TTL=1) while
 	// refreshing from upstream in the background. Eliminates latency spikes on cache expiry.
 	StaleWhileRevalidate bool `json:"stale_while_revalidate,omitempty"`
+	// CacheWarmEnabled keeps the resolver hot by performing a lightweight self-query every
+	// CacheWarmIntervalSeconds. Prevents cold-start latency after idle periods. Default true.
+	CacheWarmEnabled bool `json:"cache_warm_enabled,omitempty"`
+	// CacheWarmIntervalSeconds is the interval between keep-alive self-queries (default 10).
+	CacheWarmIntervalSeconds int `json:"cache_warm_interval_seconds,omitempty"`
 }
 
 // Loaded contains the configuration together with metadata about the source file.
@@ -306,8 +311,10 @@ func defaultConfig(baseDir string) *Config {
 			AutoBuildPTRFromA: true,
 			ForwardPTRQueries: false,
 		},
-		MinCacheTTLSeconds:   600,
-		StaleWhileRevalidate: true,
+		MinCacheTTLSeconds:    600,
+		StaleWhileRevalidate:  true,
+		CacheWarmEnabled:      true,
+		CacheWarmIntervalSeconds: 10,
 		Log: LogConfig{
 			Dir:            logDir,
 			Severity:       "none",
@@ -351,6 +358,9 @@ func (c *Config) applyDefaults(configDir string) {
 	}
 	if c.MinCacheTTLSeconds < 0 {
 		c.MinCacheTTLSeconds = 0
+	}
+	if c.CacheWarmIntervalSeconds < 1 {
+		c.CacheWarmIntervalSeconds = 10
 	}
 
 	c.FileLocations.DNSServerFile = ensureAbsolutePath(configDir, c.FileLocations.DNSServerFile, "dnsservers.json")
@@ -567,6 +577,12 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	}
 	if r, ok := raw["stale_while_revalidate"]; ok {
 		_ = json.Unmarshal(r, &c.StaleWhileRevalidate)
+	}
+	if r, ok := raw["cache_warm_enabled"]; ok {
+		_ = json.Unmarshal(r, &c.CacheWarmEnabled)
+	}
+	if r, ok := raw["cache_warm_interval_seconds"]; ok {
+		_ = json.Unmarshal(r, &c.CacheWarmIntervalSeconds)
 	}
 	return nil
 }

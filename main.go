@@ -370,6 +370,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	monitorDNSErrors()
 
 	go runUpstreamHealthProbeLoop(dnsData, dnsLogger)
+	go runCacheWarmLoop(dnsData, port)
 
 	appState.SetReadlineConfig(readline.Config{
 		Prompt:                 "> ",
@@ -670,6 +671,34 @@ func stopDNSServer(state *daemon.State) {
 
 func getServerStatus(state *daemon.State) bool {
 	return state.ServerStatus()
+}
+
+// runCacheWarmLoop sends a lightweight self-query at a fixed interval to keep
+// the Go process warm (goroutines scheduled, CPU caches hot, memory resident).
+func runCacheWarmLoop(dnsData *data.DNSResolverData, dnsPort string) {
+	for {
+		cfg := dnsData.GetResolverSettings()
+		if !cfg.CacheWarmEnabled {
+			time.Sleep(30 * time.Second)
+			continue
+		}
+		interval := time.Duration(cfg.CacheWarmIntervalSeconds) * time.Second
+		if interval < 1*time.Second {
+			interval = 10 * time.Second
+		}
+		time.Sleep(interval)
+
+		port := strings.TrimSpace(dnsPort)
+		if port == "" {
+			port = "53"
+		}
+		m := new(dns.Msg)
+		m.SetQuestion("localhost.", dns.TypeA)
+		m.RecursionDesired = false
+		c := new(dns.Client)
+		c.Timeout = 1 * time.Second
+		_, _, _ = c.Exchange(m, "127.0.0.1:"+port)
+	}
 }
 
 // DNS
