@@ -49,11 +49,14 @@ func (d *DNSResolverData) rebuildDNSRecordIndexLocked() {
 }
 
 // lookupCacheRRLocked requires d.mu RLock held.
-func (d *DNSResolverData) lookupCacheRRLocked(qname, recordType string, now time.Time) *dns.RR {
+// When stale is true, returns expired entries with TTL=1 (for stale-while-revalidate).
+// The second return value is true when the returned entry is stale (expired).
+func (d *DNSResolverData) lookupCacheRRLocked(qname, recordType string, now time.Time, stale bool) (*dns.RR, bool) {
 	if len(d.CacheRecords) == 0 {
-		return nil
+		return nil, false
 	}
 	k := dnsCacheIdxKey(qname, recordType)
+	var bestStale *dnsrecords.DNSRecord
 	for _, i := range d.cacheRecordIdx[k] {
 		if i < 0 || i >= len(d.CacheRecords) {
 			continue
@@ -61,7 +64,10 @@ func (d *DNSResolverData) lookupCacheRRLocked(qname, recordType string, now time
 		rec := &d.CacheRecords[i]
 		if now.Before(rec.Expiry) {
 			ttl := uint32(rec.Expiry.Sub(now).Seconds())
-			return dnsRecordToRRForLookup(&rec.DNSRecord, ttl, nil)
+			return dnsRecordToRRForLookup(&rec.DNSRecord, ttl, nil), false
+		}
+		if stale && bestStale == nil {
+			bestStale = &rec.DNSRecord
 		}
 	}
 	for i := range d.CacheRecords {
@@ -74,17 +80,24 @@ func (d *DNSResolverData) lookupCacheRRLocked(qname, recordType string, now time
 		}
 		if now.Before(rec.Expiry) {
 			ttl := uint32(rec.Expiry.Sub(now).Seconds())
-			return dnsRecordToRRForLookup(&rec.DNSRecord, ttl, nil)
+			return dnsRecordToRRForLookup(&rec.DNSRecord, ttl, nil), false
+		}
+		if stale && bestStale == nil {
+			bestStale = &rec.DNSRecord
 		}
 	}
-	return nil
+	if bestStale != nil {
+		return dnsRecordToRRForLookup(bestStale, 1, nil), true
+	}
+	return nil, false
 }
 
 // LookupCacheRR returns the first non-expired cached RR for name+type, or nil.
 func (d *DNSResolverData) LookupCacheRR(qname, recordType string) *dns.RR {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	return d.lookupCacheRRLocked(qname, recordType, time.Now())
+	rr, _ := d.lookupCacheRRLocked(qname, recordType, time.Now(), false)
+	return rr
 }
 
 // lookupLocalNonPTRLocked requires d.mu RLock held; not for PTR qtype.
@@ -113,26 +126,29 @@ func (d *DNSResolverData) lookupLocalNonPTRLocked(qname, recordType string) []dn
 }
 
 // TryFastLocalOrCache does local-then-cache under a single RLock. For PTR queries returns handled=false.
-func (d *DNSResolverData) TryFastLocalOrCache(qname, recordType string, qtypePTR bool) (handled bool, local []dns.RR, cache *dns.RR) {
+// When stale-while-revalidate is enabled, expired cache entries are returned (with isStale=true)
+// so the caller can serve them immediately and refresh in the background.
+func (d *DNSResolverData) TryFastLocalOrCache(qname, recordType string, qtypePTR bool) (handled bool, local []dns.RR, cache *dns.RR, isStale bool) {
 	if qtypePTR {
-		return false, nil, nil
+		return false, nil, nil, false
 	}
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	if len(d.DNSRecords) > 0 {
 		local = d.lookupLocalNonPTRLocked(qname, recordType)
 		if len(local) > 0 {
-			return true, local, nil
+			return true, local, nil, false
 		}
 	}
 	if !d.Settings.CacheRecords || len(d.CacheRecords) == 0 {
-		return false, nil, nil
+		return false, nil, nil, false
 	}
-	cache = d.lookupCacheRRLocked(qname, recordType, time.Now())
+	allowStale := d.Settings.StaleWhileRevalidate
+	cache, isStale = d.lookupCacheRRLocked(qname, recordType, time.Now(), allowStale)
 	if cache != nil {
-		return true, nil, cache
+		return true, nil, cache, isStale
 	}
-	return false, nil, nil
+	return false, nil, nil, false
 }
 
 // LookupLocalRRs returns local RRs for name+type. PTR (and auto-build PTR) uses a full scan.
