@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -44,17 +45,22 @@ type AdblockSource struct {
 
 // DNSResolverData holds all the data for the DNS resolver
 type DNSResolverData struct {
-	Settings         DNSResolverSettings
-	Stats            DNSStats
-	DNSServers       []dnsservers.DNSServer
-	DNSRecords       []dnsrecords.DNSRecord
-	CacheRecords     []dnsrecordcache.CacheRecord
-	BlockList        *adblock.BlockList
-	AdblockSources   []AdblockSource // loaded files/URLs and count per source (order preserved)
-	mu               sync.RWMutex
-	persistCh        chan struct{}
-	persistWg        sync.WaitGroup
-	persistCloseOnce sync.Once
+	Settings             DNSResolverSettings
+	Stats                DNSStats
+	DNSServers           []dnsservers.DNSServer
+	DNSRecords           []dnsrecords.DNSRecord
+	CacheRecords         []dnsrecordcache.CacheRecord
+	cacheRecordIdx       map[string][]int // normalized name|type -> CacheRecords indices
+	dnsRecordIdx         map[string][]int // normalized name|type -> DNSRecords indices (non-PTR)
+	BlockList            *adblock.BlockList
+	AdblockSources       []AdblockSource // loaded files/URLs and count per source (order preserved)
+	mu                   sync.RWMutex
+	persistCh            chan struct{}
+	persistWg            sync.WaitGroup
+	persistCloseOnce     sync.Once
+	upstreamHealth       *UpstreamHealthTracker
+	statsCacheHits       atomic.Int64
+	statsQueriesAnswered atomic.Int64
 }
 
 // DNSStats holds the data for the DNS statistics
@@ -157,6 +163,9 @@ func (d *DNSResolverData) Initialize() error {
 	d.DNSServers = servers
 	d.DNSRecords = records
 	d.CacheRecords = cache
+	d.rebuildDNSRecordIndexLocked()
+	d.rebuildCacheIndexLocked()
+	d.upstreamHealth = NewUpstreamHealthTracker()
 	d.BlockList = adblock.NewBlockList()
 	d.AdblockSources = nil
 
@@ -248,8 +257,8 @@ func (d *DNSResolverData) GetResolverSettings() DNSResolverSettings {
 // UpdateSettings updates the DNS server settings
 func (d *DNSResolverData) UpdateSettings(settings DNSResolverSettings) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.Settings = settings
+	d.mu.Unlock()
 	SaveSettings(settings)
 }
 
@@ -263,15 +272,20 @@ func (d *DNSResolverData) UpdateSettingsInMemory(settings DNSResolverSettings) {
 // GetStats returns the current DNS statistics
 func (d *DNSResolverData) GetStats() DNSStats {
 	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return d.Stats
+	s := d.Stats
+	d.mu.RUnlock()
+	s.TotalCacheHits = int(d.statsCacheHits.Load())
+	s.TotalQueriesAnswered = int(d.statsQueriesAnswered.Load())
+	return s
 }
 
 // UpdateStats updates the DNS statistics
 func (d *DNSResolverData) UpdateStats(stats DNSStats) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.Stats = stats
+	d.mu.Unlock()
+	d.statsCacheHits.Store(int64(stats.TotalCacheHits))
+	d.statsQueriesAnswered.Store(int64(stats.TotalQueriesAnswered))
 }
 
 // GetServers returns the current DNS servers
@@ -284,11 +298,10 @@ func (d *DNSResolverData) GetServers() []dnsservers.DNSServer {
 // UpdateServers updates the DNS servers
 func (d *DNSResolverData) UpdateServers(servers []dnsservers.DNSServer) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.DNSServers = servers
-	err := SaveDNSServers(servers)
-	if err != nil {
-		fmt.Println("Failed to save cache records:", err)
+	d.mu.Unlock()
+	if err := SaveDNSServers(servers); err != nil {
+		fmt.Println("Failed to save DNS servers:", err)
 	}
 }
 
@@ -316,6 +329,28 @@ func (d *DNSResolverData) GetCacheRecords() []dnsrecordcache.CacheRecord {
 	return copyCacheRecords(d.CacheRecords)
 }
 
+// ReadDNSRecords runs fn with the live DNS record slice held under RLock.
+// Do not retain the slice after fn returns.
+func (d *DNSResolverData) ReadDNSRecords(fn func([]dnsrecords.DNSRecord)) {
+	if fn == nil {
+		return
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	fn(d.DNSRecords)
+}
+
+// ReadCacheRecords runs fn with the live cache slice held under RLock.
+// Do not retain the slice after fn returns.
+func (d *DNSResolverData) ReadCacheRecords(fn func([]dnsrecordcache.CacheRecord)) {
+	if fn == nil {
+		return
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	fn(d.CacheRecords)
+}
+
 // UpdateCacheRecords updates the cache records
 func (d *DNSResolverData) UpdateCacheRecords(records []dnsrecordcache.CacheRecord) {
 	d.storeCacheRecords(records, true)
@@ -335,9 +370,7 @@ func (d *DNSResolverData) IncrementTotalQueries() {
 
 // IncrementCacheHits increments the cache hits count
 func (d *DNSResolverData) IncrementCacheHits() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.Stats.TotalCacheHits++
+	d.statsCacheHits.Add(1)
 }
 
 // IncrementTotalBlocks increments the total blocks count
@@ -356,9 +389,7 @@ func (d *DNSResolverData) IncrementQueriesForwarded() {
 
 // IncrementQueriesAnswered increments the queries answered count
 func (d *DNSResolverData) IncrementQueriesAnswered() {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.Stats.TotalQueriesAnswered++
+	d.statsQueriesAnswered.Add(1)
 }
 
 // GetBlockList returns the adblock list
@@ -528,9 +559,11 @@ func SaveCacheRecords(cacheRecords []dnsrecordcache.CacheRecord) error {
 }
 
 func (d *DNSResolverData) storeRecords(records []dnsrecords.DNSRecord, persist bool) {
+	dnsIdx := buildDNSRecordIndex(records)
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	d.DNSRecords = records
+	d.dnsRecordIdx = dnsIdx
+	d.mu.Unlock()
 	if persist {
 		if err := SaveDNSRecords(records); err != nil {
 			fmt.Println("Failed to save DNS records:", err)
@@ -539,8 +572,10 @@ func (d *DNSResolverData) storeRecords(records []dnsrecords.DNSRecord, persist b
 }
 
 func (d *DNSResolverData) storeCacheRecords(records []dnsrecordcache.CacheRecord, persist bool) {
+	cacheIdx := buildCacheRecordIndex(records)
 	d.mu.Lock()
 	d.CacheRecords = records
+	d.cacheRecordIdx = cacheIdx
 	d.mu.Unlock()
 	if persist && d.persistCh != nil {
 		select {

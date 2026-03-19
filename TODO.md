@@ -40,15 +40,16 @@ No endpoints for dnsplane.json or any config.
 
 ## 4. DNS server health checks (upstream)
 
-- [ ] Config: enable/disable (e.g. `upstream_health_check_enabled`), consecutive failures before marking down (e.g. `upstream_health_check_failures`), check interval (e.g. `upstream_health_check_interval`).
-- [ ] Optional proactive health checks: periodically test each DNS server (send test query, check reply).
-- [ ] When a server is unreachable: put on notice, notify user (log and/or TUI/API), disable for forwarding until available again; re-check on interval and re-enable when it responds.
+- [x] Config: `upstream_health_check_enabled`, `upstream_health_check_failures`, `upstream_health_check_interval_seconds`, `upstream_health_check_query_name` (see [docs/upstream-health.md](docs/upstream-health.md)).
+- [x] Proactive probes: periodic **A** query per active upstream; mark down after N consecutive failures; exclude from forwarding; recover on probe success or successful forward.
+- [x] Logging: warn when an upstream becomes unhealthy.
+- [x] API: `GET /dns/servers` includes `upstream_health`; `GET /dns/upstreams/health`; curl examples in README and docs.
 
 ---
 
 ## 5. Observability
 
-- [ ] /metrics: add histograms/summaries for DNS latency; optional label by query type.
+- [ ] /metrics: Prometheus-style metrics (histograms/summaries for DNS latency; optional label by query type). _Note: in-app `/stats/perf` already has latency histograms and `by_query_type`; /metrics is for external scraping._
 - [ ] Structured logging: add fields (query name, type, upstream, duration) in DNS layer.
 - [ ] Expose build/version in /stats and optionally /ready or /version (Go version, OS, arch).
 
@@ -68,6 +69,8 @@ No endpoints for dnsplane.json or any config.
 
 ## 7. DoT/DoH server and DNSSEC
 
+_Inbound_ listeners on dnsplane. For **querying upstreams** over TLS/HTTPS see §6 (DoT/DoH upstream)._
+
 - [ ] DoT server: listen on configurable port (e.g. 853); config dot_enabled, dot_port, dot_cert_file, dot_key_file; new listener in main.go; reuse DNS handler.
 - [ ] DoH server: endpoint (e.g. /dns-query); config doh_enabled, doh_path; TLS required; call same resolver as UDP/TCP/DoT.
 - [ ] DNSSEC validation: validate upstream responses; set AD bit when valid; config dnssec_validate; optional strict SERVFAIL.
@@ -84,10 +87,9 @@ No endpoints for dnsplane.json or any config.
 
 ---
 
-## 9. Other
+## 9. REST API (follow-ups)
 
-- [ ] Upstream health in API: expose last success/failure per server (e.g. /dns/servers or /dns/upstreams); use LastUsed/LastSuccess from DNSServer; optional in stats dashboard.
-- [ ] GET /dns/records: optional query params ?name=, ?type= for filtering; mirror dnsrecords.List.
+- [ ] `GET /dns/records`: optional query params `?name=`, `?type=` for filtering; mirror `dnsrecords.List`.
 
 ---
 
@@ -98,7 +100,31 @@ No endpoints for dnsplane.json or any config.
 
 ---
 
-## 11. Clustered DNS (multi-node sync)
+## 11. Resolver performance plan (fast path + indexes)
+
+_Tracked here because the Cursor plan file is not in-repo._
+
+**Phase 1 — host + data path**
+
+- [x] Optional Linux host tuning doc: [`docs/host-tuning.md`](docs/host-tuning.md)
+- [x] In-memory indexes for cache + local records (`LookupCacheRR`, `LookupLocalRRs`, rebuild on load/store)
+- [x] Short-circuits (empty slices, cache disabled branch)
+- [x] Bench / verify latency improvement (measured ~1ms+ gain)
+
+**Phase 2 — unified resolution + observability**
+
+- [x] Single fast path for all QTYPEs: parallel local + cache + upstreams; priority local > cache > first upstream
+- [x] PTR: local-first (incl. A→PTR), then fast path on miss
+- [x] Resolver perf by query type (`by_query_type` in JSON + perf HTML page)
+- [x] README resolution diagram + link to host-tuning
+
+**Optional later**
+
+- [ ] Extra micro-opts if profiling shows a clear target.
+
+---
+
+## 12. Clustered DNS (multi-node sync)
 
 Goal: multiple dnsplane instances that stay in sync for records (and optionally other data) over a custom protocol.
 
@@ -112,7 +138,7 @@ Goal: multiple dnsplane instances that stay in sync for records (and optionally 
 
 ---
 
-## 12. ISPConfig and cPanel compatibility
+## 13. ISPConfig and cPanel compatibility
 
 Goal: replace BIND/PowerDNS behind ISPConfig or cPanel; panels keep managing zones (DB → zone files → reload), dnsplane serves from those files.
 

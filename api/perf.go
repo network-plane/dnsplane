@@ -25,7 +25,7 @@ func perfResetHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data.ResetResolverPerf()
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "A-resolve perf counters reset"})
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "Resolver perf counters reset"})
 }
 
 var perfPageTemplate = template.Must(template.New("perf").Parse(`<!DOCTYPE html>
@@ -51,7 +51,7 @@ var perfPageTemplate = template.Must(template.New("perf").Parse(`<!DOCTYPE html>
   </style>
 </head>
 <body>
-  <h1>Resolver performance (A queries)</h1>
+  <h1>Resolver performance (fast path)</h1>
   <p class="muted">Auto-refresh every 2s · <a href="/stats/perf">JSON</a> · <a href="/stats/page">Stats</a>
     · <button type="button" id="reset">Reset counters</button></p>
   <p id="err"></p>
@@ -71,34 +71,57 @@ var perfPageTemplate = template.Must(template.New("perf").Parse(`<!DOCTYPE html>
         document.getElementById('err').textContent = '';
         const a = j.a_resolve || {};
         let h = '<div class="panel"><h2>Outcomes</h2><table>';
-        h += row('Total A resolves', a.total);
+        h += row('Total resolves', a.total);
         h += row('Local (dnsrecords)', a.outcome_local);
         h += row('Cache (dnscache)', a.outcome_cache);
         h += row('Upstream', a.outcome_upstream);
         h += row('No answer', a.outcome_none);
         h += '</table></div>';
-        h += '<div class="panel"><h2>Latency (all A resolves)</h2><table>';
+        h += '<div class="panel"><h2>Latency (all resolves)</h2><table>';
         h += row('Avg total (ms)', (a.avg_total_ms != null ? a.avg_total_ms.toFixed(3) : '—'));
         h += row('Avg prep (ms)', (a.avg_prep_ms != null ? a.avg_prep_ms.toFixed(3) : '—'));
         h += row('Max total (ms)', (a.max_total_ms != null ? a.max_total_ms.toFixed(3) : '—'));
         h += '</table></div>';
+        h += '<div class="panel"><h2>Cache-only path (dnscache hit)</h2><table>';
+        h += row('Count', a.outcome_cache);
+        h += row('Avg total (ms)', (a.avg_total_ms_cache_only != null ? a.avg_total_ms_cache_only.toFixed(3) : '—'));
+        h += row('Max total (ms)', (a.max_total_ms_cache_only != null ? a.max_total_ms_cache_only.toFixed(3) : '—'));
+        h += '</table><p class="muted" style="margin:0.5rem 0 0 0;font-size:0.8rem">If tail latency in dig is here, resolver/cache path. If flat here but dig spikes, compare Upstream count.</p>';
+        h += '<table style="margin-top:0.75rem"><thead><tr><th>Bucket</th><th class="num">Count</th></tr></thead><tbody>';
+        (a.histogram_cache_only_ms || []).forEach(function(b) {
+          h += '<tr><td>' + esc(b.label) + '</td><td class="num">' + b.count + '</td></tr>';
+        });
+        h += '</tbody></table></div>';
         if (a.outcome_upstream > 0) {
-          h += '<div class="panel"><h2>Upstream path only</h2><table>';
+          h += '<div class="panel"><h2>Upstream path (any)</h2><table>';
+          h += row('Count', a.outcome_upstream);
           h += row('Avg upstream wait (ms)', a.avg_upstream_wait_ms.toFixed(3));
           h += row('Avg slowest upstream (ms)', a.avg_max_upstream_ms.toFixed(3));
           h += row('Avg servers queried', a.avg_upstream_servers.toFixed(2));
-          h += '</table></div>';
+          h += '</table><table style="margin-top:0.75rem"><thead><tr><th>Bucket</th><th class="num">Count</th></tr></thead><tbody>';
+          (a.histogram_upstream_ms || []).forEach(function(b) {
+            h += '<tr><td>' + esc(b.label) + '</td><td class="num">' + b.count + '</td></tr>';
+          });
+          h += '</tbody></table></div>';
         }
-        h += '<div class="panel"><h2>Histogram — total time (ms)</h2><table><thead><tr><th>Bucket</th><th class="num">Count</th></tr></thead><tbody>';
+        h += '<div class="panel"><h2>Histogram — all outcomes (mixed)</h2><table><thead><tr><th>Bucket</th><th class="num">Count</th></tr></thead><tbody>';
         (a.histogram_total_ms || []).forEach(function(b) {
           h += '<tr><td>' + esc(b.label) + '</td><td class="num">' + b.count + '</td></tr>';
         });
         h += '</tbody></table></div>';
-        h += '<div class="panel"><h2>Histogram — upstream outcomes only</h2><table><thead><tr><th>Bucket</th><th class="num">Count</th></tr></thead><tbody>';
-        (a.histogram_upstream_ms || []).forEach(function(b) {
-          h += '<tr><td>' + esc(b.label) + '</td><td class="num">' + b.count + '</td></tr>';
-        });
-        h += '</tbody></table></div>';
+        const byQt = j.by_query_type || {};
+        const qtKeys = Object.keys(byQt).sort();
+        if (qtKeys.length > 0) {
+          h += '<div class="panel"><h2>By QTYPE</h2><table><thead><tr><th>Type</th><th class="num">Total</th><th class="num">Avg ms</th><th class="num">Local</th><th class="num">Cache</th><th class="num">Upstream</th><th class="num">None</th></tr></thead><tbody>';
+          qtKeys.forEach(function(k) {
+            const q = byQt[k];
+            h += '<tr><td>' + esc(k) + '</td><td class="num">' + q.total + '</td><td class="num">' +
+              (q.avg_total_ms != null ? q.avg_total_ms.toFixed(3) : '—') + '</td><td class="num">' + q.outcome_local +
+              '</td><td class="num">' + q.outcome_cache + '</td><td class="num">' + q.outcome_upstream +
+              '</td><td class="num">' + q.outcome_none + '</td></tr>';
+          });
+          h += '</tbody></table></div>';
+        }
         h += '<div class="panel muted"><p>' + esc(j.description || '') + '</p><ul>';
         (j.notes || []).forEach(function(n) { h += '<li>' + esc(n) + '</li>'; });
         h += '</ul><p>Since first A-resolve in this window: ' + esc(j.since_first_resolve || '—') + '</p></div>';

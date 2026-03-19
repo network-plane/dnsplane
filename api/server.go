@@ -165,6 +165,7 @@ func RegisterDNSRoutes(router chi.Router) {
 	router.Put("/dns/records", updateRecordHandler)
 	router.Delete("/dns/records", deleteRecordHandler)
 	router.Get("/dns/servers", listServersHandler)
+	router.Get("/dns/upstreams/health", upstreamHealthHandler)
 	router.Post("/dns/servers", addServerHandler)
 	router.Put("/dns/servers/{address}", updateServerHandler)
 	router.Delete("/dns/servers/{address}", deleteServerHandler)
@@ -237,11 +238,53 @@ func readyHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, resp)
 }
 
-// listServersHandler returns the list of configured upstream DNS servers (read-only).
+// listServersHandler returns configured upstreams plus optional health when checks are enabled.
 func listServersHandler(w http.ResponseWriter, r *http.Request) {
 	dnsData := data.GetInstance()
 	servers := dnsData.GetServers()
-	writeJSON(w, http.StatusOK, map[string]any{"servers": servers})
+	health, enabled := dnsData.UpstreamHealthStatuses()
+	cfg := dnsData.GetResolverSettings()
+	interval := cfg.UpstreamHealthCheckIntervalSeconds
+	if interval <= 0 {
+		interval = 30
+	}
+	failures := cfg.UpstreamHealthCheckFailures
+	if failures <= 0 {
+		failures = 3
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"servers":                                servers,
+		"upstream_health_check_enabled":          enabled,
+		"upstream_health_check_interval_seconds": interval,
+		"upstream_health_check_failures":         failures,
+		"upstream_health":                        health,
+	})
+}
+
+// upstreamHealthHandler returns only upstream health probe state (read-only).
+func upstreamHealthHandler(w http.ResponseWriter, r *http.Request) {
+	dnsData := data.GetInstance()
+	health, enabled := dnsData.UpstreamHealthStatuses()
+	cfg := dnsData.GetResolverSettings()
+	interval := cfg.UpstreamHealthCheckIntervalSeconds
+	if interval <= 0 {
+		interval = 30
+	}
+	failures := cfg.UpstreamHealthCheckFailures
+	if failures <= 0 {
+		failures = 3
+	}
+	q := strings.TrimSpace(cfg.UpstreamHealthCheckQueryName)
+	if q == "" {
+		q = "google.com."
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"upstream_health_check_enabled":          enabled,
+		"upstream_health_check_interval_seconds": interval,
+		"upstream_health_check_failures":         failures,
+		"upstream_health_check_query_name":       q,
+		"upstreams":                              health,
+	})
 }
 
 // resolverStatsMap returns the resolver stats as a map for session/total (both same until persistence exists).

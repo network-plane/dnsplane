@@ -1,14 +1,16 @@
 # dnsplane
 ![dnsplane](https://github.com/user-attachments/assets/38214dcd-ca33-41ce-a88f-7edad7d85822)
 
-A non-standard DNS server with multiple management interfaces (TUI, API). It queries local records, cache, and all configured upstream DNS servers (plus an optional fallback) **in parallel**, then replies by priority: local data wins, then cache, then any authoritative upstream answer, then the first successful upstream answer. This fits setups where you have a local DNS server and use work DNS over VPN at the same time—authoritative answers (e.g. from the work server) are preferred when present; otherwise you get the fastest successful reply from any server.
+A non-standard DNS server with multiple management interfaces (TUI, API). For most QTYPEs (**A**, **AAAA**, **MX**, etc.) it runs **local lookup**, **cache lookup**, and **all selected upstreams** in parallel; reply priority is **local > cache > first successful upstream**. **PTR** tries local (including auto-built from **A**) first, then uses the same fast path on miss. See [Host tuning (optional)](docs/host-tuning.md) for Linux UDP buffers and related knobs.
 
 ## Resolution behavior
 
-- **Parallel lookups:** For each A or AAAA query, dnsplane runs **at the same time**: local records (dnsrecords.json), cache (dnscache.json), and every configured upstream—plus the fallback server when it is different from the upstreams. The reply is chosen by priority; there is no second round of queries. **AAAA** is resolved the same way as A (local, then cache, then upstreams). **PTR** (reverse DNS) is supported: use the TUI `dns` command or API to query by IP; with `auto_build_ptr_from_a` the server can derive PTR from local A records.
-- **Priority:** (1) Local records, (2) cache, (3) any upstream that returned an **authoritative** answer, (4) the **first** successful answer from any upstream. If fallback is the same as an upstream, it is not queried twice; that server’s reply is used like any other upstream.
+- **Fast path (A, AAAA, MX, …):** Local, cache (if enabled), and **all upstreams start at once**. Priority: (1) local, (2) cache, (3) **first successful** upstream. Wins cancel remaining work; upstreams still run on every query (wasted traffic on hit is accepted for latency).
+- **PTR:** Local first (full scan + optional **A**→PTR synthesis), then the same fast path if no local answer.
+- **Priority:** Local > cache > first upstream success.
 - **Recursive resolvers:** Answers from resolvers like 1.1.1.1 (which are not authoritative for the domain) are accepted as “first success”; the server no longer waits for an authoritative reply and then re-querying fallback, so latency stays low (e.g. ~5–7 ms when the upstream is fast).
 - **Reply path:** The DNS reply is sent as soon as it is ready. Logging, stats, and cache persistence run asynchronously so they do not block the response.
+- **Cache tail latency:** Non-PTR queries resolve **local-then-cache under one read lock**, then return immediately on hit (no upstream fan-out). On miss, only upstreams run (local/cache already known empty). **Cache hits** and **queries answered** use atomics so they do not contend with lookups under load. Settings/server JSON writes do not hold the data lock during disk I/O.
 - **Domain whitelist (per-server):** An upstream can have an optional **domain whitelist**. If set, that server is used **only** for query names that match one of the listed suffixes (exact or subdomain). For example, a server with whitelist `example.com,example.org` receives only queries for those domains and their subdomains; all other queries use only “global” upstreams (servers with no whitelist). Whitelisted domains are resolved **only** via those servers (no fallback to global upstreams). In the TUI: `dns add 192.168.5.5 53 active:true localresolver:true adblocker:false whitelist:example.com,example.org`.
 
 ## Diagram
@@ -24,19 +26,23 @@ flowchart TD
     RECORDS -->|Yes| REPLY_R["Reply from records"]
     RECORDS -->|No| CACHE{"Cache hit?"}
     CACHE -->|Yes| REPLY_C["Reply from cache"]
-    CACHE -->|No| SELECT["Get servers for this query (whitelist: only matching or global)"]
-    SELECT --> UPSTREAM["Query selected upstreams (in parallel)"]
-    UPSTREAM --> AUTH{"Authoritative answer?"}
-    AUTH -->|Yes| REPLY_A["Reply (authoritative)"]
-    AUTH -->|No| FALLBACK["Fallback server (if configured)"]
-    FALLBACK --> REPLY_F["Reply (fallback)"]
+    CACHE -->|No| SELECT["Get servers for this query (whitelist)"]
+    SELECT --> UPSTREAM["Query upstreams in parallel; first success wins"]
+    UPSTREAM --> REPLY_A["Reply"]
 ```
 
 - **Adblock:** Query name checked against block list first; if blocked, no upstream is used.
 - **Local records:** Loaded from `records_source` (file, URL, or Git). If a record matches, that reply is used and upstreams are not queried.
 - **Cache:** If caching is enabled and the answer is still valid, it is returned without querying upstreams.
 - **Server selection:** `GetServersForQuery` picks upstreams for this name: servers with a matching domain whitelist, or (if none match) only global servers. Whitelisted domains are resolved only via their servers.
-- **Upstreams + fallback:** Selected servers are queried in parallel; priority is authoritative answer, then first success. Fallback is used only when the selected list is “global” and no authoritative answer was returned.
+- **Upstreams:** First successful reply wins for the fast path (all QTYPEs above).
+
+## Additional documentation
+
+| Doc | What it covers |
+|-----|----------------|
+| **[docs/host-tuning.md](docs/host-tuning.md)** | Optional **Linux OS / host tuning** for DNS latency: UDP buffer sizes, open-file limits, CPU governor, containers, and how to measure. |
+| **[docs/upstream-health.md](docs/upstream-health.md)** | **Upstream health checks**: periodic probes, marking servers down, config keys, logs, and **curl** examples. |
 
 **Planned:** DoT (DNS over TLS), DoH (DNS over HTTPS), and DNSSEC validation will be documented here once implemented (see [TODO](TODO.md)).
 
@@ -179,6 +185,7 @@ Besides `file_locations` (and `records_source`, `adblock_list_files`), the confi
 - **API:** `api` (bool), `apiport`
 - **Client access:** `server_socket` (UNIX socket), `server_tcp` (TCP address for remote TUI clients)
 - **Behaviour:** `cache_records`, `full_stats`, `full_stats_dir`
+- **Upstream health (optional):** `upstream_health_check_enabled`, `upstream_health_check_failures` (default 3), `upstream_health_check_interval_seconds` (default 30), `upstream_health_check_query_name` (default `google.com.`). When enabled, failed upstreams are skipped for forwarding until they pass a probe or a query succeeds. See [docs/upstream-health.md](docs/upstream-health.md).
 - **DNSRecordSettings:** `auto_build_ptr_from_a`, `forward_ptr_queries`, `add_updates_records`
 - **Log:** `log_dir`, `log_severity`, `log_rotation`, `log_rotation_size_mb`, `log_rotation_time_days`
 
@@ -194,13 +201,35 @@ Enable the REST API with `"api": true` in `dnsplane.json` and set `apiport` (e.g
 | GET | `/ready` | Readiness: returns 200 when the API and DNS listener are both up, 503 otherwise. Response is JSON with `ready`, `api`, `dns`, `tui_client` (connected, addr, since), and `listeners` (dns_port, api_port, api_enabled, client_socket_path, client_tcp_address). Useful for Kubernetes readiness probes and load balancers. |
 | GET | `/dns/records` | List DNS records (same data as the TUI). Returns JSON with `records` and optional `filter`, `messages`. |
 | POST | `/dns/records` | Add a DNS record. Body: `{"name":"...","type":"A","value":"...","ttl":3600}`. |
-| GET | `/dns/servers` | List configured upstream DNS servers (read-only). Returns JSON `{"servers":[...]}` with address, port, active, local_resolver, adblocker, domain_whitelist, last_used, last_success. |
+| GET | `/dns/servers` | List upstreams plus health: `servers`, `upstream_health_check_enabled`, interval/failures hints, and `upstream_health` per `address_port` (unhealthy, consecutive_failures, last_probe_*, last_success_at). |
+| GET | `/dns/upstreams/health` | Same health slice and check settings without full server config. See [docs/upstream-health.md](docs/upstream-health.md). |
 | GET | `/stats` | Resolver stats as JSON: total_queries, total_cache_hits, total_blocks, total_queries_forwarded, total_queries_answered, server_start_time. When `full_stats` is enabled in config, includes `full_stats.enabled`, `full_stats.requesters_count`, `full_stats.domains_count`. |
 | GET | `/metrics` | Prometheus text format: counters (e.g. `dnsplane_queries_total`, `dnsplane_cache_hits_total`, `dnsplane_blocks_total`) and gauges (`dnsplane_server_start_time_seconds`). When full_stats is enabled, adds `dnsplane_fullstats_requesters_count` and `dnsplane_fullstats_domains_count`. |
 | GET | `/stats/page` | Read-only stats dashboard (HTML): dark-themed page with panels for resolver stats, data counts, status (API/DNS/TUI client, listeners), and when full_stats is enabled a Full stats panel with requesters/domains counts and top 10 requesters and top 10 domains. Use query `?full=N` (e.g. `?full=20`) to show top N instead of 10. |
-| GET | `/stats/perf` | A-record resolve performance: outcome counts (local / cache / upstream / none), avg and max latency, histograms, upstream-only averages. Counters accumulate until `POST /stats/perf/reset`. |
+| GET | `/stats/perf` | Resolver perf: **outcome_local** / **outcome_cache** / **outcome_upstream** / **outcome_none**; **histogram_cache_only_ms** + **avg_total_ms_cache_only** (cache hits only); **histogram_upstream_ms** (upstream path only). Mixed **histogram_total_ms** is misleading for diagnosis — compare cache vs upstream histograms. Reset with `POST /stats/perf/reset`. |
 | GET | `/stats/perf/page` | HTML dashboard for `/stats/perf` (auto-refresh every 2s, reset button). |
 | POST | `/stats/perf/reset` | Clears A-resolve perf counters (use before a benchmark run). |
+
+### curl examples (upstream health)
+
+With API on port **8080** (set `apiport` in config):
+
+```bash
+# Full upstream health JSON
+curl -sS http://127.0.0.1:8080/dns/upstreams/health | jq .
+
+# Servers plus embedded health
+curl -sS http://127.0.0.1:8080/dns/servers | jq '{servers: .servers, checks_enabled: .upstream_health_check_enabled, upstream_health: .upstream_health}'
+```
+
+Enable checks in `dnsplane.json`, then restart server:
+
+```json
+"upstream_health_check_enabled": true,
+"upstream_health_check_failures": 3,
+"upstream_health_check_interval_seconds": 30,
+"upstream_health_check_query_name": "google.com."
+```
 
 ## Logging
 

@@ -36,10 +36,32 @@ var (
 	perfHistTotal [8]atomic.Uint64
 	// Histogram for upstream-path resolves only.
 	perfHistUpstream [8]atomic.Uint64
+	// Per-outcome histograms (same buckets) — use these to see tails on cache vs upstream.
+	perfHistLocal [8]atomic.Uint64
+	perfHistCache [8]atomic.Uint64
+	perfHistNone  [8]atomic.Uint64
 
 	perfUpstreamCountSum atomic.Uint64 // sum of len(serversToQuery) per upstream outcome
-	perfFirstRecord      atomic.Int64  // unix nano of first A-resolve (for uptime of perf window)
+	perfFirstRecord      atomic.Int64  // unix nano of first resolve (for uptime of perf window)
+
+	perfMaxTotalLocalNs atomic.Uint64
+	perfMaxTotalCacheNs atomic.Uint64
+	perfMaxTotalNoneNs  atomic.Uint64
+	perfSumTotalLocalNs atomic.Uint64
+	perfSumTotalCacheNs atomic.Uint64
+	perfSumTotalNoneNs  atomic.Uint64
+
+	perfQT sync.Map // qtype string -> *perfQTStats
 )
+
+type perfQTStats struct {
+	total       atomic.Uint64
+	sumTotalNs  atomic.Uint64
+	outLocal    atomic.Uint64
+	outCache    atomic.Uint64
+	outUpstream atomic.Uint64
+	outNone     atomic.Uint64
+}
 
 func perfBucketIndex(totalNs uint64) int {
 	ms := totalNs / 1e6
@@ -70,9 +92,27 @@ func perfBucketIndex(totalNs uint64) int {
 // upstreamWaitNs: for upstream outcome, time from prep done until all upstreams done (totalNs - prepNs
 // when upstream-bound); 0 otherwise.
 // upstreamServers: len(serversToQuery) for upstream outcome.
-func RecordResolverAResolve(outcome int, totalNs, prepNs, maxUpstreamNs, upstreamWaitNs uint64, upstreamServers int) {
+// qtype: dns.TypeToString e.g. "A", "AAAA"; empty skips per-type rollup.
+func RecordResolverAResolve(outcome int, totalNs, prepNs, maxUpstreamNs, upstreamWaitNs uint64, upstreamServers int, qtype string) {
 	if perfFirstRecord.Load() == 0 {
 		perfFirstRecord.CompareAndSwap(0, time.Now().UnixNano())
+	}
+
+	if qtype != "" {
+		v, _ := perfQT.LoadOrStore(qtype, &perfQTStats{})
+		qt := v.(*perfQTStats)
+		qt.total.Add(1)
+		qt.sumTotalNs.Add(totalNs)
+		switch outcome {
+		case PerfOutcomeLocal:
+			qt.outLocal.Add(1)
+		case PerfOutcomeCache:
+			qt.outCache.Add(1)
+		case PerfOutcomeUpstream:
+			qt.outUpstream.Add(1)
+		case PerfOutcomeNone:
+			qt.outNone.Add(1)
+		}
 	}
 
 	perfATotal.Add(1)
@@ -95,8 +135,36 @@ func RecordResolverAResolve(outcome int, totalNs, prepNs, maxUpstreamNs, upstrea
 
 	b := perfBucketIndex(totalNs)
 	perfHistTotal[b].Add(1)
-	if outcome == PerfOutcomeUpstream {
+	switch outcome {
+	case PerfOutcomeUpstream:
 		perfHistUpstream[b].Add(1)
+	case PerfOutcomeLocal:
+		perfHistLocal[b].Add(1)
+		perfSumTotalLocalNs.Add(totalNs)
+		for {
+			old := perfMaxTotalLocalNs.Load()
+			if totalNs <= old || perfMaxTotalLocalNs.CompareAndSwap(old, totalNs) {
+				break
+			}
+		}
+	case PerfOutcomeCache:
+		perfHistCache[b].Add(1)
+		perfSumTotalCacheNs.Add(totalNs)
+		for {
+			old := perfMaxTotalCacheNs.Load()
+			if totalNs <= old || perfMaxTotalCacheNs.CompareAndSwap(old, totalNs) {
+				break
+			}
+		}
+	case PerfOutcomeNone:
+		perfHistNone[b].Add(1)
+		perfSumTotalNoneNs.Add(totalNs)
+		for {
+			old := perfMaxTotalNoneNs.Load()
+			if totalNs <= old || perfMaxTotalNoneNs.CompareAndSwap(old, totalNs) {
+				break
+			}
+		}
 	}
 
 	for {
@@ -127,7 +195,20 @@ func ResetResolverPerf() {
 	for i := range perfHistTotal {
 		perfHistTotal[i].Store(0)
 		perfHistUpstream[i].Store(0)
+		perfHistLocal[i].Store(0)
+		perfHistCache[i].Store(0)
+		perfHistNone[i].Store(0)
 	}
+	perfMaxTotalLocalNs.Store(0)
+	perfMaxTotalCacheNs.Store(0)
+	perfMaxTotalNoneNs.Store(0)
+	perfSumTotalLocalNs.Store(0)
+	perfSumTotalCacheNs.Store(0)
+	perfSumTotalNoneNs.Store(0)
+	perfQT.Range(func(k, _ any) bool {
+		perfQT.Delete(k)
+		return true
+	})
 }
 
 // ResolverPerfReport is JSON for GET /stats/perf.
@@ -155,7 +236,32 @@ type ResolverPerfReport struct {
 			Label string `json:"label"`
 			Count uint64 `json:"count"`
 		} `json:"histogram_upstream_ms"`
+		HistLocalMs []struct {
+			Label string `json:"label"`
+			Count uint64 `json:"count"`
+		} `json:"histogram_local_only_ms"`
+		HistCacheMs []struct {
+			Label string `json:"label"`
+			Count uint64 `json:"count"`
+		} `json:"histogram_cache_only_ms"`
+		HistNoneMs []struct {
+			Label string `json:"label"`
+			Count uint64 `json:"count"`
+		} `json:"histogram_no_answer_ms"`
+		AvgTotalMsCacheOnly float64 `json:"avg_total_ms_cache_only,omitempty"`
+		MaxTotalMsCacheOnly float64 `json:"max_total_ms_cache_only,omitempty"`
+		AvgTotalMsLocalOnly float64 `json:"avg_total_ms_local_only,omitempty"`
+		MaxTotalMsLocalOnly float64 `json:"max_total_ms_local_only,omitempty"`
 	} `json:"a_resolve"`
+
+	ByQueryType map[string]struct {
+		Total      uint64  `json:"total"`
+		AvgTotalMs float64 `json:"avg_total_ms"`
+		Local      uint64  `json:"outcome_local"`
+		Cache      uint64  `json:"outcome_cache"`
+		Upstream   uint64  `json:"outcome_upstream"`
+		None       uint64  `json:"outcome_none"`
+	} `json:"by_query_type,omitempty"`
 
 	Notes []string `json:"notes"`
 }
@@ -167,10 +273,11 @@ var perfHistLabels = []string{
 // GetResolverPerfReport builds a snapshot for the API.
 func GetResolverPerfReport() ResolverPerfReport {
 	var r ResolverPerfReport
-	r.Description = "A-record parallel resolve timings (local+cache goroutines vs upstream wait). prep = max(local_elapsed, cache_elapsed) from query start."
+	r.Description = "Fast-path resolve: use histogram_cache_only_ms vs histogram_upstream_ms to see where tail latency lives."
 	r.Notes = []string{
-		"prep_ms: time until both local and cache lookups finished (parallel).",
-		"Upstream path waits for every configured upstream; total ≈ max(prep, slowest_upstream).",
+		"If bench feels 'all cache' but outcome_upstream > 0, dig spikes often match upstream RTT — check histogram_upstream_ms.",
+		"histogram_cache_only_ms is only answers served from dnscache (resolver-internal time).",
+		"histogram_total_ms mixes all outcomes — prefer per-outcome histograms for diagnosis.",
 		"POST /stats/perf/reset clears counters.",
 	}
 
@@ -207,7 +314,62 @@ func GetResolverPerfReport() ResolverPerfReport {
 			Label string `json:"label"`
 			Count uint64 `json:"count"`
 		}{Label: perfHistLabels[i], Count: perfHistUpstream[i].Load()})
+		r.AResolve.HistLocalMs = append(r.AResolve.HistLocalMs, struct {
+			Label string `json:"label"`
+			Count uint64 `json:"count"`
+		}{Label: perfHistLabels[i], Count: perfHistLocal[i].Load()})
+		r.AResolve.HistCacheMs = append(r.AResolve.HistCacheMs, struct {
+			Label string `json:"label"`
+			Count uint64 `json:"count"`
+		}{Label: perfHistLabels[i], Count: perfHistCache[i].Load()})
+		r.AResolve.HistNoneMs = append(r.AResolve.HistNoneMs, struct {
+			Label string `json:"label"`
+			Count uint64 `json:"count"`
+		}{Label: perfHistLabels[i], Count: perfHistNone[i].Load()})
 	}
+	nl := perfOutcomeLocal.Load()
+	if nl > 0 {
+		r.AResolve.AvgTotalMsLocalOnly = float64(perfSumTotalLocalNs.Load()) / float64(nl) / 1e6
+		r.AResolve.MaxTotalMsLocalOnly = float64(perfMaxTotalLocalNs.Load()) / 1e6
+	}
+	nc := perfOutcomeCache.Load()
+	if nc > 0 {
+		r.AResolve.AvgTotalMsCacheOnly = float64(perfSumTotalCacheNs.Load()) / float64(nc) / 1e6
+		r.AResolve.MaxTotalMsCacheOnly = float64(perfMaxTotalCacheNs.Load()) / 1e6
+	}
+
+	r.ByQueryType = make(map[string]struct {
+		Total      uint64  `json:"total"`
+		AvgTotalMs float64 `json:"avg_total_ms"`
+		Local      uint64  `json:"outcome_local"`
+		Cache      uint64  `json:"outcome_cache"`
+		Upstream   uint64  `json:"outcome_upstream"`
+		None       uint64  `json:"outcome_none"`
+	})
+	perfQT.Range(func(k, v any) bool {
+		qt := v.(*perfQTStats)
+		nq := qt.total.Load()
+		if nq == 0 {
+			return true
+		}
+		key, _ := k.(string)
+		r.ByQueryType[key] = struct {
+			Total      uint64  `json:"total"`
+			AvgTotalMs float64 `json:"avg_total_ms"`
+			Local      uint64  `json:"outcome_local"`
+			Cache      uint64  `json:"outcome_cache"`
+			Upstream   uint64  `json:"outcome_upstream"`
+			None       uint64  `json:"outcome_none"`
+		}{
+			Total:      nq,
+			AvgTotalMs: float64(qt.sumTotalNs.Load()) / float64(nq) / 1e6,
+			Local:      qt.outLocal.Load(),
+			Cache:      qt.outCache.Load(),
+			Upstream:   qt.outUpstream.Load(),
+			None:       qt.outNone.Load(),
+		}
+		return true
+	})
 
 	return r
 }
