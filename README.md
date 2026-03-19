@@ -11,6 +11,7 @@ A non-standard DNS server with multiple management interfaces (TUI, API). For mo
 - **Recursive resolvers:** Answers from resolvers like 1.1.1.1 (which are not authoritative for the domain) are accepted as “first success”; the server no longer waits for an authoritative reply and then re-querying fallback, so latency stays low (e.g. ~5–7 ms when the upstream is fast).
 - **Reply path:** The DNS reply is sent as soon as it is ready. Logging, stats, and cache persistence run asynchronously so they do not block the response.
 - **Cache tail latency:** Non-PTR queries resolve **local-then-cache under one read lock**, then return immediately on hit (no upstream fan-out). On miss, only upstreams run (local/cache already known empty). **Cache hits** and **queries answered** use atomics so they do not contend with lookups under load. Settings/server JSON writes do not hold the data lock during disk I/O.
+- **A/AAAA vs adblock:** Local and cache are checked **before** the blocklist so a warm cache does not pay blocklist work on every query. After a cache miss, blocked names still get the block reply. If a name is blocked but already has a **positive** cache entry, that answer is served until TTL (flush cache if you need blocklist to win immediately).
 - **Domain whitelist (per-server):** An upstream can have an optional **domain whitelist**. If set, that server is used **only** for query names that match one of the listed suffixes (exact or subdomain). For example, a server with whitelist `example.com,example.org` receives only queries for those domains and their subdomains; all other queries use only “global” upstreams (servers with no whitelist). Whitelisted domains are resolved **only** via those servers (no fallback to global upstreams). In the TUI: `dns add 192.168.5.5 53 active:true localresolver:true adblocker:false whitelist:example.com,example.org`.
 
 ## Diagram
@@ -19,19 +20,19 @@ Resolution flow including adblock, local records (file/URL/git), cache, per-serv
 
 ```mermaid
 flowchart TD
-    REQ["DNS Request"]
-    REQ --> ADBLOCK{"Adblock blocked?"}
-    ADBLOCK -->|Yes| BLOCK["Blocked / NXDOMAIN"]
-    ADBLOCK -->|No| RECORDS{"Local records (records_source) match?"}
+    REQ["DNS Request A/AAAA"]
+    REQ --> RECORDS{"Local records?"}
     RECORDS -->|Yes| REPLY_R["Reply from records"]
     RECORDS -->|No| CACHE{"Cache hit?"}
     CACHE -->|Yes| REPLY_C["Reply from cache"]
-    CACHE -->|No| SELECT["Get servers for this query (whitelist)"]
+    CACHE -->|No| ADBLOCK{"Adblock blocked?"}
+    ADBLOCK -->|Yes| BLOCK["Blocked reply"]
+    ADBLOCK -->|No| SELECT["Get servers for this query (whitelist)"]
     SELECT --> UPSTREAM["Query upstreams in parallel; first success wins"]
     UPSTREAM --> REPLY_A["Reply"]
 ```
 
-- **Adblock:** Query name checked against block list first; if blocked, no upstream is used.
+- **Adblock (A/AAAA):** After local/cache miss, the name is checked against the block list; if blocked, no upstream is used.
 - **Local records:** Loaded from `records_source` (file, URL, or Git). If a record matches, that reply is used and upstreams are not queried.
 - **Cache:** If caching is enabled and the answer is still valid, it is returned without querying upstreams.
 - **Server selection:** `GetServersForQuery` picks upstreams for this name: servers with a matching domain whitelist, or (if none match) only global servers. Whitelisted domains are resolved only via their servers.
