@@ -93,6 +93,12 @@ type Config struct {
 	UpstreamHealthCheckIntervalSeconds int `json:"upstream_health_check_interval_seconds,omitempty"`
 	// UpstreamHealthCheckQueryName is the QNAME for probes (default "google.com.").
 	UpstreamHealthCheckQueryName string `json:"upstream_health_check_query_name,omitempty"`
+	// MinCacheTTLSeconds overrides short upstream TTLs: cached answers use max(original TTL, this value).
+	// Default 600 (10 minutes). Set to 0 to disable (use upstream TTL as-is).
+	MinCacheTTLSeconds int `json:"min_cache_ttl_seconds,omitempty"`
+	// StaleWhileRevalidate when true serves expired cache entries immediately (with TTL=1) while
+	// refreshing from upstream in the background. Eliminates latency spikes on cache expiry.
+	StaleWhileRevalidate bool `json:"stale_while_revalidate,omitempty"`
 }
 
 // Loaded contains the configuration together with metadata about the source file.
@@ -300,6 +306,8 @@ func defaultConfig(baseDir string) *Config {
 			AutoBuildPTRFromA: true,
 			ForwardPTRQueries: false,
 		},
+		MinCacheTTLSeconds:   600,
+		StaleWhileRevalidate: true,
 		Log: LogConfig{
 			Dir:            logDir,
 			Severity:       "none",
@@ -340,6 +348,9 @@ func (c *Config) applyDefaults(configDir string) {
 	}
 	if c.UpstreamHealthCheckIntervalSeconds < 0 {
 		c.UpstreamHealthCheckIntervalSeconds = 0
+	}
+	if c.MinCacheTTLSeconds < 0 {
+		c.MinCacheTTLSeconds = 0
 	}
 
 	c.FileLocations.DNSServerFile = ensureAbsolutePath(configDir, c.FileLocations.DNSServerFile, "dnsservers.json")
@@ -536,6 +547,26 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	if r, ok := raw["log"]; ok {
 		_ = json.Unmarshal(r, &c.Log)
 	}
-	// If any renamed field was missing, standard unmarshal would leave zero value; apply defaults later via applyDefaults
+	if r, ok := raw["adblock_list_files"]; ok {
+		_ = json.Unmarshal(r, &c.AdblockListFiles)
+	}
+	if r, ok := raw["upstream_health_check_enabled"]; ok {
+		_ = json.Unmarshal(r, &c.UpstreamHealthCheckEnabled)
+	}
+	if r, ok := raw["upstream_health_check_failures"]; ok {
+		_ = json.Unmarshal(r, &c.UpstreamHealthCheckFailures)
+	}
+	if r, ok := raw["upstream_health_check_interval_seconds"]; ok {
+		_ = json.Unmarshal(r, &c.UpstreamHealthCheckIntervalSeconds)
+	}
+	if r, ok := raw["upstream_health_check_query_name"]; ok {
+		_ = json.Unmarshal(r, &c.UpstreamHealthCheckQueryName)
+	}
+	if r, ok := raw["min_cache_ttl_seconds"]; ok {
+		_ = json.Unmarshal(r, &c.MinCacheTTLSeconds)
+	}
+	if r, ok := raw["stale_while_revalidate"]; ok {
+		_ = json.Unmarshal(r, &c.StaleWhileRevalidate)
+	}
 	return nil
 }

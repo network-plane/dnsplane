@@ -43,7 +43,8 @@ type Store interface {
 	FilterHealthyUpstreamAddresses(addrs []string) []string
 	RecordUpstreamForwardSuccess(addressPort string)
 	// TryFastLocalOrCache: single-lock local-then-cache for non-PTR; returns handled if answered from RAM.
-	TryFastLocalOrCache(qname, recordType string, qtypePTR bool) (handled bool, local []dns.RR, cache *dns.RR)
+	// isStale is true when the cache entry is expired but returned for stale-while-revalidate.
+	TryFastLocalOrCache(qname, recordType string, qtypePTR bool) (handled bool, local []dns.RR, cache *dns.RR, isStale bool)
 }
 
 // UpstreamClient issues DNS queries to upstream resolvers.
@@ -148,7 +149,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 	// Local/cache first without loading settings — one RLock (TryFastLocalOrCache) instead of
 	// GetResolverSettings + TryFastLocalOrCache; matches the old dedicated A/cache hot path.
 	if !isPTR {
-		handled, loc, crr := r.store.TryFastLocalOrCache(question.Name, recordType, false)
+		handled, loc, crr, isStale := r.store.TryFastLocalOrCache(question.Name, recordType, false)
 		if handled {
 			if len(loc) > 0 {
 				r.processCachedRecords(question, loc, response)
@@ -161,6 +162,9 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 				r.processCacheRecord(question, crr, response)
 				prep := uint64(time.Since(t0))
 				data.RecordResolverAResolve(data.PerfOutcomeCache, prep, prep, 0, 0, 0, qtypeKey)
+				if isStale {
+					go r.backgroundRefresh(question)
+				}
 				return
 			}
 		}
@@ -388,12 +392,44 @@ func cacheDNSResponse(store Store, rrs []dns.RR) {
 	if !settings.CacheRecords {
 		return
 	}
+	minTTL := uint32(settings.MinCacheTTLSeconds)
+	if settings.MinCacheTTLSeconds == 0 {
+		minTTL = 600
+	}
 	cache := store.GetCacheRecords()
 	for i := range rrs {
 		rr := rrs[i]
-		cache = dnsrecordcache.Add(cache, &rr)
+		cache = dnsrecordcache.Add(cache, &rr, minTTL)
 	}
 	store.UpdateCacheRecords(cache)
+}
+
+// backgroundRefresh queries upstream for a stale cache entry and updates the cache.
+func (r *Resolver) backgroundRefresh(question dns.Question) {
+	if r == nil || r.store == nil || r.upstream == nil {
+		return
+	}
+	settings := r.store.GetResolverSettings()
+	allServers := r.store.GetServers()
+	servers := dnsservers.GetServersForQuery(allServers, question.Name, true)
+	if len(servers) == 0 {
+		if settings.FallbackServerIP != "" && settings.FallbackServerPort != "" {
+			servers = []string{settings.FallbackServerIP + ":" + settings.FallbackServerPort}
+		}
+	}
+	servers = r.store.FilterHealthyUpstreamAddresses(servers)
+	if len(servers) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), r.upstreamTimeout)
+	defer cancel()
+	for _, srv := range servers {
+		resp, err := r.upstream.Query(ctx, question, srv)
+		if err == nil && resp != nil && resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
+			cacheDNSResponse(r.store, resp.Answer)
+			return
+		}
+	}
 }
 
 func (r *Resolver) log(format string, args ...interface{}) {

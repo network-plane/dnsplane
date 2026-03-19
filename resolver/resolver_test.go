@@ -89,8 +89,8 @@ func (s *whitelistIntegrationStore) HasAnyLocalRecords() bool                   
 func (s *whitelistIntegrationStore) HasAnyCachedRecords() bool                          { return len(s.GetCacheRecords()) > 0 }
 func (s *whitelistIntegrationStore) FilterHealthyUpstreamAddresses(a []string) []string { return a }
 func (s *whitelistIntegrationStore) RecordUpstreamForwardSuccess(string)                {}
-func (s *whitelistIntegrationStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR) {
-	return false, nil, nil
+func (s *whitelistIntegrationStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR, bool) {
+	return false, nil, nil, false
 }
 
 // TestWhitelistIntegration verifies that for a query matching a whitelist server only that server
@@ -175,15 +175,15 @@ func (s *localRecordStore) HasAnyLocalRecords() bool                           {
 func (s *localRecordStore) HasAnyCachedRecords() bool                          { return false }
 func (s *localRecordStore) FilterHealthyUpstreamAddresses(a []string) []string { return a }
 func (s *localRecordStore) RecordUpstreamForwardSuccess(string)                {}
-func (s *localRecordStore) TryFastLocalOrCache(qname, rt string, ptr bool) (bool, []dns.RR, *dns.RR) {
+func (s *localRecordStore) TryFastLocalOrCache(qname, rt string, ptr bool) (bool, []dns.RR, *dns.RR, bool) {
 	if ptr {
-		return false, nil, nil
+		return false, nil, nil, false
 	}
 	loc := dnsrecords.FindAllRecords(s.records, qname, rt, false)
 	if len(loc) > 0 {
-		return true, loc, nil
+		return true, loc, nil, false
 	}
-	return false, nil, nil
+	return false, nil, nil, false
 }
 
 // TestResolver_LocalRecordReturnsA is a minimal integration test: resolver with in-memory store
@@ -243,8 +243,8 @@ func (s *emptyStore) HasAnyLocalRecords() bool                           { retur
 func (s *emptyStore) HasAnyCachedRecords() bool                          { return false }
 func (s *emptyStore) FilterHealthyUpstreamAddresses(a []string) []string { return a }
 func (s *emptyStore) RecordUpstreamForwardSuccess(string)                {}
-func (s *emptyStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR) {
-	return false, nil, nil
+func (s *emptyStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR, bool) {
+	return false, nil, nil, false
 }
 
 // TestResolver_NoLocalCacheUpstream_ReturnsEmpty verifies that when the store has no local
@@ -296,8 +296,8 @@ func (s *upstreamOnlyStore) HasAnyLocalRecords() bool                           
 func (s *upstreamOnlyStore) HasAnyCachedRecords() bool                          { return false }
 func (s *upstreamOnlyStore) FilterHealthyUpstreamAddresses(a []string) []string { return a }
 func (s *upstreamOnlyStore) RecordUpstreamForwardSuccess(string)                {}
-func (s *upstreamOnlyStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR) {
-	return false, nil, nil
+func (s *upstreamOnlyStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR, bool) {
+	return false, nil, nil, false
 }
 
 func TestResolver_AAAA_upstreamFastPath(t *testing.T) {
