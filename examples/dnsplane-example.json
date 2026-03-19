@@ -6,6 +6,8 @@
   "apiport": "8080",
   "api": false,
   "cache_records": true,
+  "min_cache_ttl_seconds": 600,
+  "stale_while_revalidate": true,
   "full_stats": false,
   "full_stats_dir": "./fullstats",
   "server_socket": "/tmp/dnsplane.socket",
