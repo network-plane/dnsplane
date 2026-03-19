@@ -132,13 +132,11 @@ func perfQTypeString(q dns.Question) string {
 }
 
 // resolveFastPath runs local, cache, and all upstreams at once for any QTYPE. Priority: local > cache > first upstream success.
+//
+// A/AAAA: local/cache is consulted before adblock so a warm cache path does not pay GetBlockList+IsBlocked
+// (two extra locks and work) on every query. If a name is on the blocklist but still has a positive cache
+// entry, the cached answer is served until TTL expires.
 func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, response *dns.Msg) {
-	if question.Qtype == dns.TypeA || question.Qtype == dns.TypeAAAA {
-		if r.checkBlocked(question) {
-			r.processBlockedDomain(question, response)
-			return
-		}
-	}
 	t0 := time.Now()
 	recordType := dns.TypeToString[question.Qtype]
 	if recordType == "" {
@@ -165,6 +163,13 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 				data.RecordResolverAResolve(data.PerfOutcomeCache, prep, prep, 0, 0, 0, qtypeKey)
 				return
 			}
+		}
+	}
+
+	if question.Qtype == dns.TypeA || question.Qtype == dns.TypeAAAA {
+		if r.checkBlocked(question) {
+			r.processBlockedDomain(question, response)
+			return
 		}
 	}
 
