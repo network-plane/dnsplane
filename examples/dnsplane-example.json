@@ -8,6 +8,8 @@
   "cache_records": true,
   "min_cache_ttl_seconds": 600,
   "stale_while_revalidate": true,
+  "cache_warm_enabled": true,
+  "cache_warm_interval_seconds": 10,
   "full_stats": false,
   "full_stats_dir": "./fullstats",
   "server_socket": "/tmp/dnsplane.socket",
