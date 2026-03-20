@@ -3,6 +3,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,5 +31,20 @@ func TestLoadFromPathCreatesDefaultConfig(t *testing.T) {
 	expectedPath := filepath.Join(dir, FileName)
 	if loaded.Path != expectedPath {
 		t.Errorf("loaded.Path = %q, want %q", loaded.Path, expectedPath)
+	}
+}
+
+// Legacy configs without cache_warm_* keys must keep documented defaults (warm on, 10s interval).
+func TestUnmarshalJSON_CacheWarmLegacyDefaults(t *testing.T) {
+	raw := []byte(`{"port":"53","apiport":"8080","file_locations":{"dnsservers":"a.json","cache":"b.json","records_source":{"type":"file","location":"r.json"}},"DNSRecordSettings":{"auto_build_ptr_from_a":true,"forward_ptr_queries":false},"log":{"log_dir":"./l","log_severity":"none","log_rotation":"size","log_rotation_size_mb":100,"log_rotation_time_days":7}}`)
+	var c Config
+	if err := json.Unmarshal(raw, &c); err != nil {
+		t.Fatal(err)
+	}
+	if !c.CacheWarmEnabled {
+		t.Fatal("cache_warm_enabled absent: want default true")
+	}
+	if c.CacheWarmIntervalSeconds != 10 {
+		t.Fatalf("cache_warm_interval_seconds absent: want 10, got %d", c.CacheWarmIntervalSeconds)
 	}
 }
