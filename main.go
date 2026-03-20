@@ -370,6 +370,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	monitorDNSErrors()
 
 	go runUpstreamHealthProbeLoop(dnsData, dnsLogger)
+	go runCacheWarmLoop(dnsData, port)
 
 	appState.SetReadlineConfig(readline.Config{
 		Prompt:                 "> ",
