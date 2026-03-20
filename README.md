@@ -11,6 +11,7 @@ A non-standard DNS server with multiple management interfaces (TUI, API). For mo
 - **Recursive resolvers:** Answers from resolvers like 1.1.1.1 (which are not authoritative for the domain) are accepted as “first success”; the server no longer waits for an authoritative reply and then re-querying fallback, so latency stays low (e.g. ~5–7 ms when the upstream is fast).
 - **Reply path:** The DNS reply is sent as soon as it is ready. Logging, stats, and cache persistence run asynchronously so they do not block the response.
 - **Cache tail latency:** Non-PTR queries resolve **local-then-cache under one read lock**, then return immediately on hit (no upstream fan-out). On miss, only upstreams run (local/cache already known empty). **Cache hits** and **queries answered** use atomics so they do not contend with lookups under load. Settings/server JSON writes do not hold the data lock during disk I/O. **`min_cache_ttl_seconds`** (default 600) ensures short upstream TTLs don't cause frequent cache misses. **`stale_while_revalidate`** serves expired entries instantly (TTL=1) while refreshing from upstream in the background — no client-visible latency spike on cache expiry.
+- **Cache warm (keep-alive):** When **`cache_warm_enabled`** is true (default), a background goroutine sends a lightweight self-query every **`cache_warm_interval_seconds`** (default 10). This keeps the Go process scheduled, CPU caches hot, and memory pages resident — preventing cold-start latency spikes (30 ms+) after idle periods.
 - **A/AAAA vs adblock:** Local and cache are checked **before** the blocklist so a warm cache does not pay blocklist work on every query. After a cache miss, blocked names still get the block reply. If a name is blocked but already has a **positive** cache entry, that answer is served until TTL (flush cache if you need blocklist to win immediately).
 - **Domain whitelist (per-server):** An upstream can have an optional **domain whitelist**. If set, that server is used **only** for query names that match one of the listed suffixes (exact or subdomain). For example, a server with whitelist `example.com,example.org` receives only queries for those domains and their subdomains; all other queries use only “global” upstreams (servers with no whitelist). Whitelisted domains are resolved **only** via those servers (no fallback to global upstreams). In the TUI: `dns add 192.168.5.5 53 active:true localresolver:true adblocker:false whitelist:example.com,example.org`.
 
@@ -23,18 +24,20 @@ flowchart TD
     REQ["DNS Request A/AAAA"]
     REQ --> RECORDS{"Local records?"}
     RECORDS -->|Yes| REPLY_R["Reply from records"]
-    RECORDS -->|No| CACHE{"Cache hit?"}
+    RECORDS -->|No| CACHE{"Cache hit (fresh)?"}
     CACHE -->|Yes| REPLY_C["Reply from cache"]
+    CACHE -->|"Stale entry\n(stale_while_revalidate)"| STALE["Reply stale (TTL=1)\n+ background refresh"]
     CACHE -->|No| ADBLOCK{"Adblock blocked?"}
     ADBLOCK -->|Yes| BLOCK["Blocked reply"]
     ADBLOCK -->|No| SELECT["Get servers for this query (whitelist)"]
     SELECT --> UPSTREAM["Query upstreams in parallel; first success wins"]
-    UPSTREAM --> REPLY_A["Reply"]
+    UPSTREAM --> REPLY_A["Reply + cache (min TTL enforced)"]
 ```
 
 - **Adblock (A/AAAA):** After local/cache miss, the name is checked against the block list; if blocked, no upstream is used.
 - **Local records:** Loaded from `records_source` (file, URL, or Git). If a record matches, that reply is used and upstreams are not queried.
-- **Cache:** If caching is enabled and the answer is still valid, it is returned without querying upstreams.
+- **Cache:** If caching is enabled and the answer is still valid, it is returned without querying upstreams. When `stale_while_revalidate` is enabled, expired entries are served immediately (TTL=1) while a background goroutine refreshes from upstream.
+- **Min TTL:** Upstream answers are cached with `max(original TTL, min_cache_ttl_seconds)` so short-TTL domains don't cause frequent cache misses.
 - **Server selection:** `GetServersForQuery` picks upstreams for this name: servers with a matching domain whitelist, or (if none match) only global servers. Whitelisted domains are resolved only via their servers.
 - **Upstreams:** First successful reply wins for the fast path (all QTYPEs above).
 
@@ -185,7 +188,13 @@ Besides `file_locations` (and `records_source`, `adblock_list_files`), the confi
 - **DNS / fallback:** `port`, `apiport`, `fallback_server_ip`, `fallback_server_port`, `timeout`
 - **API:** `api` (bool), `apiport`
 - **Client access:** `server_socket` (UNIX socket), `server_tcp` (TCP address for remote TUI clients)
-- **Behaviour:** `cache_records`, `full_stats`, `full_stats_dir`, `min_cache_ttl_seconds` (default 600; overrides short upstream TTLs so cache entries live at least this many seconds; set 0 to disable), `stale_while_revalidate` (bool; when true, expired cache entries are served immediately with TTL=1 while a background upstream refresh runs — eliminates latency spikes on cache expiry)
+- **Behaviour:**
+    - `cache_records` — enable/disable DNS cache.
+    - `min_cache_ttl_seconds` — minimum TTL for cached upstream answers (default 600; set 0 to use upstream TTL as-is).
+    - `stale_while_revalidate` — when true, expired cache entries are served instantly (TTL=1) while upstream is refreshed in the background; eliminates latency spikes on cache expiry.
+    - `cache_warm_enabled` — when true (default), a background self-query runs every `cache_warm_interval_seconds` to keep the process hot and prevent cold-start latency after idle periods.
+    - `cache_warm_interval_seconds` — seconds between keep-alive self-queries (default 10).
+    - `full_stats`, `full_stats_dir` — optional aggregated stats tracking.
 - **Upstream health (optional):** `upstream_health_check_enabled`, `upstream_health_check_failures` (default 3), `upstream_health_check_interval_seconds` (default 30), `upstream_health_check_query_name` (default `google.com.`). When enabled, failed upstreams are skipped for forwarding until they pass a probe or a query succeeds. See [docs/upstream-health.md](docs/upstream-health.md).
 - **DNSRecordSettings:** `auto_build_ptr_from_a`, `forward_ptr_queries`, `add_updates_records`
 - **Log:** `log_dir`, `log_severity`, `log_rotation`, `log_rotation_size_mb`, `log_rotation_time_days`
