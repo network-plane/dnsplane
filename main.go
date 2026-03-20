@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"dnsplane/api"
+	"dnsplane/buildinfo"
 	"dnsplane/commandhandler"
 	"dnsplane/config"
 	"dnsplane/daemon"
@@ -48,7 +49,6 @@ const (
 
 var (
 	appState         = daemon.NewState()
-	appVersion       = "1.3.103"
 	dnsResolver      *resolver.Resolver
 	fullStatsTracker *fullstats.Tracker
 	dnsLogger        *slog.Logger
@@ -116,7 +116,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Please check the configuration in the repo.")
 		os.Exit(1)
 	}
-	rootCmd.Version = fmt.Sprintf("DNS Resolver %s", appVersion)
+	rootCmd.Version = fmt.Sprintf("DNS Resolver %s", buildinfo.Version)
 	rootCmd.SetVersionTemplate("{{.Version}}\n")
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal(err)
@@ -306,7 +306,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		func() bool { return appState.IsTUIClientTCP() },
 		func() commandhandler.ServerListenerInfo { return currentServerListeners(appState) },
 	)
-	commandhandler.SetVersion(appVersion, appVersion)
+	commandhandler.SetVersion(buildinfo.Version, buildinfo.Version)
 	commandhandler.SetFullStatsTracker(fullStatsTracker)
 	api.SetFullStatsTracker(fullStatsTracker)
 	tui.SetPrompt("dnsplane> ")
@@ -334,6 +334,21 @@ func runServer(cmd *cobra.Command, args []string) error {
 				if asyncLogQueue != nil && dnsLogger != nil {
 					asyncLogQueue.Enqueue(func() { dnsLogger.Error(msg, keyValues...) })
 				}
+			},
+			QueryObserver: func(qname, qtype, outcome, upstream string, elapsed time.Duration) {
+				if asyncLogQueue == nil || dnsLogger == nil || !appState.DaemonMode() {
+					return
+				}
+				ms := elapsed.Seconds() * 1000
+				asyncLogQueue.Enqueue(func() {
+					dnsLogger.Debug("dns query",
+						"qname", qname,
+						"qtype", qtype,
+						"outcome", outcome,
+						"upstream", upstream,
+						"duration_ms", ms,
+					)
+				})
 			},
 			UpstreamTimeout: 2 * time.Second,
 		})
@@ -823,7 +838,7 @@ func serveInteractiveSession(conn net.Conn, log *slog.Logger) {
 
 	// Send banner so remote client can verify this is a dnsplane server.
 	if err := conn.SetWriteDeadline(time.Now().Add(3 * time.Second)); err == nil {
-		_, _ = fmt.Fprintf(conn, "%s %s\n", tuiBannerPrefix, appVersion)
+		_, _ = fmt.Fprintf(conn, "%s %s\n", tuiBannerPrefix, buildinfo.Version)
 		_ = conn.SetWriteDeadline(time.Time{})
 	}
 
@@ -974,10 +989,10 @@ func connectToInteractiveEndpoint(target string, killOther bool) {
 	}
 
 	serverVersion := strings.TrimSpace(strings.TrimPrefix(banner, tuiBannerPrefix))
-	if serverVersion != "" && serverVersion != appVersion {
-		fmt.Fprintf(os.Stderr, "Warning: version mismatch — server %s, client %s\n", serverVersion, appVersion)
+	if serverVersion != "" && serverVersion != buildinfo.Version {
+		fmt.Fprintf(os.Stderr, "Warning: version mismatch — server %s, client %s\n", serverVersion, buildinfo.Version)
 		if clientLogger != nil {
-			clientLogger.Warn("version mismatch", "server", serverVersion, "client", appVersion)
+			clientLogger.Warn("version mismatch", "server", serverVersion, "client", buildinfo.Version)
 		}
 	}
 

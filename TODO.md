@@ -49,9 +49,9 @@ No endpoints for dnsplane.json or any config.
 
 ## 5. Observability
 
-- [ ] /metrics: Prometheus-style metrics (histograms/summaries for DNS latency; optional label by query type). _Note: in-app `/stats/perf` already has latency histograms and `by_query_type`; /metrics is for external scraping._
-- [ ] Structured logging: add fields (query name, type, upstream, duration) in DNS layer.
-- [ ] Expose build/version in /stats and optionally /ready or /version (Go version, OS, arch).
+- [x] /metrics: Prometheus-style metrics (histograms/summaries for DNS latency; optional label by query type). _Note: in-app `/stats/perf` still has latency histograms and `by_query_type`; /metrics exposes `dnsplane_dns_resolve_duration_seconds` (+ `qtype` label) for scraping._
+- [x] Structured logging: add fields (query name, type, upstream, duration) in DNS layer (`dns query` at debug with `outcome`/`upstream`).
+- [x] Expose build/version in /stats and /ready and `/version` (Go version, OS, arch via `buildinfo`).
 
 ---
 

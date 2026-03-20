@@ -160,7 +160,7 @@ var statsPageTemplate = template.Must(template.New("stats").Parse(`<!DOCTYPE htm
 </head>
 <body>
   <h1>dnsplane Stats</h1>
-  <p class="muted">JSON: <a href="/stats">/stats</a> · <a href="/stats/perf">/stats/perf</a> · <a href="/stats/perf/page">Perf</a> · Prometheus: <a href="/metrics">/metrics</a> · <a href="#resolver">Resolver</a>{{if .FullStatsEnabled}} · Full stats: <a href="/stats/page?scope=total{{.StatsFullSuffix}}#full-stats">Total</a> | <a href="/stats/page?scope=session{{.StatsFullSuffix}}#full-stats">Session</a>{{end}}</p>
+  <p class="muted">JSON: <a href="/stats">/stats</a> · <a href="/version">/version</a> · <a href="/stats/perf">/stats/perf</a> · <a href="/stats/perf/page">Perf</a> · Prometheus: <a href="/metrics">/metrics</a> · <a href="#resolver">Resolver</a>{{if .FullStatsEnabled}} · Full stats: <a href="/stats/page?scope=total{{.StatsFullSuffix}}#full-stats">Total</a> | <a href="/stats/page?scope=session{{.StatsFullSuffix}}#full-stats">Session</a>{{end}}</p>
   <div class="grid">
     <div class="panel" id="resolver">
       <h2>Resolver</h2>
