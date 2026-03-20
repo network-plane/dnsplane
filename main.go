@@ -22,6 +22,7 @@ import (
 
 	"dnsplane/api"
 	"dnsplane/buildinfo"
+	"dnsplane/cluster"
 	"dnsplane/commandhandler"
 	"dnsplane/config"
 	"dnsplane/daemon"
@@ -433,6 +434,18 @@ func runServer(cmd *cobra.Command, args []string) error {
 		tcpTUIListenerMu.Unlock()
 		go acceptInteractiveSessions(listener, tuiLogger)
 	}
+
+	clusterCtx, clusterCancel := context.WithCancel(context.Background())
+	clusterMgr := cluster.NewManager(loadedCfg.Path, dnsData, dnsLogger)
+	cluster.SetGlobalManager(clusterMgr)
+	sCluster := dnsData.GetResolverSettings()
+	if err := clusterMgr.Start(clusterCtx, sCluster); err != nil && dnsLogger != nil {
+		dnsLogger.Warn("cluster: start failed", "error", err)
+	}
+	if sCluster.ClusterEnabled {
+		data.SetClusterRecordsNotify(clusterMgr.NotifyLocalRecordsChanged)
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
@@ -445,6 +458,10 @@ func runServer(cmd *cobra.Command, args []string) error {
 		dnsLogger.Info("Shutting down")
 	}
 	fmt.Println("Shutting down.")
+	clusterCancel()
+	clusterMgr.Stop()
+	cluster.SetGlobalManager(nil)
+	data.SetClusterRecordsNotify(nil)
 	stopDNSServer(appState)
 	if fullStatsTracker != nil {
 		done := make(chan struct{})

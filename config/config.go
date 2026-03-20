@@ -110,6 +110,28 @@ type Config struct {
 	StatsPerfPageEnabled bool `json:"stats_perf_page_enabled,omitempty"`
 	// StatsDashboardEnabled serves GET /stats/dashboard and /stats/dashboard/data. Default true.
 	StatsDashboardEnabled bool `json:"stats_dashboard_enabled,omitempty"`
+	// ClusterEnabled turns on multi-node DNS record sync over TCP (see docs/clustering.md).
+	ClusterEnabled bool `json:"cluster_enabled,omitempty"`
+	// ClusterListenAddr is the TCP listen address for incoming cluster connections (e.g. ":7946"). Empty uses :7946 when enabled.
+	ClusterListenAddr string `json:"cluster_listen_addr,omitempty"`
+	// ClusterPeers lists peer host:port endpoints to push to after local record changes.
+	ClusterPeers []string `json:"cluster_peers,omitempty"`
+	// ClusterAuthToken is a shared secret; peers must match to exchange data.
+	ClusterAuthToken string `json:"cluster_auth_token,omitempty"`
+	// ClusterNodeID optionally identifies this node (stable across restarts). Empty: auto from cluster_state.json.
+	ClusterNodeID string `json:"cluster_node_id,omitempty"`
+	// ClusterSyncIntervalSeconds is periodic pull from peers (0 = disabled). Default 0.
+	ClusterSyncIntervalSeconds int `json:"cluster_sync_interval_seconds,omitempty"`
+	// ClusterAdvertiseAddr is the host:port peers should dial (shown in cluster info). Empty: derive from listen + guessed IP.
+	ClusterAdvertiseAddr string `json:"cluster_advertise_addr,omitempty"`
+	// ClusterReplicaOnly when true: pull/apply snapshots but do not push to peers (read replica).
+	ClusterReplicaOnly bool `json:"cluster_replica_only,omitempty"`
+	// ClusterRejectLocalWrites when true: reject local API/TUI record mutations (cluster applies still allowed).
+	ClusterRejectLocalWrites bool `json:"cluster_reject_local_writes,omitempty"`
+	// ClusterAdmin when true: this node may send admin_config_apply to peers (requires cluster_admin_token on both sides).
+	ClusterAdmin bool `json:"cluster_admin,omitempty"`
+	// ClusterAdminToken must match incoming admin_config_apply; empty disables remote admin apply.
+	ClusterAdminToken string `json:"cluster_admin_token,omitempty"`
 }
 
 // Loaded contains the configuration together with metadata about the source file.
@@ -371,6 +393,9 @@ func (c *Config) applyDefaults(configDir string) {
 	if c.CacheWarmIntervalSeconds < 1 {
 		c.CacheWarmIntervalSeconds = 10
 	}
+	if c.ClusterSyncIntervalSeconds < 0 {
+		c.ClusterSyncIntervalSeconds = 0
+	}
 
 	c.FileLocations.DNSServerFile = ensureAbsolutePath(configDir, c.FileLocations.DNSServerFile, "dnsservers.json")
 	c.FileLocations.CacheFile = ensureAbsolutePath(configDir, c.FileLocations.CacheFile, "dnscache.json")
@@ -618,6 +643,39 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	}
 	if _, ok := raw["stats_dashboard_enabled"]; !ok {
 		c.StatsDashboardEnabled = true
+	}
+	if r, ok := raw["cluster_enabled"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterEnabled)
+	}
+	if r, ok := raw["cluster_listen_addr"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterListenAddr)
+	}
+	if r, ok := raw["cluster_peers"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterPeers)
+	}
+	if r, ok := raw["cluster_auth_token"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterAuthToken)
+	}
+	if r, ok := raw["cluster_node_id"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterNodeID)
+	}
+	if r, ok := raw["cluster_sync_interval_seconds"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterSyncIntervalSeconds)
+	}
+	if r, ok := raw["cluster_advertise_addr"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterAdvertiseAddr)
+	}
+	if r, ok := raw["cluster_replica_only"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterReplicaOnly)
+	}
+	if r, ok := raw["cluster_reject_local_writes"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterRejectLocalWrites)
+	}
+	if r, ok := raw["cluster_admin"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterAdmin)
+	}
+	if r, ok := raw["cluster_admin_token"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterAdminToken)
 	}
 	return nil
 }

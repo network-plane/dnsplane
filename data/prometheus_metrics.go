@@ -27,8 +27,8 @@ func cumulativeFromBuckets(counts [8]uint64) [8]uint64 {
 // WriteResolverPerfPrometheus appends Prometheus histogram lines for fast-path resolve latency
 // (from RecordResolverAResolve). Emits aggregate series and per-qtype labeled histograms.
 func WriteResolverPerfPrometheus(w io.Writer) {
-	fmt.Fprintf(w, "# HELP dnsplane_dns_resolve_duration_seconds DNS fast-path resolve latency (seconds)\n")
-	fmt.Fprintf(w, "# TYPE dnsplane_dns_resolve_duration_seconds histogram\n")
+	_, _ = fmt.Fprintf(w, "# HELP dnsplane_dns_resolve_duration_seconds DNS fast-path resolve latency (seconds)\n")
+	_, _ = fmt.Fprintf(w, "# TYPE dnsplane_dns_resolve_duration_seconds histogram\n")
 
 	n := perfATotal.Load()
 	var totalCounts [8]uint64
@@ -64,17 +64,17 @@ func writeHistogramSeries(w io.Writer, labels string, counts [8]uint64, sum floa
 	for i := 0; i < 8; i++ {
 		le := prometheusResolveBucketLe[i]
 		if labels == "" {
-			fmt.Fprintf(w, `dnsplane_dns_resolve_duration_seconds_bucket{le="%s"} %d`+"\n", le, cum[i])
+			_, _ = fmt.Fprintf(w, `dnsplane_dns_resolve_duration_seconds_bucket{le="%s"} %d`+"\n", le, cum[i])
 		} else {
-			fmt.Fprintf(w, `dnsplane_dns_resolve_duration_seconds_bucket{%s,le="%s"} %d`+"\n", labels, le, cum[i])
+			_, _ = fmt.Fprintf(w, `dnsplane_dns_resolve_duration_seconds_bucket{%s,le="%s"} %d`+"\n", labels, le, cum[i])
 		}
 	}
 	if labels == "" {
-		fmt.Fprintf(w, "dnsplane_dns_resolve_duration_seconds_sum %g\n", sum)
-		fmt.Fprintf(w, "dnsplane_dns_resolve_duration_seconds_count %d\n", count)
+		_, _ = fmt.Fprintf(w, "dnsplane_dns_resolve_duration_seconds_sum %g\n", sum)
+		_, _ = fmt.Fprintf(w, "dnsplane_dns_resolve_duration_seconds_count %d\n", count)
 	} else {
-		fmt.Fprintf(w, "dnsplane_dns_resolve_duration_seconds_sum{%s} %g\n", labels, sum)
-		fmt.Fprintf(w, "dnsplane_dns_resolve_duration_seconds_count{%s} %d\n", labels, count)
+		_, _ = fmt.Fprintf(w, "dnsplane_dns_resolve_duration_seconds_sum{%s} %g\n", labels, sum)
+		_, _ = fmt.Fprintf(w, "dnsplane_dns_resolve_duration_seconds_count{%s} %d\n", labels, count)
 	}
 }
 
