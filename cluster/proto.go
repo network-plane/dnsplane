@@ -47,14 +47,17 @@ func ReadFrame(r io.Reader) ([]byte, error) {
 
 // Message types (JSON "type" field).
 const (
-	TypeAuth        = "auth"
-	TypeAuthOK      = "auth_ok"
-	TypeAuthFail    = "auth_fail"
-	TypeRecordsFull = "records_full"
-	TypePull        = "pull"
-	TypePing        = "ping"
-	TypePong        = "pong"
-	TypeError       = "error"
+	TypeAuth             = "auth"
+	TypeAuthOK           = "auth_ok"
+	TypeAuthFail         = "auth_fail"
+	TypeRecordsFull      = "records_full"
+	TypePull             = "pull"
+	TypePing             = "ping"
+	TypePong             = "pong"
+	TypeError            = "error"
+	TypeAdminConfigApply = "admin_config_apply"
+	TypeAdminConfigOK    = "admin_config_ok"
+	TypeAdminConfigFail  = "admin_config_fail"
 )
 
 // AuthMessage is the first message from a client.
@@ -76,4 +79,16 @@ type RecordsFullMessage struct {
 type SimpleMessage struct {
 	Type    string `json:"type"`
 	Message string `json:"message,omitempty"`
+}
+
+// AdminConfigApplyMessage updates cluster-related fields on a peer (requires matching admin_token on target).
+type AdminConfigApplyMessage struct {
+	Type        string `json:"type"`
+	AdminToken  string `json:"admin_token"`
+	AuthToken   string `json:"cluster_auth_token,omitempty"`
+	Peers       []string `json:"cluster_peers,omitempty"`
+	ReplicaOnly *bool    `json:"cluster_replica_only,omitempty"`
+	RejectLocal *bool    `json:"cluster_reject_local_writes,omitempty"`
+	AdminLocal  *bool    `json:"cluster_admin,omitempty"`
+	SyncInterval *int    `json:"cluster_sync_interval_seconds,omitempty"`
 }

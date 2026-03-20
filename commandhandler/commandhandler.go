@@ -15,6 +15,7 @@ import (
 	"dnsplane/dnsservers"
 	"dnsplane/fullstats"
 	"dnsplane/resolver"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -366,7 +367,11 @@ func runRecordAdd(allowUpdate bool) func(tui.CommandRuntime, tui.CommandInput) t
 			result.Error = commandErrorFromRecordErr(err)
 			return result
 		}
-		dnsData.UpdateRecords(updated)
+		if err := dnsData.UpdateRecords(updated); err != nil {
+			result.Status = tui.StatusFailed
+			result.Error = &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError}
+			return result
+		}
 		result.Payload = updated
 		return result
 	}
@@ -386,7 +391,11 @@ func runRecordRemove() func(tui.CommandRuntime, tui.CommandInput) tui.CommandRes
 			result.Error = commandErrorFromRecordErr(err)
 			return result
 		}
-		dnsData.UpdateRecords(updated)
+		if err := dnsData.UpdateRecords(updated); err != nil {
+			result.Status = tui.StatusFailed
+			result.Error = &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError}
+			return result
+		}
 		result.Payload = updated
 		return result
 	}
@@ -407,7 +416,12 @@ func runRecordClear() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResu
 			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
 		}
 		dnsData := data.GetInstance()
-		dnsData.UpdateRecordsInMemory([]dnsrecords.DNSRecord{})
+		if err := dnsData.UpdateRecordsInMemory([]dnsrecords.DNSRecord{}); err != nil {
+			return tui.CommandResult{
+				Status: tui.StatusFailed,
+				Error:  &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError},
+			}
+		}
 		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("All DNS records have been cleared.")}
 	}
 }
@@ -434,7 +448,12 @@ func runRecordLoad() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResul
 				Error:  &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError},
 			}
 		}
-		dnsData.UpdateRecords(records)
+		if err := dnsData.UpdateRecords(records); err != nil {
+			return tui.CommandResult{
+				Status: tui.StatusFailed,
+				Error:  &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError},
+			}
+		}
 		return tui.CommandResult{Status: tui.StatusSuccess, Payload: records, Messages: infoMessages("DNS records loaded.")}
 	}
 }
@@ -1613,6 +1632,19 @@ func RegisterCommands() {
 			Tags:        []string{"adblock", "clear"},
 			Examples:    []tui.Example{{Description: "Clear block list", Command: "adblock clear"}},
 		}, runAdblockClear()),
+		newLegacyFactory(tui.CommandSpec{
+			Name:        "cluster",
+			Summary:     "Multi-node cluster (sync, peers, admin)",
+			Description: "Cluster status, pull, join info, peer add/remove/set-role, push records and config.",
+			Usage:       "cluster status | pull | join | peer ... | push ...",
+			Category:    "Cluster",
+			Tags:        []string{"cluster", "sync", "ha"},
+			Args:        []tui.ArgSpec{{Name: "subcommand", Description: "status, pull, join, peer, push", Required: false}},
+			Examples: []tui.Example{
+				{Description: "Show cluster status JSON", Command: "cluster status"},
+				{Description: "Add peer and mark readonly on remote", Command: "cluster peer add 192.168.1.5:7946 readonly"},
+			},
+		}, runCluster()),
 	}
 
 	for _, cmd := range commands {
@@ -1899,6 +1931,14 @@ func printAllServerConfig(settings config.Config) {
 	fmt.Printf("    stats_dashboard_enabled:  %v\n", settings.StatsDashboardEnabled)
 	fmt.Printf("    full_stats:     %v\n", settings.FullStats)
 	fmt.Printf("    full_stats_dir: %s\n", settings.FullStatsDir)
+	fmt.Println("  Cluster:")
+	fmt.Printf("    cluster_enabled: %v\n", settings.ClusterEnabled)
+	fmt.Printf("    cluster_listen_addr: %s\n", settings.ClusterListenAddr)
+	fmt.Printf("    cluster_advertise_addr: %s\n", settings.ClusterAdvertiseAddr)
+	fmt.Printf("    cluster_replica_only: %v\n", settings.ClusterReplicaOnly)
+	fmt.Printf("    cluster_reject_local_writes: %v\n", settings.ClusterRejectLocalWrites)
+	fmt.Printf("    cluster_admin: %v\n", settings.ClusterAdmin)
+	fmt.Printf("    cluster_peers: %d entries\n", len(settings.ClusterPeers))
 	fmt.Println("  File locations:")
 	fmt.Printf("    dnsservers:  %s\n", settings.FileLocations.DNSServerFile)
 	fmt.Printf("    cache:       %s\n", settings.FileLocations.CacheFile)
@@ -2095,9 +2135,88 @@ func applyConfigSetting(cfg *config.Config, setting, value string) (successMsg s
 		}
 		cfg.Log.RotationDays = n
 		return fmt.Sprintf("Log rotation time days set to %d", n), nil
+	case "cluster_enabled":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid value for cluster_enabled: %s (use true/false)", value)
+		}
+		cfg.ClusterEnabled = b
+		return fmt.Sprintf("cluster_enabled set to %v", b), nil
+	case "cluster_listen_addr":
+		cfg.ClusterListenAddr = value
+		return fmt.Sprintf("cluster_listen_addr set to %s", value), nil
+	case "cluster_peers":
+		peers, err := parseClusterPeersList(value)
+		if err != nil {
+			return "", err
+		}
+		cfg.ClusterPeers = peers
+		return fmt.Sprintf("cluster_peers set (%d peers)", len(peers)), nil
+	case "cluster_auth_token":
+		cfg.ClusterAuthToken = value
+		return "cluster_auth_token updated", nil
+	case "cluster_node_id":
+		cfg.ClusterNodeID = value
+		return fmt.Sprintf("cluster_node_id set to %s", value), nil
+	case "cluster_sync_interval_seconds":
+		n, e := strconv.Atoi(value)
+		if e != nil || n < 0 {
+			return "", fmt.Errorf("invalid cluster_sync_interval_seconds: %s", value)
+		}
+		cfg.ClusterSyncIntervalSeconds = n
+		return fmt.Sprintf("cluster_sync_interval_seconds set to %d", n), nil
+	case "cluster_advertise_addr":
+		cfg.ClusterAdvertiseAddr = value
+		return fmt.Sprintf("cluster_advertise_addr set to %s", value), nil
+	case "cluster_replica_only":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid value for cluster_replica_only: %s (use true/false)", value)
+		}
+		cfg.ClusterReplicaOnly = b
+		return fmt.Sprintf("cluster_replica_only set to %v", b), nil
+	case "cluster_reject_local_writes":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid value for cluster_reject_local_writes: %s (use true/false)", value)
+		}
+		cfg.ClusterRejectLocalWrites = b
+		return fmt.Sprintf("cluster_reject_local_writes set to %v", b), nil
+	case "cluster_admin":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid value for cluster_admin: %s (use true/false)", value)
+		}
+		cfg.ClusterAdmin = b
+		return fmt.Sprintf("cluster_admin set to %v", b), nil
+	case "cluster_admin_token":
+		cfg.ClusterAdminToken = value
+		return "cluster_admin_token updated", nil
 	default:
 		return "", fmt.Errorf("unknown setting: %s", setting)
 	}
+}
+
+func parseClusterPeersList(value string) ([]string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	if value[0] == '[' {
+		var peers []string
+		if err := json.Unmarshal([]byte(value), &peers); err != nil {
+			return nil, fmt.Errorf("cluster_peers: invalid JSON array: %w", err)
+		}
+		return peers, nil
+	}
+	var peers []string
+	for _, p := range strings.Split(value, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			peers = append(peers, p)
+		}
+	}
+	return peers, nil
 }
 
 func handleServerSet(args []string) {

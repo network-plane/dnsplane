@@ -122,6 +122,16 @@ type Config struct {
 	ClusterNodeID string `json:"cluster_node_id,omitempty"`
 	// ClusterSyncIntervalSeconds is periodic pull from peers (0 = disabled). Default 0.
 	ClusterSyncIntervalSeconds int `json:"cluster_sync_interval_seconds,omitempty"`
+	// ClusterAdvertiseAddr is the host:port peers should dial (shown in cluster info). Empty: derive from listen + guessed IP.
+	ClusterAdvertiseAddr string `json:"cluster_advertise_addr,omitempty"`
+	// ClusterReplicaOnly when true: pull/apply snapshots but do not push to peers (read replica).
+	ClusterReplicaOnly bool `json:"cluster_replica_only,omitempty"`
+	// ClusterRejectLocalWrites when true: reject local API/TUI record mutations (cluster applies still allowed).
+	ClusterRejectLocalWrites bool `json:"cluster_reject_local_writes,omitempty"`
+	// ClusterAdmin when true: this node may send admin_config_apply to peers (requires cluster_admin_token on both sides).
+	ClusterAdmin bool `json:"cluster_admin,omitempty"`
+	// ClusterAdminToken must match incoming admin_config_apply; empty disables remote admin apply.
+	ClusterAdminToken string `json:"cluster_admin_token,omitempty"`
 }
 
 // Loaded contains the configuration together with metadata about the source file.
@@ -651,6 +661,21 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	}
 	if r, ok := raw["cluster_sync_interval_seconds"]; ok {
 		_ = json.Unmarshal(r, &c.ClusterSyncIntervalSeconds)
+	}
+	if r, ok := raw["cluster_advertise_addr"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterAdvertiseAddr)
+	}
+	if r, ok := raw["cluster_replica_only"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterReplicaOnly)
+	}
+	if r, ok := raw["cluster_reject_local_writes"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterRejectLocalWrites)
+	}
+	if r, ok := raw["cluster_admin"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterAdmin)
+	}
+	if r, ok := raw["cluster_admin_token"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterAdminToken)
 	}
 	return nil
 }
