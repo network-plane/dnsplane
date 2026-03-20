@@ -21,14 +21,16 @@ import (
 	"time"
 
 	"dnsplane/api"
-	"dnsplane/buildinfo"
 	"dnsplane/cluster"
 	"dnsplane/commandhandler"
 	"dnsplane/config"
 	"dnsplane/daemon"
 	"dnsplane/data"
+	"dnsplane/dnssecsign"
+	"dnsplane/dnsserve"
 	"dnsplane/fullstats"
 	"dnsplane/logger"
+	"dnsplane/ratelimit"
 	"dnsplane/resolver"
 
 	"github.com/chzyer/readline"
@@ -48,6 +50,11 @@ const (
 	tuiClientKillCmd = "dnsplane-kill"
 )
 
+// appVersion is the dnsplane release string. CI/build services should inject with:
+//
+//	go build -ldflags "-X main.appVersion=v1.2.3"
+var appVersion = "1.4.141"
+
 var (
 	appState         = daemon.NewState()
 	dnsResolver      *resolver.Resolver
@@ -57,6 +64,7 @@ var (
 	tuiLogger        *slog.Logger
 	clientLogger     *slog.Logger
 	asyncLogQueue    *logger.AsyncLogQueue
+	dnsQueryLimiter  *ratelimit.PerIP
 
 	// defaultSocketPath is the default UNIX socket for server and client (set in init from config).
 	defaultSocketPath string
@@ -117,7 +125,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Please check the configuration in the repo.")
 		os.Exit(1)
 	}
-	rootCmd.Version = fmt.Sprintf("DNS Resolver %s", buildinfo.Version)
+	rootCmd.Version = fmt.Sprintf("DNS Resolver %s", appVersion)
 	rootCmd.SetVersionTemplate("{{.Version}}\n")
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal(err)
@@ -142,6 +150,8 @@ func init() {
 	// Client flags
 	clientCmd.Flags().String("log-file", "", "Path to log file or directory for client (writes dnsplaneclient.log when set)")
 	clientCmd.Flags().Bool("kill", false, "Disconnect the current TUI client and take over the session")
+
+	api.SetAppVersion(appVersion)
 }
 
 func normalizeTCPAddress(addr string) string {
@@ -269,7 +279,11 @@ func runServer(cmd *cobra.Command, args []string) error {
 		info.APIPort = apiport
 		info.APIEndpoint = ""
 		if info.APIPort != "" {
-			info.APIEndpoint = normalizeTCPAddress(":" + info.APIPort)
+			if b := strings.TrimSpace(settings.APIBind); b != "" {
+				info.APIEndpoint = normalizeTCPAddress(net.JoinHostPort(b, info.APIPort))
+			} else {
+				info.APIEndpoint = normalizeTCPAddress(":" + info.APIPort)
+			}
 		}
 		info.APIEnabled = apiMode
 	})
@@ -283,6 +297,17 @@ func runServer(cmd *cobra.Command, args []string) error {
 	settings.APIEnabled = apiMode
 	settings.RESTPort = apiport
 	dnsData.UpdateSettingsInMemory(settings)
+
+	if settings.DNSRateLimitPerIP > 0 {
+		burst := settings.DNSRateLimitBurst
+		if burst <= 0 {
+			burst = 50
+		}
+		dnsQueryLimiter = ratelimit.NewPerIP(settings.DNSRateLimitPerIP, burst)
+	} else {
+		dnsQueryLimiter = nil
+	}
+	responseLimiter = buildResponseLimiter(settings)
 
 	// Initialize full stats tracker if enabled
 	if settings.FullStats {
@@ -307,7 +332,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		func() bool { return appState.IsTUIClientTCP() },
 		func() commandhandler.ServerListenerInfo { return currentServerListeners(appState) },
 	)
-	commandhandler.SetVersion(buildinfo.Version, buildinfo.Version)
+	commandhandler.SetVersion(appVersion, appVersion)
 	commandhandler.SetFullStatsTracker(fullStatsTracker)
 	api.SetFullStatsTracker(fullStatsTracker)
 	tui.SetPrompt("dnsplane> ")
@@ -319,9 +344,25 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	if dnsResolver == nil {
+		var dnssecZSK *dnssecsign.Signer
+		signSt := dnsData.GetResolverSettings()
+		if signSt.DNSSECSignEnabled && strings.TrimSpace(signSt.DNSSECSignZone) != "" &&
+			strings.TrimSpace(signSt.DNSSECSignKeyFile) != "" && strings.TrimSpace(signSt.DNSSECSignPrivateKeyFile) != "" {
+			if s, err := dnssecsign.LoadSigner(signSt.DNSSECSignZone, signSt.DNSSECSignKeyFile, signSt.DNSSECSignPrivateKeyFile); err != nil {
+				if dnsLogger != nil {
+					dnsLogger.Warn("DNSSEC signing disabled: key load failed", "error", err)
+				}
+			} else {
+				dnssecZSK = s
+				if dnsLogger != nil {
+					dnsLogger.Info("DNSSEC signing enabled for zone", "zone", dnssecZSK.Zone())
+				}
+			}
+		}
 		dnsResolver = resolver.New(resolver.Config{
-			Store:    dnsData,
-			Upstream: resolver.NewDNSClient(2 * time.Second),
+			Store:        dnsData,
+			Upstream:     resolver.NewDNSClient(2 * time.Second),
+			DNSSECSigner: dnssecZSK,
 			Logger: func(format string, args ...interface{}) {
 				if asyncLogQueue != nil {
 					asyncLogQueue.Enqueue(func() {
@@ -364,8 +405,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 		})
 	}
 
-	dns.HandleFunc(".", handleRequest)
-
 	startedCh, dnsErrCh := startDNSServer(appState, port)
 
 	waitForServer := func() error {
@@ -393,6 +432,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	monitorDNSErrors()
+
+	go startInboundDNSListeners(appState.StopChannel())
 
 	go runUpstreamHealthProbeLoop(dnsData, dnsLogger)
 	go runCacheWarmLoop(dnsData, port)
@@ -581,12 +622,19 @@ func currentServerListeners(state *daemon.State) commandhandler.ServerListenerIn
 	tcp := strings.TrimSpace(listener.ClientTCPAddress)
 	apiEndpoint := strings.TrimSpace(listener.APIEndpoint)
 	if apiEndpoint == "" && settings.RESTPort != "" {
-		apiEndpoint = normalizeTCPAddress(":" + strings.TrimSpace(settings.RESTPort))
+		rest := strings.TrimSpace(settings.RESTPort)
+		apiBind := strings.TrimSpace(settings.APIBind)
+		if apiBind != "" {
+			apiEndpoint = normalizeTCPAddress(net.JoinHostPort(apiBind, rest))
+		} else {
+			apiEndpoint = normalizeTCPAddress(":" + rest)
+		}
 	}
 
+	dnsAddr := dnsListenAddr(dnsPort)
 	info := commandhandler.ServerListenerInfo{
-		DNSProtocol:         "udp",
-		DNSListeners:        []string{normalizeTCPAddress(":" + dnsPort)},
+		DNSProtocol:         "udp,tcp",
+		DNSListeners:        []string{normalizeTCPAddress(dnsAddr)},
 		ClientSocket:        socket,
 		ClientSocketEnabled: socket != "",
 		ClientTCPEndpoint:   tcp,
@@ -604,7 +652,14 @@ func startAPIAsync(state *daemon.State, port string, log *slog.Logger) {
 		port = data.GetInstance().GetResolverSettings().RESTPort
 	}
 	trimmed := strings.TrimSpace(port)
-	apiEndpoint := normalizeTCPAddress(":" + trimmed)
+	st := data.GetInstance().GetResolverSettings()
+	apiBind := strings.TrimSpace(st.APIBind)
+	var apiEndpoint string
+	if apiBind != "" {
+		apiEndpoint = normalizeTCPAddress(net.JoinHostPort(apiBind, trimmed))
+	} else {
+		apiEndpoint = normalizeTCPAddress(":" + trimmed)
+	}
 	state.UpdateListener(func(info *daemon.ListenerSettings) {
 		info.APIPort = trimmed
 		info.APIEndpoint = apiEndpoint
@@ -613,7 +668,26 @@ func startAPIAsync(state *daemon.State, port string, log *slog.Logger) {
 	if state.APIRunning() {
 		return
 	}
-	api.Start(state, trimmed, nil, log)
+	opts := &api.ListenOptions{
+		BindIP:         st.APIBind,
+		TLSCertFile:    st.APITLSCertFile,
+		TLSKeyFile:     st.APITLSKeyFile,
+		RateLimitRPS:   st.APIRateLimitPerIP,
+		RateLimitBurst: st.APIRateLimitBurst,
+	}
+	api.Start(state, trimmed, opts, nil, log)
+}
+
+func dnsListenAddr(port string) string {
+	p := strings.TrimSpace(port)
+	if p == "" {
+		p = "53"
+	}
+	bind := strings.TrimSpace(data.GetInstance().GetResolverSettings().DNSBind)
+	if bind == "" {
+		return ":" + p
+	}
+	return net.JoinHostPort(bind, p)
 }
 
 func startDNSServer(state *daemon.State, port string) (<-chan struct{}, <-chan error) {
@@ -622,21 +696,39 @@ func startDNSServer(state *daemon.State, port string) (<-chan struct{}, <-chan e
 		info.DNSPort = trimmedPort
 	})
 	dnsData := data.GetInstance()
+	dnsAddr := dnsListenAddr(trimmedPort)
 
-	server := &dns.Server{
-		Addr:         fmt.Sprintf(":%s", trimmedPort),
+	udpMux := dns.NewServeMux()
+	udpMux.HandleFunc(".", func(w dns.ResponseWriter, r *dns.Msg) {
+		handleRequestProto(w, r, dnsserve.ProtoUDP)
+	})
+	tcpMux := dns.NewServeMux()
+	tcpMux.HandleFunc(".", func(w dns.ResponseWriter, r *dns.Msg) {
+		handleRequestProto(w, r, dnsserve.ProtoTCP)
+	})
+
+	udpServer := &dns.Server{
+		Addr:         dnsAddr,
 		Net:          "udp",
+		Handler:      udpMux,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+	}
+	tcpServer := &dns.Server{
+		Addr:         dnsAddr,
+		Net:          "tcp",
+		Handler:      tcpMux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 	}
 
-	dnsLogger.Info("Starting DNS server", "addr", server.Addr)
+	dnsLogger.Info("Starting DNS servers", "udp", udpServer.Addr, "tcp", tcpServer.Addr)
 
 	startedCh := make(chan struct{})
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 2)
 	var once sync.Once
 
-	server.NotifyStartedFunc = func() {
+	notifyStarted := func() {
 		once.Do(func() {
 			state.SetServerStatus(true)
 			stats := dnsData.GetStats()
@@ -645,10 +737,11 @@ func startDNSServer(state *daemon.State, port string) (<-chan struct{}, <-chan e
 			close(startedCh)
 		})
 	}
+	udpServer.NotifyStartedFunc = notifyStarted
 
 	go func() {
 		defer state.NotifyStopped()
-		if err := server.ListenAndServe(); err != nil {
+		if err := udpServer.ListenAndServe(); err != nil {
 			state.SetServerStatus(false)
 			select {
 			case errCh <- err:
@@ -659,12 +752,28 @@ func startDNSServer(state *daemon.State, port string) (<-chan struct{}, <-chan e
 		state.SetServerStatus(false)
 	}()
 
+	go func() {
+		if err := tcpServer.ListenAndServe(); err != nil {
+			state.SetServerStatus(false)
+			select {
+			case errCh <- err:
+			default:
+			}
+		}
+	}()
+
 	stopCh := state.StopChannel()
 	go func() {
 		<-stopCh
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		if err := server.ShutdownContext(shutdownCtx); err != nil {
+		if err := udpServer.ShutdownContext(shutdownCtx); err != nil {
+			select {
+			case errCh <- err:
+			default:
+			}
+		}
+		if err := tcpServer.ShutdownContext(shutdownCtx); err != nil {
 			select {
 			case errCh <- err:
 			default:
@@ -686,7 +795,10 @@ func restartDNSServer(state *daemon.State, port string) {
 	case err := <-errCh:
 		dnsLogger.Error("Error restarting DNS server", "error", err)
 		fmt.Fprintf(os.Stderr, "Error restarting DNS server: %v\n", err)
+		return
 	}
+	responseLimiter = buildResponseLimiter(data.GetInstance().GetResolverSettings())
+	go startInboundDNSListeners(state.StopChannel())
 }
 
 const dnsShutdownWaitTimeout = 20 * time.Second
@@ -712,59 +824,6 @@ func stopDNSServer(state *daemon.State) {
 
 func getServerStatus(state *daemon.State) bool {
 	return state.ServerStatus()
-}
-
-// DNS
-func handleRequest(writer dns.ResponseWriter, request *dns.Msg) {
-	t0 := time.Now()
-	response := new(dns.Msg)
-	response.SetReply(request)
-	response.Authoritative = false
-
-	requesterIP := "unknown"
-	if addr := writer.RemoteAddr(); addr != nil {
-		if host, _, err := net.SplitHostPort(addr.String()); err == nil {
-			requesterIP = host
-		} else {
-			requesterIP = addr.String()
-		}
-	}
-
-	ctx := context.Background()
-	if dnsResolver != nil {
-		for _, question := range request.Question {
-			dnsResolver.HandleQuestion(ctx, question, response)
-		}
-	}
-	resolveDone := time.Since(t0)
-
-	err := writer.WriteMsg(response)
-	total := time.Since(t0)
-
-	if total > 10*time.Millisecond {
-		qname := ""
-		if len(request.Question) > 0 {
-			qname = request.Question[0].Name
-		}
-		fmt.Printf("[SLOW] %s resolve=%s write=%s total=%s\n", qname, resolveDone, total-resolveDone, total)
-	}
-
-	// Everything after the reply is async so the client never waits on logging or stats.
-	go func() {
-		dnsData := data.GetInstance()
-		dnsData.IncrementTotalQueries()
-		for _, question := range request.Question {
-			if fullStatsTracker != nil {
-				recordType := dns.TypeToString[question.Qtype]
-				key := fmt.Sprintf("%s:%s", question.Name, recordType)
-				_ = fullStatsTracker.RecordRequest(key, requesterIP, recordType)
-			}
-		}
-		if err != nil && asyncLogQueue != nil && dnsLogger != nil {
-			errCopy := err
-			asyncLogQueue.Enqueue(func() { dnsLogger.Error("Error writing response", "error", errCopy) })
-		}
-	}()
 }
 
 func startUnixSocketListener(socketPath string, log *slog.Logger) (net.Listener, error) {
@@ -864,7 +923,7 @@ func serveInteractiveSession(conn net.Conn, log *slog.Logger) {
 
 	// Send banner so remote client can verify this is a dnsplane server.
 	if err := conn.SetWriteDeadline(time.Now().Add(3 * time.Second)); err == nil {
-		_, _ = fmt.Fprintf(conn, "%s %s\n", tuiBannerPrefix, buildinfo.Version)
+		_, _ = fmt.Fprintf(conn, "%s %s\n", tuiBannerPrefix, appVersion)
 		_ = conn.SetWriteDeadline(time.Time{})
 	}
 
@@ -1015,10 +1074,10 @@ func connectToInteractiveEndpoint(target string, killOther bool) {
 	}
 
 	serverVersion := strings.TrimSpace(strings.TrimPrefix(banner, tuiBannerPrefix))
-	if serverVersion != "" && serverVersion != buildinfo.Version {
-		fmt.Fprintf(os.Stderr, "Warning: version mismatch — server %s, client %s\n", serverVersion, buildinfo.Version)
+	if serverVersion != "" && serverVersion != appVersion {
+		fmt.Fprintf(os.Stderr, "Warning: version mismatch — server %s, client %s\n", serverVersion, appVersion)
 		if clientLogger != nil {
-			clientLogger.Warn("version mismatch", "server", serverVersion, "client", buildinfo.Version)
+			clientLogger.Warn("version mismatch", "server", serverVersion, "client", appVersion)
 		}
 	}
 

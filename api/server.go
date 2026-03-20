@@ -8,18 +8,20 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
-	"dnsplane/buildinfo"
 	"dnsplane/daemon"
 	"dnsplane/data"
 	"dnsplane/dnsrecordcache"
 	"dnsplane/dnsrecords"
 	"dnsplane/dnsservers"
 	"dnsplane/fullstats"
+	"dnsplane/ratelimit"
 	"net/url"
 
 	"github.com/go-chi/chi/v5"
@@ -32,6 +34,24 @@ var (
 	apiState            *daemon.State
 	apiFullStatsTracker *fullstats.Tracker
 )
+
+// appVersion is set from package main via SetAppVersion (main.appVersion; CI may use -ldflags "-X main.appVersion=...").
+var appVersion string
+
+// SetAppVersion registers the application release string for /ready, /version, and /stats JSON.
+func SetAppVersion(v string) {
+	appVersion = v
+}
+
+// BuildInfo returns version and runtime metadata for JSON APIs.
+func BuildInfo() map[string]string {
+	return map[string]string{
+		"version":    appVersion,
+		"go_version": runtime.Version(),
+		"os":         runtime.GOOS,
+		"arch":       runtime.GOARCH,
+	}
+}
 
 // SetFullStatsTracker sets the full statistics tracker for /stats and /metrics (optional).
 func SetFullStatsTracker(t *fullstats.Tracker) {
@@ -80,8 +100,9 @@ type RouteRegistrar func(chi.Router)
 // Start launches the REST API server asynchronously. If registrar is nil, the
 // package's default DNS routes are registered. The server listens on the
 // provided port and updates the daemon state when it stops.
+// opts may be nil (defaults: all interfaces, no TLS, no rate limit).
 // If logger is nil, no file logging is done for API messages.
-func Start(state *daemon.State, port string, registrar RouteRegistrar, logger *slog.Logger) {
+func Start(state *daemon.State, port string, opts *ListenOptions, registrar RouteRegistrar, logger *slog.Logger) {
 	if state == nil {
 		logAPIWarn(logger, "missing daemon state; cannot start API")
 		return
@@ -100,27 +121,52 @@ func Start(state *daemon.State, port string, registrar RouteRegistrar, logger *s
 	if registrar == nil {
 		registrar = RegisterDNSRoutes
 	}
+	if opts == nil {
+		opts = &ListenOptions{}
+	}
 
 	apiServerMu.Lock()
 	apiState = state
 	apiServerMu.Unlock()
 	state.SetAPIRunning(true)
+	bindIP := strings.TrimSpace(opts.BindIP)
+	addr := ":" + trimmed
+	if bindIP != "" {
+		addr = net.JoinHostPort(bindIP, trimmed)
+	}
 	if logger != nil {
-		logger.Info("API server starting", "port", trimmed)
+		logger.Info("API server starting", "addr", addr, "tls", opts.TLSCertFile != "" && opts.TLSKeyFile != "")
 	}
 	router := chi.NewRouter()
 	router.Use(middleware.Recoverer)
 	router.Use(middleware.Logger)
+	var lim *ratelimit.PerIP
+	if opts.RateLimitRPS > 0 {
+		burst := opts.RateLimitBurst
+		if burst <= 0 {
+			burst = 20
+		}
+		lim = ratelimit.NewPerIP(opts.RateLimitRPS, burst)
+	}
+	if lim != nil {
+		router.Use(rateLimitMiddleware(lim))
+	}
+	router.Use(apiAuthMiddleware())
 	registrar(router)
 
-	addr := fmt.Sprintf(":%s", trimmed)
 	srv := &http.Server{Addr: addr, Handler: router}
 	apiServerMu.Lock()
 	apiServer = srv
 	apiServerMu.Unlock()
 	go func() {
 		defer state.SetAPIRunning(false)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		var err error
+		if strings.TrimSpace(opts.TLSCertFile) != "" && strings.TrimSpace(opts.TLSKeyFile) != "" {
+			err = srv.ListenAndServeTLS(opts.TLSCertFile, opts.TLSKeyFile)
+		} else {
+			err = srv.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
 			logAPIError(logger, "API server stopped with error", "error", err)
 		}
 	}()
@@ -227,7 +273,7 @@ func readyHandler(w http.ResponseWriter, r *http.Request) {
 		"api":       apiUp,
 		"dns":       dnsUp,
 		"listeners": listeners,
-		"build":     buildinfo.Info(),
+		"build":     BuildInfo(),
 	}
 	tuiObj := map[string]any{"connected": tuiConnected}
 	if tuiConnected {
@@ -245,7 +291,7 @@ func readyHandler(w http.ResponseWriter, r *http.Request) {
 
 // versionHandler returns build metadata (version, Go, OS, arch) as JSON.
 func versionHandler(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, buildinfo.Info())
+	writeJSON(w, http.StatusOK, BuildInfo())
 }
 
 // listServersHandler returns configured upstreams plus optional health when checks are enabled.
@@ -335,7 +381,7 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"session": sessionMap,
 		"total":   totalMap,
-		"build":   buildinfo.Info(),
+		"build":   BuildInfo(),
 	})
 }
 
@@ -390,6 +436,8 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 
 	_, _ = fmt.Fprintln(w)
 	data.WriteResolverPerfPrometheus(w)
+	_, _ = fmt.Fprintln(w)
+	data.WriteDNSAbusePrometheus(w)
 }
 
 type AddRecordRequest struct {

@@ -146,19 +146,37 @@ func (t *UpstreamHealthTracker) Snapshot(keys []string) []UpstreamHealthStatus {
 	return out
 }
 
-// FilterHealthyUpstreamAddresses removes upstreams marked unhealthy when health checks are enabled.
-func (d *DNSResolverData) FilterHealthyUpstreamAddresses(addrs []string) []string {
-	if d == nil || len(addrs) == 0 {
-		return addrs
+// FilterHealthyUpstreamEndpoints removes upstreams marked unhealthy when health checks are enabled.
+func (d *DNSResolverData) FilterHealthyUpstreamEndpoints(eps []dnsservers.UpstreamEndpoint) []dnsservers.UpstreamEndpoint {
+	if d == nil || len(eps) == 0 {
+		return eps
 	}
 	d.mu.RLock()
 	h := d.upstreamHealth
 	cfg := d.Settings
 	d.mu.RUnlock()
 	if h == nil {
-		return addrs
+		return eps
 	}
-	return h.Filter(&cfg, addrs)
+	keys := make([]string, len(eps))
+	for i := range eps {
+		keys[i] = eps[i].HealthKey()
+	}
+	filtered := h.Filter(&cfg, keys)
+	keep := make(map[string]struct{}, len(filtered))
+	for _, k := range filtered {
+		keep[k] = struct{}{}
+	}
+	out := make([]dnsservers.UpstreamEndpoint, 0, len(filtered))
+	for _, ep := range eps {
+		if _, ok := keep[ep.HealthKey()]; ok {
+			out = append(out, ep)
+		}
+	}
+	if len(out) == 0 {
+		return eps
+	}
+	return out
 }
 
 // RecordUpstreamForwardSuccess clears unhealthy state after a successful upstream reply.
@@ -189,11 +207,7 @@ func (d *DNSResolverData) UpstreamHealthStatuses() ([]UpstreamHealthStatus, bool
 		if !s.Active {
 			continue
 		}
-		port := s.Port
-		if port == "" {
-			port = "53"
-		}
-		keys = append(keys, s.Address+":"+port)
+		keys = append(keys, dnsservers.ServerToEndpoint(s).HealthKey())
 	}
 	if h == nil {
 		out := make([]UpstreamHealthStatus, len(keys))

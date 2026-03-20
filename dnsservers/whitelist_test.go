@@ -66,7 +66,7 @@ func TestServerMatchesQuery(t *testing.T) {
 	}
 }
 
-func TestGetServersForQuery(t *testing.T) {
+func TestGetUpstreamEndpointsForQuery(t *testing.T) {
 	global := DNSServer{Address: "8.8.8.8", Port: "53", Active: true}
 	whitelisted := DNSServer{
 		Address:         "192.168.5.5",
@@ -77,54 +77,54 @@ func TestGetServersForQuery(t *testing.T) {
 	servers := []DNSServer{global, whitelisted}
 
 	// Query for whitelisted domain: only whitelisted server
-	got := GetServersForQuery(servers, "api.internal.vodafoneinnovus.com", true)
-	if len(got) != 1 || got[0] != "192.168.5.5:53" {
-		t.Errorf("GetServersForQuery(whitelisted domain) = %v, want [192.168.5.5:53]", got)
+	got := GetUpstreamEndpointsForQuery(servers, "api.internal.vodafoneinnovus.com", true)
+	if len(got) != 1 || got[0].HealthKey() != "192.168.5.5:53" {
+		t.Errorf("GetUpstreamEndpointsForQuery(whitelisted domain) = %v, want [192.168.5.5:53]", got)
 	}
 
 	// Query for other domain: only global server
-	got = GetServersForQuery(servers, "example.com", true)
-	if len(got) != 1 || got[0] != "8.8.8.8:53" {
-		t.Errorf("GetServersForQuery(global domain) = %v, want [8.8.8.8:53]", got)
+	got = GetUpstreamEndpointsForQuery(servers, "example.com", true)
+	if len(got) != 1 || got[0].HealthKey() != "8.8.8.8:53" {
+		t.Errorf("GetUpstreamEndpointsForQuery(global domain) = %v, want [8.8.8.8:53]", got)
 	}
 
 	// Inactive whitelisted server not returned when activeOnly true
 	serversInactive := []DNSServer{global, {Address: "192.168.5.5", Port: "53", Active: false, DomainWhitelist: []string{"internal.vodafoneinnovus.com"}}}
-	got = GetServersForQuery(serversInactive, "api.internal.vodafoneinnovus.com", true)
+	got = GetUpstreamEndpointsForQuery(serversInactive, "api.internal.vodafoneinnovus.com", true)
 	if len(got) != 0 {
-		t.Errorf("GetServersForQuery(whitelisted but inactive, activeOnly=true) = %v, want []", got)
+		t.Errorf("GetUpstreamEndpointsForQuery(whitelisted but inactive, activeOnly=true) = %v, want []", got)
 	}
 
 	// Empty server list returns nil
-	got = GetServersForQuery(nil, "example.com", true)
+	got = GetUpstreamEndpointsForQuery(nil, "example.com", true)
 	if got != nil {
-		t.Errorf("GetServersForQuery(nil, ...) = %v, want nil", got)
+		t.Errorf("GetUpstreamEndpointsForQuery(nil, ...) = %v, want nil", got)
 	}
-	got = GetServersForQuery([]DNSServer{}, "example.com", true)
+	got = GetUpstreamEndpointsForQuery([]DNSServer{}, "example.com", true)
 	if got != nil {
-		t.Errorf("GetServersForQuery(empty, ...) = %v, want nil", got)
+		t.Errorf("GetUpstreamEndpointsForQuery(empty, ...) = %v, want nil", got)
 	}
 
 	// Multiple whitelist servers matching same query: all returned
 	whitelist2 := DNSServer{Address: "192.168.5.6", Port: "53", Active: true, DomainWhitelist: []string{"internal.vodafoneinnovus.com"}}
 	serversMulti := []DNSServer{global, whitelisted, whitelist2}
-	got = GetServersForQuery(serversMulti, "api.internal.vodafoneinnovus.com", true)
+	got = GetUpstreamEndpointsForQuery(serversMulti, "api.internal.vodafoneinnovus.com", true)
 	if len(got) != 2 {
-		t.Fatalf("GetServersForQuery(two whitelist match) len = %d, want 2", len(got))
+		t.Fatalf("GetUpstreamEndpointsForQuery(two whitelist match) len = %d, want 2", len(got))
 	}
 	// Both whitelist servers should be present (order not specified)
 	seen := make(map[string]bool)
-	for _, addr := range got {
-		seen[addr] = true
+	for _, ep := range got {
+		seen[ep.HealthKey()] = true
 	}
 	if !seen["192.168.5.5:53"] || !seen["192.168.5.6:53"] {
-		t.Errorf("GetServersForQuery(two whitelist match) = %v", got)
+		t.Errorf("GetUpstreamEndpointsForQuery(two whitelist match) = %v", got)
 	}
 
 	// activeOnly false: inactive matching server is included
-	got = GetServersForQuery(serversInactive, "api.internal.vodafoneinnovus.com", false)
-	if len(got) != 1 || got[0] != "192.168.5.5:53" {
-		t.Errorf("GetServersForQuery(whitelisted inactive, activeOnly=false) = %v, want [192.168.5.5:53]", got)
+	got = GetUpstreamEndpointsForQuery(serversInactive, "api.internal.vodafoneinnovus.com", false)
+	if len(got) != 1 || got[0].HealthKey() != "192.168.5.5:53" {
+		t.Errorf("GetUpstreamEndpointsForQuery(whitelisted inactive, activeOnly=false) = %v, want [192.168.5.5:53]", got)
 	}
 }
 
@@ -143,8 +143,8 @@ func FuzzServerMatchesQuery(f *testing.F) {
 	})
 }
 
-// FuzzGetServersForQuery exercises server selection with fuzzed query name.
-func FuzzGetServersForQuery(f *testing.F) {
+// FuzzGetUpstreamEndpointsForQuery exercises server selection with fuzzed query name.
+func FuzzGetUpstreamEndpointsForQuery(f *testing.F) {
 	servers := []DNSServer{
 		{Address: "8.8.8.8", Port: "53", Active: true},
 		{Address: "192.168.5.5", Port: "53", Active: true, DomainWhitelist: []string{"internal.example.com"}},
@@ -152,7 +152,7 @@ func FuzzGetServersForQuery(f *testing.F) {
 	f.Add("example.com")
 	f.Add("api.internal.example.com")
 	f.Fuzz(func(t *testing.T, queryName string) {
-		_ = GetServersForQuery(servers, queryName, true)
-		_ = GetServersForQuery(servers, queryName, false)
+		_ = GetUpstreamEndpointsForQuery(servers, queryName, true)
+		_ = GetUpstreamEndpointsForQuery(servers, queryName, false)
 	})
 }
