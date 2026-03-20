@@ -236,6 +236,9 @@ var statsPageTemplate = template.Must(template.New("stats").Parse(`<!DOCTYPE htm
 
 // statsPageHandler serves a dark-themed read-only stats dashboard with optional full_stats.
 func statsPageHandler(w http.ResponseWriter, r *http.Request) {
+	if !requireStatsHTMLPage(w, r, data.StatsPageHTMLEnabled()) {
+		return
+	}
 	dnsData := data.GetInstance()
 	stats := dnsData.GetStats()
 

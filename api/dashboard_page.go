@@ -14,6 +14,9 @@ func dashboardDataHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
+	if !requireStatsHTMLPage(w, r, data.StatsDashboardHTMLEnabled()) {
+		return
+	}
 	dnsData := data.GetInstance()
 	stats := dnsData.GetStats()
 	perf := data.GetResolverPerfReport()
@@ -42,6 +45,9 @@ func dashboardDataHandler(w http.ResponseWriter, r *http.Request) {
 func dashboardPageHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireStatsHTMLPage(w, r, data.StatsDashboardHTMLEnabled()) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
