@@ -194,6 +194,9 @@ Besides `file_locations` (and `records_source`, `adblock_list_files`), the confi
     - `stale_while_revalidate` — when true, expired cache entries are served instantly (TTL=1) while upstream is refreshed in the background; eliminates latency spikes on cache expiry.
     - `cache_warm_enabled` — when true (default), a background self-query runs every `cache_warm_interval_seconds` to keep the process hot and prevent cold-start latency after idle periods.
     - `cache_warm_interval_seconds` — seconds between keep-alive self-queries (default 10).
+    - `stats_page_enabled` — when true (default), serves HTML **`/stats/page`**; set `false` to disable (JSON **`/stats`** is unchanged).
+    - `stats_perf_page_enabled` — when true (default), serves HTML **`/stats/perf/page`**; set `false` to disable (JSON **`/stats/perf`** and **`POST /stats/perf/reset`** unchanged).
+    - `stats_dashboard_enabled` — when true (default), serves **`/stats/dashboard`** and **`/stats/dashboard/data`**; set `false` to disable both.
     - `full_stats`, `full_stats_dir` — optional aggregated stats tracking.
 - **Upstream health (optional):** `upstream_health_check_enabled`, `upstream_health_check_failures` (default 3), `upstream_health_check_interval_seconds` (default 30), `upstream_health_check_query_name` (default `google.com.`). When enabled, failed upstreams are skipped for forwarding until they pass a probe or a query succeeds. See [docs/upstream-health.md](docs/upstream-health.md).
 - **DNSRecordSettings:** `auto_build_ptr_from_a`, `forward_ptr_queries`, `add_updates_records`
@@ -208,16 +211,19 @@ Enable the REST API with `"api": true` in `dnsplane.json` and set `apiport` (e.g
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/health` | Liveness: returns 200 when the API process is up. No dependency on DNS or other listeners. |
-| GET | `/ready` | Readiness: returns 200 when the API and DNS listener are both up, 503 otherwise. Response is JSON with `ready`, `api`, `dns`, `tui_client` (connected, addr, since), and `listeners` (dns_port, api_port, api_enabled, client_socket_path, client_tcp_address). Useful for Kubernetes readiness probes and load balancers. |
+| GET | `/ready` | Readiness: returns 200 when the API and DNS listener are both up, 503 otherwise. Response is JSON with `ready`, `api`, `dns`, `tui_client` (connected, addr, since), `listeners` (dns_port, api_port, api_enabled, client_socket_path, client_tcp_address), and **`build`** (`version`, `go_version`, `os`, `arch`). Useful for Kubernetes readiness probes and load balancers. |
+| GET | `/version` | Build metadata as JSON: `version`, `go_version`, `os`, `arch` (same as `build` in `/stats` and `/ready`). |
 | GET | `/dns/records` | List DNS records (same data as the TUI). Returns JSON with `records` and optional `filter`, `messages`. |
 | POST | `/dns/records` | Add a DNS record. Body: `{"name":"...","type":"A","value":"...","ttl":3600}`. |
 | GET | `/dns/servers` | List upstreams plus health: `servers`, `upstream_health_check_enabled`, interval/failures hints, and `upstream_health` per `address_port` (unhealthy, consecutive_failures, last_probe_*, last_success_at). |
 | GET | `/dns/upstreams/health` | Same health slice and check settings without full server config. See [docs/upstream-health.md](docs/upstream-health.md). |
-| GET | `/stats` | Resolver stats as JSON: total_queries, total_cache_hits, total_blocks, total_queries_forwarded, total_queries_answered, server_start_time. When `full_stats` is enabled in config, includes `full_stats.enabled`, `full_stats.requesters_count`, `full_stats.domains_count`. |
-| GET | `/metrics` | Prometheus text format: counters (e.g. `dnsplane_queries_total`, `dnsplane_cache_hits_total`, `dnsplane_blocks_total`) and gauges (`dnsplane_server_start_time_seconds`). When full_stats is enabled, adds `dnsplane_fullstats_requesters_count` and `dnsplane_fullstats_domains_count`. |
-| GET | `/stats/page` | Read-only stats dashboard (HTML): dark-themed page with panels for resolver stats, data counts, status (API/DNS/TUI client, listeners), and when full_stats is enabled a Full stats panel with requesters/domains counts and top 10 requesters and top 10 domains. Use query `?full=N` (e.g. `?full=20`) to show top N instead of 10. |
+| GET | `/stats` | Resolver stats as JSON: `session` / `total` scopes with resolver counters; top-level **`build`** (`version`, `go_version`, `os`, `arch`). When `full_stats` is enabled in config, includes `full_stats.enabled`, `full_stats.requesters_count`, `full_stats.domains_count`. |
+| GET | `/metrics` | Prometheus text format: counters (e.g. `dnsplane_queries_total`, `dnsplane_cache_hits_total`, `dnsplane_blocks_total`) and gauges (`dnsplane_server_start_time_seconds`). When full_stats is enabled, adds full_stats gauges. **`dnsplane_dns_resolve_duration_seconds`** histogram (`_bucket` with `le`, `_sum`, `_count`) reflects fast-path resolve latency; labeled **`dnsplane_dns_resolve_duration_seconds_bucket{qtype="A",le="..."}`** (and other QTYPEs) mirrors `/stats/perf` by query type. |
+| GET | `/stats/page` | Read-only stats dashboard (HTML): dark-themed page with panels for resolver stats, data counts, status (API/DNS/TUI client, listeners), and when `full_stats` is enabled a Full stats panel with requesters/domains counts and top N lists. **Gated by** `stats_page_enabled` (default true); when false → **404**. |
+| GET | `/stats/dashboard` | Live **dashboard** (HTML): light-themed layout with metric cards, replies-per-minute and average resolution time charts (last 60 minutes), and a rolling resolution log. **Gated by** `stats_dashboard_enabled` (default true); when false → **404**. |
+| GET | `/stats/dashboard/data` | JSON for the dashboard (`counters`, `perf`, `series`, `log`). **Gated by** `stats_dashboard_enabled`; when false → **404**. |
 | GET | `/stats/perf` | Resolver perf: **outcome_local** / **outcome_cache** / **outcome_upstream** / **outcome_none**; **histogram_cache_only_ms** + **avg_total_ms_cache_only** (cache hits only); **histogram_upstream_ms** (upstream path only). Mixed **histogram_total_ms** is misleading for diagnosis — compare cache vs upstream histograms. Reset with `POST /stats/perf/reset`. |
-| GET | `/stats/perf/page` | HTML dashboard for `/stats/perf` (auto-refresh every 2s, reset button). |
+| GET | `/stats/perf/page` | HTML dashboard for `/stats/perf` (auto-refresh every 2s, reset button). **Gated by** `stats_perf_page_enabled` (default true); when false → **404**. |
 | POST | `/stats/perf/reset` | Clears A-resolve perf counters (use before a benchmark run). |
 
 ### curl examples (upstream health)
@@ -242,6 +248,8 @@ Enable checks in `dnsplane.json`, then restart server:
 ```
 
 ## Logging
+
+**DNS structured logs (debug):** When `log_severity` is `debug` (or lower) and the DNS log file is enabled, each resolved query is logged asynchronously with **`dns query`** and fields: `qname`, `qtype`, `outcome` (`local` \| `cache` \| `upstream` \| `none` \| `blocked`), `upstream` (address:port when `outcome` is `upstream`, else empty), `duration_ms`.
 
 **Server:** Logging is configured in `dnsplane.json` under a `log` section. By default logs are written to `/var/log/dnsplane/` with fixed filenames: `dnsserver.log`, `apiserver.log`, and `tuiserver.log`. You can set:
 

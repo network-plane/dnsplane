@@ -104,6 +104,12 @@ type Config struct {
 	CacheWarmEnabled bool `json:"cache_warm_enabled,omitempty"`
 	// CacheWarmIntervalSeconds is seconds between keep-alive self-queries. Default 10.
 	CacheWarmIntervalSeconds int `json:"cache_warm_interval_seconds,omitempty"`
+	// StatsPageEnabled serves GET /stats/page (HTML). Default true.
+	StatsPageEnabled bool `json:"stats_page_enabled,omitempty"`
+	// StatsPerfPageEnabled serves GET /stats/perf/page (HTML). Default true.
+	StatsPerfPageEnabled bool `json:"stats_perf_page_enabled,omitempty"`
+	// StatsDashboardEnabled serves GET /stats/dashboard and /stats/dashboard/data. Default true.
+	StatsDashboardEnabled bool `json:"stats_dashboard_enabled,omitempty"`
 }
 
 // Loaded contains the configuration together with metadata about the source file.
@@ -315,6 +321,9 @@ func defaultConfig(baseDir string) *Config {
 		StaleWhileRevalidate:     true,
 		CacheWarmEnabled:         true,
 		CacheWarmIntervalSeconds: 10,
+		StatsPageEnabled:         true,
+		StatsPerfPageEnabled:     true,
+		StatsDashboardEnabled:    true,
 		Log: LogConfig{
 			Dir:            logDir,
 			Severity:       "none",
@@ -583,6 +592,25 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	}
 	if r, ok := raw["cache_warm_interval_seconds"]; ok {
 		_ = json.Unmarshal(r, &c.CacheWarmIntervalSeconds)
+	}
+	if r, ok := raw["stats_page_enabled"]; ok {
+		_ = json.Unmarshal(r, &c.StatsPageEnabled)
+	}
+	if r, ok := raw["stats_perf_page_enabled"]; ok {
+		_ = json.Unmarshal(r, &c.StatsPerfPageEnabled)
+	}
+	if r, ok := raw["stats_dashboard_enabled"]; ok {
+		_ = json.Unmarshal(r, &c.StatsDashboardEnabled)
+	}
+	// Opt-out HTML stats UIs: default true when keys are absent (legacy configs).
+	if _, ok := raw["stats_page_enabled"]; !ok {
+		c.StatsPageEnabled = true
+	}
+	if _, ok := raw["stats_perf_page_enabled"]; !ok {
+		c.StatsPerfPageEnabled = true
+	}
+	if _, ok := raw["stats_dashboard_enabled"]; !ok {
+		c.StatsDashboardEnabled = true
 	}
 	return nil
 }
