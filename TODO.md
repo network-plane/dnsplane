@@ -128,13 +128,13 @@ _Tracked here because the Cursor plan file is not in-repo._
 
 Goal: multiple dnsplane instances that stay in sync for records (and optionally other data) over a custom protocol.
 
-- [ ] Define data to sync: records (dnsrecords) as primary payload; optionally adblock and upstream list; cache per-node, not synced.
-- [ ] Custom sync protocol: TCP (optionally TLS), configurable listen port and peer list; message types: full dump, delta (add/update/delete since sequence N), heartbeat.
-- [ ] Sequence numbers or version vector per node; authentication: shared secret (cluster_auth_token) or mTLS; wire format: length-prefixed, schema for record + metadata (seq, timestamp).
-- [ ] Topology: primary–replica, or multi-primary with conflict resolution, or single writer with leader election (e.g. raft); configurable.
-- [ ] Discovery: config list cluster_peers; optional DNS SRV for dynamic discovery.
-- [ ] Implementation: sync listener and sync client; apply incoming sync to local store (data.UpdateRecords etc.) and persist; trigger reload. Config: cluster_enabled, cluster_peers, cluster_listen_addr, cluster_auth_token, sync_interval or push-on-change.
-- [ ] Docs: deployment (e.g. 2–3 nodes behind load balancer); only one writer in primary–replica to avoid split-brain.
+- [x] Define data to sync: records (dnsrecords) as primary payload; optionally adblock and upstream list; cache per-node, not synced.
+- [x] Custom sync protocol: TCP, configurable listen port and peer list; message types: full dump, pull, ping/pong (delta/heartbeat optional later).
+- [x] Sequence numbers per node; authentication: shared secret (`cluster_auth_token`); wire format: length-prefixed JSON (seq, node id, records).
+- [ ] Topology: primary–replica, or multi-primary with conflict resolution, or single writer with leader election (e.g. raft); configurable. *(Current: multi-primary LWW by sequence.)*
+- [ ] Discovery: config list `cluster_peers` done; optional DNS SRV for dynamic discovery.
+- [x] Implementation: sync listener and client; apply incoming sync (`ApplyClusterRecords`); persist; push-on-change + optional periodic pull. Config: `cluster_*` keys in `dnsplane.json`.
+- [x] Docs: [docs/clustering.md](docs/clustering.md) — deployment, auth, limitations (split-brain).
 
 ---
 

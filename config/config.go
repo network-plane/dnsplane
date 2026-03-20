@@ -110,6 +110,18 @@ type Config struct {
 	StatsPerfPageEnabled bool `json:"stats_perf_page_enabled,omitempty"`
 	// StatsDashboardEnabled serves GET /stats/dashboard and /stats/dashboard/data. Default true.
 	StatsDashboardEnabled bool `json:"stats_dashboard_enabled,omitempty"`
+	// ClusterEnabled turns on multi-node DNS record sync over TCP (see docs/clustering.md).
+	ClusterEnabled bool `json:"cluster_enabled,omitempty"`
+	// ClusterListenAddr is the TCP listen address for incoming cluster connections (e.g. ":7946"). Empty uses :7946 when enabled.
+	ClusterListenAddr string `json:"cluster_listen_addr,omitempty"`
+	// ClusterPeers lists peer host:port endpoints to push to after local record changes.
+	ClusterPeers []string `json:"cluster_peers,omitempty"`
+	// ClusterAuthToken is a shared secret; peers must match to exchange data.
+	ClusterAuthToken string `json:"cluster_auth_token,omitempty"`
+	// ClusterNodeID optionally identifies this node (stable across restarts). Empty: auto from cluster_state.json.
+	ClusterNodeID string `json:"cluster_node_id,omitempty"`
+	// ClusterSyncIntervalSeconds is periodic pull from peers (0 = disabled). Default 0.
+	ClusterSyncIntervalSeconds int `json:"cluster_sync_interval_seconds,omitempty"`
 }
 
 // Loaded contains the configuration together with metadata about the source file.
@@ -371,6 +383,9 @@ func (c *Config) applyDefaults(configDir string) {
 	if c.CacheWarmIntervalSeconds < 1 {
 		c.CacheWarmIntervalSeconds = 10
 	}
+	if c.ClusterSyncIntervalSeconds < 0 {
+		c.ClusterSyncIntervalSeconds = 0
+	}
 
 	c.FileLocations.DNSServerFile = ensureAbsolutePath(configDir, c.FileLocations.DNSServerFile, "dnsservers.json")
 	c.FileLocations.CacheFile = ensureAbsolutePath(configDir, c.FileLocations.CacheFile, "dnscache.json")
@@ -618,6 +633,24 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	}
 	if _, ok := raw["stats_dashboard_enabled"]; !ok {
 		c.StatsDashboardEnabled = true
+	}
+	if r, ok := raw["cluster_enabled"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterEnabled)
+	}
+	if r, ok := raw["cluster_listen_addr"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterListenAddr)
+	}
+	if r, ok := raw["cluster_peers"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterPeers)
+	}
+	if r, ok := raw["cluster_auth_token"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterAuthToken)
+	}
+	if r, ok := raw["cluster_node_id"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterNodeID)
+	}
+	if r, ok := raw["cluster_sync_interval_seconds"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterSyncIntervalSeconds)
 	}
 	return nil
 }
