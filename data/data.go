@@ -66,6 +66,31 @@ type DNSResolverData struct {
 	statsQueriesForwarded atomic.Int64
 }
 
+// clusterSkipNotify: when non-zero, storeRecords skips notifying cluster after a successful save (avoids push loops).
+var clusterSkipNotify int32
+
+var (
+	clusterRecordsNotifyMu sync.Mutex
+	clusterRecordsNotify   func()
+)
+
+// SetClusterRecordsNotify registers a callback invoked after local DNS records are persisted successfully.
+// Pass nil to clear. Used by the cluster manager to push updates to peers.
+func SetClusterRecordsNotify(fn func()) {
+	clusterRecordsNotifyMu.Lock()
+	defer clusterRecordsNotifyMu.Unlock()
+	clusterRecordsNotify = fn
+}
+
+func callClusterRecordsNotify() {
+	clusterRecordsNotifyMu.Lock()
+	fn := clusterRecordsNotify
+	clusterRecordsNotifyMu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
 // DNSStats holds the data for the DNS statistics
 type DNSStats struct {
 	TotalQueries          int       `json:"total_queries"`
@@ -216,7 +241,7 @@ func (d *DNSResolverData) recordsRefreshLoop(interval time.Duration) {
 			log.Printf("records refresh: %v", err)
 			continue
 		}
-		d.UpdateRecordsInMemory(records)
+		d.storeRecords(records, false)
 		log.Printf("records refresh: loaded %d records", len(records))
 	}
 }
@@ -322,13 +347,27 @@ func (d *DNSResolverData) GetRecords() []dnsrecords.DNSRecord {
 }
 
 // UpdateRecords updates the DNS records
-func (d *DNSResolverData) UpdateRecords(records []dnsrecords.DNSRecord) {
+func (d *DNSResolverData) UpdateRecords(records []dnsrecords.DNSRecord) error {
+	d.mu.RLock()
+	reject := d.Settings.ClusterRejectLocalWrites
+	d.mu.RUnlock()
+	if reject {
+		return fmt.Errorf("cluster: local record writes are disabled on this node (cluster_reject_local_writes)")
+	}
 	d.storeRecords(records, true)
+	return nil
 }
 
 // UpdateRecordsInMemory replaces DNS records without writing to disk.
-func (d *DNSResolverData) UpdateRecordsInMemory(records []dnsrecords.DNSRecord) {
+func (d *DNSResolverData) UpdateRecordsInMemory(records []dnsrecords.DNSRecord) error {
+	d.mu.RLock()
+	reject := d.Settings.ClusterRejectLocalWrites
+	d.mu.RUnlock()
+	if reject {
+		return fmt.Errorf("cluster: local record writes are disabled on this node (cluster_reject_local_writes)")
+	}
 	d.storeRecords(records, false)
+	return nil
 }
 
 // GetCacheRecords returns the current cache records
@@ -570,8 +609,26 @@ func (d *DNSResolverData) storeRecords(records []dnsrecords.DNSRecord, persist b
 	if persist {
 		if err := SaveDNSRecords(records); err != nil {
 			fmt.Println("Failed to save DNS records:", err)
+		} else if atomic.LoadInt32(&clusterSkipNotify) == 0 {
+			callClusterRecordsNotify()
 		}
 	}
+}
+
+// ApplyClusterRecords replaces in-memory and persisted DNS records from a cluster peer.
+// Returns an error if the records source is read-only (URL/git).
+func (d *DNSResolverData) ApplyClusterRecords(records []dnsrecords.DNSRecord) error {
+	if RecordsSourceIsReadOnly() {
+		return fmt.Errorf("cluster: records source is read-only")
+	}
+	rec := copyDNSRecords(records)
+	for i := range rec {
+		rec[i].Name = dnsrecords.CanonicalizeRecordNameForStorage(rec[i].Name)
+	}
+	atomic.StoreInt32(&clusterSkipNotify, 1)
+	defer atomic.StoreInt32(&clusterSkipNotify, 0)
+	d.storeRecords(rec, true)
+	return nil
 }
 
 func (d *DNSResolverData) storeCacheRecords(records []dnsrecordcache.CacheRecord, persist bool) {

@@ -6,6 +6,7 @@ package api
 import (
 	"net/http"
 
+	"dnsplane/cluster"
 	"dnsplane/data"
 )
 
@@ -20,7 +21,7 @@ func dashboardDataHandler(w http.ResponseWriter, r *http.Request) {
 	dnsData := data.GetInstance()
 	stats := dnsData.GetStats()
 	perf := data.GetResolverPerfReport()
-	writeJSON(w, http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"counters": map[string]any{
 			"total_queries":           stats.TotalQueries,
 			"total_cache_hits":        stats.TotalCacheHits,
@@ -39,7 +40,12 @@ func dashboardDataHandler(w http.ResponseWriter, r *http.Request) {
 		},
 		"series": data.GetDashboardSeries(),
 		"log":    data.GetDashboardLogNewestFirst(200),
-	})
+	}
+	if mgr := cluster.GlobalManager(); mgr != nil {
+		snap := mgr.StatusSnapshot()
+		payload["cluster"] = snap
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func dashboardPageHandler(w http.ResponseWriter, r *http.Request) {
@@ -296,6 +302,11 @@ const dashboardHTML = `<!DOCTYPE html>
         <div class="card"><h3>Avg resolve (fast path)</h3><div class="value" id="m-avg">—</div><div class="sub">ms · A/AAAA perf</div></div>
         <div class="card"><h3>Upstream wins</h3><div class="value" id="m-up">—</div><div class="sub">outcome_upstream</div></div>
       </div>
+      <div class="chart-card" id="cluster-wrap" style="display:none;margin-bottom:1.25rem;max-width:100%">
+        <h2>Cluster</h2>
+        <p class="muted-link" style="margin:0 0 0.75rem 0;font-size:0.85rem">Read-only · manage via TUI (<code>cluster</code>)</p>
+        <div id="cluster-root" style="font-size:0.85rem"></div>
+      </div>
       <div class="charts-row">
         <div class="charts-stack">
           <div class="chart-card">
@@ -403,6 +414,36 @@ const dashboardHTML = `<!DOCTYPE html>
         }
         if (!h) h = '<div class="log-item" style="color:#64748b">No resolutions yet — send DNS queries to this server.</div>';
         document.getElementById('log-root').innerHTML = h;
+        const cw = document.getElementById('cluster-wrap');
+        const cr = document.getElementById('cluster-root');
+        if (j.cluster) {
+          cw.style.display = 'block';
+          const cl = j.cluster;
+          if (!cl.enabled) {
+            cr.innerHTML = '<span class="muted-link">Cluster is disabled.</span>';
+          } else {
+            let ch = '<div><strong>node_id</strong> ' + esc(cl.node_id) + ' · <strong>seq</strong> ' + esc(String(cl.local_seq)) + '</div>';
+            ch += '<div style="margin-top:0.35rem"><strong>replica_only</strong> ' + esc(String(cl.replica_only)) + ' · <strong>cluster_admin</strong> ' + esc(String(cl.cluster_admin)) + '</div>';
+            ch += '<div style="margin-top:0.35rem"><strong>dial</strong> ' + esc(cl.advertise_addr || cl.cluster_port_guess || '—') + '</div>';
+            const peers = cl.peers || [];
+            if (peers.length) {
+              ch += '<table style="width:100%;margin-top:0.75rem;border-collapse:collapse;font-size:0.82rem"><thead><tr><th style="text-align:left;border-bottom:1px solid var(--border)">Peer</th><th style="text-align:left;border-bottom:1px solid var(--border)">Reachable</th><th style="text-align:left;border-bottom:1px solid var(--border)">Probe RTT ms</th><th style="text-align:left;border-bottom:1px solid var(--border)">Last error</th></tr></thead><tbody>';
+              for (let i = 0; i < peers.length; i++) {
+                const q = peers[i];
+                ch += '<tr><td style="padding:0.35rem 0;border-bottom:1px solid var(--border)">' + esc(q.address) + '</td>';
+                ch += '<td style="padding:0.35rem 0;border-bottom:1px solid var(--border)">' + esc(String(q.reachable)) + '</td>';
+                ch += '<td style="padding:0.35rem 0;border-bottom:1px solid var(--border)">' + (q.last_probe_rtt_ms != null ? esc(String(q.last_probe_rtt_ms.toFixed(1))) : '—') + '</td>';
+                ch += '<td style="padding:0.35rem 0;border-bottom:1px solid var(--border);word-break:break-all">' + esc(q.last_probe_error || q.last_outbound_error || '') + '</td></tr>';
+              }
+              ch += '</tbody></table>';
+            } else {
+              ch += '<div style="margin-top:0.5rem;color:#64748b">No peers configured.</div>';
+            }
+            cr.innerHTML = ch;
+          }
+        } else {
+          cw.style.display = 'none';
+        }
       } catch (e) {
         document.getElementById('err').textContent = 'Failed to load: ' + e.message;
       }
