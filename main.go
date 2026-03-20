@@ -335,17 +335,26 @@ func runServer(cmd *cobra.Command, args []string) error {
 					asyncLogQueue.Enqueue(func() { dnsLogger.Error(msg, keyValues...) })
 				}
 			},
-			QueryObserver: func(qname, qtype, outcome, upstream string, elapsed time.Duration) {
+			QueryObserver: func(qname, qtype, outcome, upstream, recordSummary string, elapsed time.Duration) {
+				ms := elapsed.Seconds() * 1000
+				data.RecordDashboardResolution(data.DashboardResolution{
+					Qname:      qname,
+					Qtype:      qtype,
+					Outcome:    outcome,
+					Upstream:   upstream,
+					Record:     recordSummary,
+					DurationMs: ms,
+				})
 				if asyncLogQueue == nil || dnsLogger == nil || !appState.DaemonMode() {
 					return
 				}
-				ms := elapsed.Seconds() * 1000
 				asyncLogQueue.Enqueue(func() {
 					dnsLogger.Debug("dns query",
 						"qname", qname,
 						"qtype", qtype,
 						"outcome", outcome,
 						"upstream", upstream,
+						"record", recordSummary,
 						"duration_ms", ms,
 					)
 				})
