@@ -25,9 +25,9 @@ type recordingUpstream struct {
 	queries []struct{ name, server string }
 }
 
-func (u *recordingUpstream) Query(ctx context.Context, question dns.Question, server string) (*dns.Msg, error) {
+func (u *recordingUpstream) Query(ctx context.Context, question dns.Question, ep dnsservers.UpstreamEndpoint) (*dns.Msg, error) {
 	u.mu.Lock()
-	u.queries = append(u.queries, struct{ name, server string }{question.Name, server})
+	u.queries = append(u.queries, struct{ name, server string }{question.Name, ep.HealthKey()})
 	u.mu.Unlock()
 	msg := &dns.Msg{}
 	msg.SetReply(&dns.Msg{Question: []dns.Question{question}})
@@ -82,13 +82,15 @@ func (s *whitelistIntegrationStore) GetServers() []dnsservers.DNSServer         
 func (s *whitelistIntegrationStore) GetBlockList() *adblock.BlockList {
 	return adblock.NewBlockList()
 }
-func (s *whitelistIntegrationStore) IncrementCacheHits()                                {}
-func (s *whitelistIntegrationStore) IncrementQueriesAnswered()                          {}
-func (s *whitelistIntegrationStore) IncrementTotalBlocks()                              {}
-func (s *whitelistIntegrationStore) HasAnyLocalRecords() bool                           { return len(s.GetRecords()) > 0 }
-func (s *whitelistIntegrationStore) HasAnyCachedRecords() bool                          { return len(s.GetCacheRecords()) > 0 }
-func (s *whitelistIntegrationStore) FilterHealthyUpstreamAddresses(a []string) []string { return a }
-func (s *whitelistIntegrationStore) RecordUpstreamForwardSuccess(string)                {}
+func (s *whitelistIntegrationStore) IncrementCacheHits()       {}
+func (s *whitelistIntegrationStore) IncrementQueriesAnswered() {}
+func (s *whitelistIntegrationStore) IncrementTotalBlocks()     {}
+func (s *whitelistIntegrationStore) HasAnyLocalRecords() bool  { return len(s.GetRecords()) > 0 }
+func (s *whitelistIntegrationStore) HasAnyCachedRecords() bool { return len(s.GetCacheRecords()) > 0 }
+func (s *whitelistIntegrationStore) FilterHealthyUpstreamEndpoints(eps []dnsservers.UpstreamEndpoint) []dnsservers.UpstreamEndpoint {
+	return eps
+}
+func (s *whitelistIntegrationStore) RecordUpstreamForwardSuccess(string) {}
 func (s *whitelistIntegrationStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR, bool) {
 	return false, nil, nil, false
 }
@@ -164,17 +166,19 @@ func (s *localRecordStore) GetCacheRecords() []dnsrecordcache.CacheRecord { retu
 func (s *localRecordStore) LookupLocalRRs(name, recordType string, autoBuildPTR bool) []dns.RR {
 	return dnsrecords.FindAllRecords(s.records, name, recordType, autoBuildPTR)
 }
-func (s *localRecordStore) LookupCacheRR(string, string) *dns.RR               { return nil }
-func (s *localRecordStore) UpdateCacheRecords(_ []dnsrecordcache.CacheRecord)  {}
-func (s *localRecordStore) GetServers() []dnsservers.DNSServer                 { return nil }
-func (s *localRecordStore) GetBlockList() *adblock.BlockList                   { return adblock.NewBlockList() }
-func (s *localRecordStore) IncrementCacheHits()                                {}
-func (s *localRecordStore) IncrementQueriesAnswered()                          {}
-func (s *localRecordStore) IncrementTotalBlocks()                              {}
-func (s *localRecordStore) HasAnyLocalRecords() bool                           { return len(s.records) > 0 }
-func (s *localRecordStore) HasAnyCachedRecords() bool                          { return false }
-func (s *localRecordStore) FilterHealthyUpstreamAddresses(a []string) []string { return a }
-func (s *localRecordStore) RecordUpstreamForwardSuccess(string)                {}
+func (s *localRecordStore) LookupCacheRR(string, string) *dns.RR              { return nil }
+func (s *localRecordStore) UpdateCacheRecords(_ []dnsrecordcache.CacheRecord) {}
+func (s *localRecordStore) GetServers() []dnsservers.DNSServer                { return nil }
+func (s *localRecordStore) GetBlockList() *adblock.BlockList                  { return adblock.NewBlockList() }
+func (s *localRecordStore) IncrementCacheHits()                               {}
+func (s *localRecordStore) IncrementQueriesAnswered()                         {}
+func (s *localRecordStore) IncrementTotalBlocks()                             {}
+func (s *localRecordStore) HasAnyLocalRecords() bool                          { return len(s.records) > 0 }
+func (s *localRecordStore) HasAnyCachedRecords() bool                         { return false }
+func (s *localRecordStore) FilterHealthyUpstreamEndpoints(eps []dnsservers.UpstreamEndpoint) []dnsservers.UpstreamEndpoint {
+	return eps
+}
+func (s *localRecordStore) RecordUpstreamForwardSuccess(string) {}
 func (s *localRecordStore) TryFastLocalOrCache(qname, rt string, ptr bool) (bool, []dns.RR, *dns.RR, bool) {
 	if ptr {
 		return false, nil, nil, false
@@ -228,21 +232,23 @@ type emptyStore struct {
 	config config.Config
 }
 
-func (s *emptyStore) GetResolverSettings() data.DNSResolverSettings      { return s.config }
-func (s *emptyStore) GetRecords() []dnsrecords.DNSRecord                 { return nil }
-func (s *emptyStore) GetCacheRecords() []dnsrecordcache.CacheRecord      { return nil }
-func (s *emptyStore) LookupLocalRRs(string, string, bool) []dns.RR       { return nil }
-func (s *emptyStore) LookupCacheRR(string, string) *dns.RR               { return nil }
-func (s *emptyStore) UpdateCacheRecords(_ []dnsrecordcache.CacheRecord)  {}
-func (s *emptyStore) GetServers() []dnsservers.DNSServer                 { return nil }
-func (s *emptyStore) GetBlockList() *adblock.BlockList                   { return adblock.NewBlockList() }
-func (s *emptyStore) IncrementCacheHits()                                {}
-func (s *emptyStore) IncrementQueriesAnswered()                          {}
-func (s *emptyStore) IncrementTotalBlocks()                              {}
-func (s *emptyStore) HasAnyLocalRecords() bool                           { return false }
-func (s *emptyStore) HasAnyCachedRecords() bool                          { return false }
-func (s *emptyStore) FilterHealthyUpstreamAddresses(a []string) []string { return a }
-func (s *emptyStore) RecordUpstreamForwardSuccess(string)                {}
+func (s *emptyStore) GetResolverSettings() data.DNSResolverSettings     { return s.config }
+func (s *emptyStore) GetRecords() []dnsrecords.DNSRecord                { return nil }
+func (s *emptyStore) GetCacheRecords() []dnsrecordcache.CacheRecord     { return nil }
+func (s *emptyStore) LookupLocalRRs(string, string, bool) []dns.RR      { return nil }
+func (s *emptyStore) LookupCacheRR(string, string) *dns.RR              { return nil }
+func (s *emptyStore) UpdateCacheRecords(_ []dnsrecordcache.CacheRecord) {}
+func (s *emptyStore) GetServers() []dnsservers.DNSServer                { return nil }
+func (s *emptyStore) GetBlockList() *adblock.BlockList                  { return adblock.NewBlockList() }
+func (s *emptyStore) IncrementCacheHits()                               {}
+func (s *emptyStore) IncrementQueriesAnswered()                         {}
+func (s *emptyStore) IncrementTotalBlocks()                             {}
+func (s *emptyStore) HasAnyLocalRecords() bool                          { return false }
+func (s *emptyStore) HasAnyCachedRecords() bool                         { return false }
+func (s *emptyStore) FilterHealthyUpstreamEndpoints(eps []dnsservers.UpstreamEndpoint) []dnsservers.UpstreamEndpoint {
+	return eps
+}
+func (s *emptyStore) RecordUpstreamForwardSuccess(string) {}
 func (s *emptyStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR, bool) {
 	return false, nil, nil, false
 }
@@ -281,21 +287,23 @@ type upstreamOnlyStore struct {
 	config  config.Config
 }
 
-func (s *upstreamOnlyStore) GetResolverSettings() data.DNSResolverSettings      { return s.config }
-func (s *upstreamOnlyStore) GetRecords() []dnsrecords.DNSRecord                 { return nil }
-func (s *upstreamOnlyStore) GetCacheRecords() []dnsrecordcache.CacheRecord      { return nil }
-func (s *upstreamOnlyStore) LookupLocalRRs(string, string, bool) []dns.RR       { return nil }
-func (s *upstreamOnlyStore) LookupCacheRR(string, string) *dns.RR               { return nil }
-func (s *upstreamOnlyStore) UpdateCacheRecords(_ []dnsrecordcache.CacheRecord)  {}
-func (s *upstreamOnlyStore) GetServers() []dnsservers.DNSServer                 { return s.servers }
-func (s *upstreamOnlyStore) GetBlockList() *adblock.BlockList                   { return adblock.NewBlockList() }
-func (s *upstreamOnlyStore) IncrementCacheHits()                                {}
-func (s *upstreamOnlyStore) IncrementQueriesAnswered()                          {}
-func (s *upstreamOnlyStore) IncrementTotalBlocks()                              {}
-func (s *upstreamOnlyStore) HasAnyLocalRecords() bool                           { return false }
-func (s *upstreamOnlyStore) HasAnyCachedRecords() bool                          { return false }
-func (s *upstreamOnlyStore) FilterHealthyUpstreamAddresses(a []string) []string { return a }
-func (s *upstreamOnlyStore) RecordUpstreamForwardSuccess(string)                {}
+func (s *upstreamOnlyStore) GetResolverSettings() data.DNSResolverSettings     { return s.config }
+func (s *upstreamOnlyStore) GetRecords() []dnsrecords.DNSRecord                { return nil }
+func (s *upstreamOnlyStore) GetCacheRecords() []dnsrecordcache.CacheRecord     { return nil }
+func (s *upstreamOnlyStore) LookupLocalRRs(string, string, bool) []dns.RR      { return nil }
+func (s *upstreamOnlyStore) LookupCacheRR(string, string) *dns.RR              { return nil }
+func (s *upstreamOnlyStore) UpdateCacheRecords(_ []dnsrecordcache.CacheRecord) {}
+func (s *upstreamOnlyStore) GetServers() []dnsservers.DNSServer                { return s.servers }
+func (s *upstreamOnlyStore) GetBlockList() *adblock.BlockList                  { return adblock.NewBlockList() }
+func (s *upstreamOnlyStore) IncrementCacheHits()                               {}
+func (s *upstreamOnlyStore) IncrementQueriesAnswered()                         {}
+func (s *upstreamOnlyStore) IncrementTotalBlocks()                             {}
+func (s *upstreamOnlyStore) HasAnyLocalRecords() bool                          { return false }
+func (s *upstreamOnlyStore) HasAnyCachedRecords() bool                         { return false }
+func (s *upstreamOnlyStore) FilterHealthyUpstreamEndpoints(eps []dnsservers.UpstreamEndpoint) []dnsservers.UpstreamEndpoint {
+	return eps
+}
+func (s *upstreamOnlyStore) RecordUpstreamForwardSuccess(string) {}
 func (s *upstreamOnlyStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR, bool) {
 	return false, nil, nil, false
 }

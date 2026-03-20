@@ -907,24 +907,23 @@ func runToolsDig() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult 
 		}
 
 		// Determine DNS servers to query (use domain whitelist when no @server specified)
-		var servers []string
+		var servers []dnsservers.UpstreamEndpoint
 		if serverHost != "" {
 			if serverPort == "" {
 				serverPort = "53"
 			}
-			servers = []string{net.JoinHostPort(serverHost, serverPort)}
+			servers = []dnsservers.UpstreamEndpoint{
+				{Addr: net.JoinHostPort(serverHost, serverPort), Transport: "udp"},
+			}
 		} else {
 			dnsData := data.GetInstance()
-			servers = dnsservers.GetServersForQuery(dnsData.GetServers(), queryName, true)
+			servers = dnsservers.GetUpstreamEndpointsForQuery(dnsData.GetServers(), queryName, true)
 			if len(servers) == 0 {
 				settings := dnsData.GetResolverSettings()
 				fallbackIP := strings.TrimSpace(settings.FallbackServerIP)
 				fallbackPort := strings.TrimSpace(settings.FallbackServerPort)
 				if fallbackIP != "" {
-					if fallbackPort == "" {
-						fallbackPort = "53"
-					}
-					servers = append(servers, fmt.Sprintf("%s:%s", fallbackIP, fallbackPort))
+					servers = append(servers, dnsservers.FallbackEndpoint(fallbackIP, fallbackPort, settings.FallbackServerTransport))
 				}
 			}
 			if len(servers) == 0 {
@@ -957,13 +956,13 @@ func runToolsDig() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult 
 
 		for _, server := range servers {
 			wg.Add(1)
-			go func(srv string) {
+			go func(ep dnsservers.UpstreamEndpoint) {
 				defer wg.Done()
 				start := time.Now()
-				resp, err := client.Query(ctx, question, srv)
+				resp, err := client.Query(ctx, question, ep)
 				duration := time.Since(start)
 				results <- serverResult{
-					server:   srv,
+					server:   ep.String(),
 					response: resp,
 					err:      err,
 					duration: duration,
@@ -1919,6 +1918,11 @@ func printAllServerConfig(settings config.Config) {
 	fmt.Println("  API:")
 	fmt.Printf("    apiport:   %s\n", settings.RESTPort)
 	fmt.Printf("    api:       %v\n", settings.APIEnabled)
+	if strings.TrimSpace(settings.APIAuthToken) != "" {
+		fmt.Println("    api_auth_token: (set)")
+	} else {
+		fmt.Println("    api_auth_token: (empty — no bearer required)")
+	}
 	fmt.Println("  Client access:")
 	fmt.Printf("    server_socket: %s\n", settings.ClientSocketPath)
 	fmt.Printf("    server_tcp:    %s\n", settings.ClientTCPAddress)
@@ -1954,6 +1958,14 @@ func printAllServerConfig(settings config.Config) {
 	fmt.Printf("    auto_build_ptr_from_a: %v\n", settings.DNSRecordSettings.AutoBuildPTRFromA)
 	fmt.Printf("    forward_ptr_queries:   %v\n", settings.DNSRecordSettings.ForwardPTRQueries)
 	fmt.Printf("    add_updates_records:   %v\n", settings.DNSRecordSettings.AddUpdatesRecords)
+	fmt.Println("  DNSSEC:")
+	fmt.Printf("    dnssec_validate:        %v\n", settings.DNSSECValidate)
+	fmt.Printf("    dnssec_validate_strict: %v\n", settings.DNSSECValidateStrict)
+	fmt.Printf("    dnssec_trust_anchor_file: %s\n", settings.DNSSECTrustAnchorFile)
+	fmt.Printf("    dnssec_sign_enabled: %v\n", settings.DNSSECSignEnabled)
+	fmt.Printf("    dnssec_sign_zone:    %s\n", settings.DNSSECSignZone)
+	fmt.Printf("    dnssec_sign_key_file: %s\n", settings.DNSSECSignKeyFile)
+	fmt.Printf("    dnssec_sign_private_key_file: %s\n", settings.DNSSECSignPrivateKeyFile)
 	fmt.Println("  Log:")
 	fmt.Printf("    log_dir:                 %s\n", settings.Log.Dir)
 	fmt.Printf("    log_severity:            %s\n", settings.Log.Severity)
@@ -2008,6 +2020,189 @@ func applyConfigSetting(cfg *config.Config, setting, value string) (successMsg s
 		}
 		cfg.APIEnabled = b
 		return fmt.Sprintf("API enabled set to %v", b), nil
+	case "api_auth_token":
+		cfg.APIAuthToken = value
+		return "api_auth_token updated (use empty value to disable API auth)", nil
+	case "dns_bind":
+		cfg.DNSBind = value
+		return fmt.Sprintf("dns_bind set to %q (empty = all interfaces)", value), nil
+	case "api_bind":
+		cfg.APIBind = value
+		return fmt.Sprintf("api_bind set to %q (empty = all interfaces)", value), nil
+	case "api_tls_cert":
+		cfg.APITLSCertFile = value
+		return fmt.Sprintf("api_tls_cert set to %s", value), nil
+	case "api_tls_key":
+		cfg.APITLSKeyFile = value
+		return fmt.Sprintf("api_tls_key set to %s", value), nil
+	case "api_rate_limit_rps":
+		f, e := strconv.ParseFloat(value, 64)
+		if e != nil || f < 0 {
+			return "", fmt.Errorf("invalid api_rate_limit_rps: %s (non-negative number)", value)
+		}
+		cfg.APIRateLimitPerIP = f
+		return fmt.Sprintf("API rate limit set to %g req/s per IP (0=disabled)", f), nil
+	case "api_rate_limit_burst":
+		n, e := strconv.Atoi(value)
+		if e != nil || n < 0 {
+			return "", fmt.Errorf("invalid api_rate_limit_burst: %s", value)
+		}
+		cfg.APIRateLimitBurst = n
+		return fmt.Sprintf("API rate limit burst set to %d", n), nil
+	case "dns_rate_limit_rps":
+		f, e := strconv.ParseFloat(value, 64)
+		if e != nil || f < 0 {
+			return "", fmt.Errorf("invalid dns_rate_limit_rps: %s (non-negative number)", value)
+		}
+		cfg.DNSRateLimitPerIP = f
+		return fmt.Sprintf("DNS rate limit set to %g q/s per IP (0=disabled)", f), nil
+	case "dns_rate_limit_burst":
+		n, e := strconv.Atoi(value)
+		if e != nil || n < 0 {
+			return "", fmt.Errorf("invalid dns_rate_limit_burst: %s", value)
+		}
+		cfg.DNSRateLimitBurst = n
+		return fmt.Sprintf("DNS rate limit burst set to %d", n), nil
+	case "dns_amplification_max_ratio":
+		n, e := strconv.Atoi(value)
+		if e != nil || n < 0 {
+			return "", fmt.Errorf("invalid dns_amplification_max_ratio: %s (non-negative integer)", value)
+		}
+		cfg.DNSAmplificationMaxRatio = n
+		return fmt.Sprintf("DNS amplification max ratio set to %d (0=disabled)", n), nil
+	case "dot_enabled":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid dot_enabled: %s (use true/false)", value)
+		}
+		cfg.DOTEnabled = b
+		return fmt.Sprintf("DoT server enabled set to %v", b), nil
+	case "dot_bind":
+		cfg.DOTBind = value
+		return fmt.Sprintf("dot_bind set to %q", value), nil
+	case "dot_port":
+		cfg.DOTPort = value
+		return fmt.Sprintf("DoT port set to %s", value), nil
+	case "dot_cert_file":
+		cfg.DOTCertFile = value
+		return fmt.Sprintf("dot_cert_file set to %s", value), nil
+	case "dot_key_file":
+		cfg.DOTKeyFile = value
+		return fmt.Sprintf("dot_key_file set to %s", value), nil
+	case "doh_enabled":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid doh_enabled: %s (use true/false)", value)
+		}
+		cfg.DOHEnabled = b
+		return fmt.Sprintf("DoH server enabled set to %v", b), nil
+	case "doh_bind":
+		cfg.DOHBind = value
+		return fmt.Sprintf("doh_bind set to %q", value), nil
+	case "doh_port":
+		cfg.DOHPort = value
+		return fmt.Sprintf("DoH port set to %s", value), nil
+	case "doh_path":
+		cfg.DOHPath = value
+		return fmt.Sprintf("DoH path set to %s", value), nil
+	case "doh_cert_file":
+		cfg.DOHCertFile = value
+		return fmt.Sprintf("doh_cert_file set to %s", value), nil
+	case "doh_key_file":
+		cfg.DOHKeyFile = value
+		return fmt.Sprintf("doh_key_file set to %s", value), nil
+	case "dns_response_limit_mode":
+		t := strings.ToLower(strings.TrimSpace(value))
+		if t != "sliding_window" && t != "rrl" {
+			return "", fmt.Errorf("dns_response_limit_mode must be sliding_window or rrl")
+		}
+		cfg.DNSResponseLimitMode = t
+		return fmt.Sprintf("dns_response_limit_mode set to %s", t), nil
+	case "dns_sliding_window_seconds":
+		n, e := strconv.Atoi(value)
+		if e != nil || n < 1 {
+			return "", fmt.Errorf("invalid dns_sliding_window_seconds: %s", value)
+		}
+		cfg.DNSSlidingWindowSeconds = n
+		return fmt.Sprintf("dns_sliding_window_seconds set to %d", n), nil
+	case "dns_max_responses_per_ip_window":
+		n, e := strconv.Atoi(value)
+		if e != nil || n < 0 {
+			return "", fmt.Errorf("invalid dns_max_responses_per_ip_window: %s", value)
+		}
+		cfg.DNSMaxResponsesPerIPWindow = n
+		return fmt.Sprintf("dns_max_responses_per_ip_window set to %d (0=disabled)", n), nil
+	case "dns_rrl_max_per_bucket":
+		n, e := strconv.Atoi(value)
+		if e != nil || n < 0 {
+			return "", fmt.Errorf("invalid dns_rrl_max_per_bucket: %s", value)
+		}
+		cfg.DNSRRLMaxPerBucket = n
+		return fmt.Sprintf("dns_rrl_max_per_bucket set to %d", n), nil
+	case "dns_rrl_window_seconds":
+		n, e := strconv.Atoi(value)
+		if e != nil || n < 0 {
+			return "", fmt.Errorf("invalid dns_rrl_window_seconds: %s", value)
+		}
+		cfg.DNSRRLWindowSeconds = n
+		return fmt.Sprintf("dns_rrl_window_seconds set to %d", n), nil
+	case "dns_rrl_slip":
+		f, e := strconv.ParseFloat(value, 64)
+		if e != nil || f < 0 || f > 1 {
+			return "", fmt.Errorf("invalid dns_rrl_slip: %s (0-1)", value)
+		}
+		cfg.DNSRRLSlip = f
+		return fmt.Sprintf("dns_rrl_slip set to %g", f), nil
+	case "dnssec_validate":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid dnssec_validate: %s (use true/false)", value)
+		}
+		cfg.DNSSECValidate = b
+		return fmt.Sprintf("dnssec_validate set to %v", b), nil
+	case "dnssec_validate_strict":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid dnssec_validate_strict: %s (use true/false)", value)
+		}
+		cfg.DNSSECValidateStrict = b
+		return fmt.Sprintf("dnssec_validate_strict set to %v", b), nil
+	case "dnssec_trust_anchor_file":
+		cfg.DNSSECTrustAnchorFile = value
+		return fmt.Sprintf("dnssec_trust_anchor_file set to %s", value), nil
+	case "dnssec_sign_enabled":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid dnssec_sign_enabled: %s (use true/false)", value)
+		}
+		cfg.DNSSECSignEnabled = b
+		return fmt.Sprintf("dnssec_sign_enabled set to %v (restart DNS process to apply signing)", b), nil
+	case "dnssec_sign_zone":
+		cfg.DNSSECSignZone = value
+		return fmt.Sprintf("dnssec_sign_zone set to %s (restart DNS process to apply)", value), nil
+	case "dnssec_sign_key_file":
+		cfg.DNSSECSignKeyFile = value
+		return fmt.Sprintf("dnssec_sign_key_file set to %s (restart DNS process to apply)", value), nil
+	case "dnssec_sign_private_key_file":
+		cfg.DNSSECSignPrivateKeyFile = value
+		return fmt.Sprintf("dnssec_sign_private_key_file set to %s (restart DNS process to apply)", value), nil
+	case "dns_refuse_any":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid dns_refuse_any: %s (use true/false)", value)
+		}
+		cfg.DNSRefuseANY = b
+		return fmt.Sprintf("dns_refuse_any set to %v", b), nil
+	case "dns_max_edns_udp_payload":
+		u, e := strconv.ParseUint(value, 10, 16)
+		if e != nil {
+			return "", fmt.Errorf("invalid dns_max_edns_udp_payload: %s (use 0-65535)", value)
+		}
+		cfg.DNSMaxEDNSUDPPayload = uint16(u)
+		return fmt.Sprintf("dns_max_edns_udp_payload set to %d (0=no cap)", u), nil
+	case "fallback_server_transport":
+		cfg.FallbackServerTransport = strings.ToLower(strings.TrimSpace(value))
+		return fmt.Sprintf("fallback_server_transport set to %s", cfg.FallbackServerTransport), nil
 	case "cache_records":
 		b, e := strconv.ParseBool(value)
 		if e != nil {

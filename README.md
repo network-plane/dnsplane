@@ -49,11 +49,13 @@ flowchart TD
 | **[docs/upstream-health.md](docs/upstream-health.md)** | **Upstream health checks**: periodic probes, marking servers down, config keys, logs, and **curl** examples. |
 | **[docs/clustering.md](docs/clustering.md)** | **Multi-node record sync**: TCP peer protocol, `cluster_*` config keys, auth token, sequences, deployment notes. |
 
-**Planned:** DoT (DNS over TLS), DoH (DNS over HTTPS), and DNSSEC validation will be documented here once implemented (see [TODO](TODO.md)).
+**Inbound:** DoT (`dot_*`), DoH (`doh_*`), DNSSEC validation (`dnssec_validate`, …), and optional **DNSSEC signing** for local zones (`dnssec_sign_*`) — see [docs/security-public-dns.md](docs/security-public-dns.md) and [TODO](TODO.md).
 
 ## Usage/Examples
 
 dnsplane has two commands: **server** (run the DNS server and TUI/API listeners) and **client** (connect to a running server). The `--config` flag applies only to the **server** command.
+
+**Release version** is the `appVersion` variable in `main.go` (default string). CI/build pipelines should set it with `-ldflags`, e.g. `go build -ldflags "-X main.appVersion=v1.2.3"` so `/version`, `/ready`, and the TUI banner match your release tag.
 
 ### start as daemon (server)
 ```bash
@@ -208,6 +210,14 @@ Use `server config` in the TUI to print all current settings, and `server set <s
 ### REST API
 
 Enable the REST API with `"api": true` in `dnsplane.json` and set `apiport` (e.g. `8080`). You can start or stop the API listener from the TUI with `server start api` / `server stop api`.
+
+**Optional API authentication:** set `"api_auth_token": "<secret>"` in `dnsplane.json` (or `server set api_auth_token '<secret>'` then `server save`). When set, every request must send either `Authorization: Bearer <secret>` or `X-API-Token: <secret>`, except **GET/HEAD `/health`** and **GET/HEAD `/ready`** (so load balancers and Kubernetes probes work without the token). All other paths—including `/version`, `/metrics`, and HTML stats pages—require the token when configured.
+
+**TLS, bind, and rate limits:** set `api_tls_cert` and `api_tls_key` to PEM file paths to serve the REST API over HTTPS. Use `dns_bind` and `api_bind` (e.g. `"127.0.0.1"`) to listen on a specific address instead of all interfaces. Per-IP limits: `api_rate_limit_rps` / `api_rate_limit_burst` (HTTP 429 when exceeded), `dns_rate_limit_rps` / `dns_rate_limit_burst` (DNS `REFUSED` when exceeded). Amplification hardening: `dns_amplification_max_ratio` caps packed response size vs packed request (0 disables).
+
+**Upstream transport:** in `dnsservers.json`, each server may set `transport` to `udp` (default), `tcp`, `dot` (TLS to port 853 by default), or `doh`. For DoH set `doh_url` to the full `https://…/dns-query` URL (or put a URL in `address` when using `doh`). Optional `fallback_server_transport` applies to the configured fallback resolver.
+
+**Public / internet-facing DNS:** see [docs/security-public-dns.md](docs/security-public-dns.md) for DoT/DoH listeners (`dot_*`, `doh_*`), response limit modes (`dns_response_limit_mode` `sliding_window` vs `rrl`), DNSSEC validation flags, and metrics.
 
 | Method | Path | Description |
 | --- | --- | --- |

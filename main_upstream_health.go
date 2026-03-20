@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"dnsplane/data"
+	"dnsplane/dnsservers"
 	"dnsplane/resolver"
 
 	"github.com/miekg/dns"
@@ -46,14 +47,11 @@ func runUpstreamHealthProbeLoop(dnsData *data.DNSResolverData, dnsLogger *slog.L
 			if !s.Active {
 				continue
 			}
-			port := strings.TrimSpace(s.Port)
-			if port == "" {
-				port = "53"
-			}
-			key := s.Address + ":" + port
+			ep := dnsservers.ServerToEndpoint(s)
+			key := ep.HealthKey()
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			q := dns.Question{Name: qname, Qtype: dns.TypeA, Qclass: dns.ClassINET}
-			msg, err := client.Query(ctx, q, key)
+			msg, err := client.Query(ctx, q, ep)
 			cancel()
 			var ok bool
 			var errStr string
