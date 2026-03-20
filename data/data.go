@@ -241,7 +241,7 @@ func (d *DNSResolverData) recordsRefreshLoop(interval time.Duration) {
 			log.Printf("records refresh: %v", err)
 			continue
 		}
-		d.UpdateRecordsInMemory(records)
+		d.storeRecords(records, false)
 		log.Printf("records refresh: loaded %d records", len(records))
 	}
 }
@@ -347,13 +347,27 @@ func (d *DNSResolverData) GetRecords() []dnsrecords.DNSRecord {
 }
 
 // UpdateRecords updates the DNS records
-func (d *DNSResolverData) UpdateRecords(records []dnsrecords.DNSRecord) {
+func (d *DNSResolverData) UpdateRecords(records []dnsrecords.DNSRecord) error {
+	d.mu.RLock()
+	reject := d.Settings.ClusterRejectLocalWrites
+	d.mu.RUnlock()
+	if reject {
+		return fmt.Errorf("cluster: local record writes are disabled on this node (cluster_reject_local_writes)")
+	}
 	d.storeRecords(records, true)
+	return nil
 }
 
 // UpdateRecordsInMemory replaces DNS records without writing to disk.
-func (d *DNSResolverData) UpdateRecordsInMemory(records []dnsrecords.DNSRecord) {
+func (d *DNSResolverData) UpdateRecordsInMemory(records []dnsrecords.DNSRecord) error {
+	d.mu.RLock()
+	reject := d.Settings.ClusterRejectLocalWrites
+	d.mu.RUnlock()
+	if reject {
+		return fmt.Errorf("cluster: local record writes are disabled on this node (cluster_reject_local_writes)")
+	}
 	d.storeRecords(records, false)
+	return nil
 }
 
 // GetCacheRecords returns the current cache records

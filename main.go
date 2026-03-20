@@ -436,13 +436,14 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	clusterCtx, clusterCancel := context.WithCancel(context.Background())
-	var clusterMgr *cluster.Manager
-	if s := dnsData.GetResolverSettings(); s.ClusterEnabled {
-		clusterMgr = cluster.NewManager(loadedCfg.Path, dnsData, dnsLogger)
+	clusterMgr := cluster.NewManager(loadedCfg.Path, dnsData, dnsLogger)
+	cluster.SetGlobalManager(clusterMgr)
+	sCluster := dnsData.GetResolverSettings()
+	if err := clusterMgr.Start(clusterCtx, sCluster); err != nil && dnsLogger != nil {
+		dnsLogger.Warn("cluster: start failed", "error", err)
+	}
+	if sCluster.ClusterEnabled {
 		data.SetClusterRecordsNotify(clusterMgr.NotifyLocalRecordsChanged)
-		if err := clusterMgr.Start(clusterCtx, s); err != nil && dnsLogger != nil {
-			dnsLogger.Warn("cluster: start failed", "error", err)
-		}
 	}
 
 	sigCh := make(chan os.Signal, 1)
@@ -458,9 +459,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("Shutting down.")
 	clusterCancel()
-	if clusterMgr != nil {
-		clusterMgr.Stop()
-	}
+	clusterMgr.Stop()
+	cluster.SetGlobalManager(nil)
 	data.SetClusterRecordsNotify(nil)
 	stopDNSServer(appState)
 	if fullStatsTracker != nil {

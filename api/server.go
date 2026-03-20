@@ -441,7 +441,10 @@ func addRecordHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, map[string]any{"error": err.Error(), "messages": extractRecordMessages(messages)})
 		return
 	}
-	dnsData.UpdateRecords(updated)
+	if err := dnsData.UpdateRecords(updated); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{"status": "record added", "messages": extractRecordMessages(messages)})
 }
 
@@ -503,7 +506,10 @@ func updateRecordHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, map[string]any{"error": err.Error(), "messages": extractRecordMessages(messages)})
 		return
 	}
-	dnsData.UpdateRecords(updated)
+	if err := dnsData.UpdateRecords(updated); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "record updated", "messages": extractRecordMessages(messages)})
 }
 
@@ -559,7 +565,10 @@ func deleteRecordHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, map[string]any{"error": err.Error(), "messages": extractRecordMessages(messages)})
 		return
 	}
-	dnsData.UpdateRecords(updated)
+	if err := dnsData.UpdateRecords(updated); err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "record deleted", "messages": extractRecordMessages(messages)})
 }
 
