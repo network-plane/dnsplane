@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"dnsplane/buildinfo"
 	"dnsplane/daemon"
 	"dnsplane/data"
 	"dnsplane/dnsrecordcache"
@@ -160,6 +161,7 @@ func RegisterDNSRoutes(router chi.Router) {
 	}
 	router.Get("/health", healthHandler)
 	router.Get("/ready", readyHandler)
+	router.Get("/version", versionHandler)
 	router.Get("/dns/records", listRecordsHandler)
 	router.Post("/dns/records", addRecordHandler)
 	router.Put("/dns/records", updateRecordHandler)
@@ -180,6 +182,8 @@ func RegisterDNSRoutes(router chi.Router) {
 	router.Get("/stats", statsHandler)
 	router.Get("/metrics", metricsHandler)
 	router.Get("/stats/page", statsPageHandler)
+	router.Get("/stats/dashboard", dashboardPageHandler)
+	router.Get("/stats/dashboard/data", dashboardDataHandler)
 	router.Get("/stats/perf", perfStatsHandler)
 	router.Post("/stats/perf/reset", perfResetHandler)
 	router.Get("/stats/perf/page", perfPageHandler)
@@ -223,6 +227,7 @@ func readyHandler(w http.ResponseWriter, r *http.Request) {
 		"api":       apiUp,
 		"dns":       dnsUp,
 		"listeners": listeners,
+		"build":     buildinfo.Info(),
 	}
 	tuiObj := map[string]any{"connected": tuiConnected}
 	if tuiConnected {
@@ -236,6 +241,11 @@ func readyHandler(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusServiceUnavailable
 	}
 	writeJSON(w, status, resp)
+}
+
+// versionHandler returns build metadata (version, Go, OS, arch) as JSON.
+func versionHandler(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, buildinfo.Info())
 }
 
 // listServersHandler returns configured upstreams plus optional health when checks are enabled.
@@ -322,7 +332,11 @@ func statsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"session": sessionMap, "total": totalMap})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"session": sessionMap,
+		"total":   totalMap,
+		"build":   buildinfo.Info(),
+	})
 }
 
 // prometheusMetric describes a single Prometheus metric for loop-based output.
@@ -373,6 +387,9 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 			_, _ = fmt.Fprintf(w, "%s %d\n", m.name, m.value.(int))
 		}
 	}
+
+	_, _ = fmt.Fprintln(w)
+	data.WriteResolverPerfPrometheus(w)
 }
 
 type AddRecordRequest struct {
