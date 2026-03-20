@@ -7,8 +7,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 )
+
+func TestMain(m *testing.M) {
+	SetAppVersion("test-version")
+	os.Exit(m.Run())
+}
 
 func TestVersionHandler(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/version", nil)

@@ -22,6 +22,10 @@ import (
 type DNSServer struct {
 	Address         string    `json:"address"`
 	Port            string    `json:"port"`
+	// Transport is udp, tcp, dot, or doh (empty = udp).
+	Transport string `json:"transport,omitempty"`
+	// DoHURL is the full HTTPS URL for DNS-over-HTTPS (required for transport doh if address is not a URL).
+	DoHURL string `json:"doh_url,omitempty"`
 	Active          bool      `json:"active"`
 	LocalResolver   bool      `json:"local_resolver"`
 	AdBlocker       bool      `json:"adblocker"`
@@ -104,19 +108,19 @@ func ServerMatchesQuery(server DNSServer, queryName string) bool {
 	return false
 }
 
-// GetServersForQuery returns the list of "Address:Port" servers to use for the given query name.
+// GetUpstreamEndpointsForQuery returns upstream endpoints to use for the given query name.
 // If any server has a non-empty whitelist and matches the query, only active matching servers are returned (whitelist-only; no fallback to global).
 // If the query matches a whitelist but no matching server is active, returns nil (strict: do not use global servers).
 // Otherwise returns global servers only (servers with no whitelist or empty whitelist).
 // activeOnly filters to Active servers in both cases.
-func GetServersForQuery(dnsServerData []DNSServer, queryName string, activeOnly bool) []string {
-	var whitelisted []string
+func GetUpstreamEndpointsForQuery(dnsServerData []DNSServer, queryName string, activeOnly bool) []UpstreamEndpoint {
+	var whitelisted []UpstreamEndpoint
 	for _, s := range dnsServerData {
 		if activeOnly && !s.Active {
 			continue
 		}
 		if ServerMatchesQuery(s, queryName) {
-			whitelisted = append(whitelisted, s.Address+":"+s.Port)
+			whitelisted = append(whitelisted, ServerToEndpoint(s))
 		}
 	}
 	if len(whitelisted) > 0 {
@@ -129,13 +133,13 @@ func GetServersForQuery(dnsServerData []DNSServer, queryName string, activeOnly 
 		}
 	}
 	// Global: servers with no whitelist
-	var global []string
+	var global []UpstreamEndpoint
 	for _, s := range dnsServerData {
 		if activeOnly && !s.Active {
 			continue
 		}
 		if len(s.DomainWhitelist) == 0 {
-			global = append(global, s.Address+":"+s.Port)
+			global = append(global, ServerToEndpoint(s))
 		}
 	}
 	return global
@@ -291,8 +295,12 @@ func applyArgsToDNSServer(server *DNSServer, args []string) error {
 					}
 				}
 			}
+		case "transport":
+			server.Transport = strings.ToLower(strings.TrimSpace(val))
+		case "doh_url":
+			server.DoHURL = val
 		default:
-			return fmt.Errorf("unknown parameter %q; allowed: active, localresolver, adblocker, whitelist", key)
+			return fmt.Errorf("unknown parameter %q; allowed: active, localresolver, adblocker, whitelist, transport, doh_url", key)
 		}
 	}
 	return nil

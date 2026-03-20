@@ -25,9 +25,9 @@ type recordingUpstream struct {
 	queries []struct{ name, server string }
 }
 
-func (u *recordingUpstream) Query(ctx context.Context, question dns.Question, server string) (*dns.Msg, error) {
+func (u *recordingUpstream) Query(ctx context.Context, question dns.Question, ep dnsservers.UpstreamEndpoint) (*dns.Msg, error) {
 	u.mu.Lock()
-	u.queries = append(u.queries, struct{ name, server string }{question.Name, server})
+	u.queries = append(u.queries, struct{ name, server string }{question.Name, ep.HealthKey()})
 	u.mu.Unlock()
 	msg := &dns.Msg{}
 	msg.SetReply(&dns.Msg{Question: []dns.Question{question}})
@@ -87,7 +87,9 @@ func (s *whitelistIntegrationStore) IncrementQueriesAnswered()                  
 func (s *whitelistIntegrationStore) IncrementTotalBlocks()                              {}
 func (s *whitelistIntegrationStore) HasAnyLocalRecords() bool                           { return len(s.GetRecords()) > 0 }
 func (s *whitelistIntegrationStore) HasAnyCachedRecords() bool                          { return len(s.GetCacheRecords()) > 0 }
-func (s *whitelistIntegrationStore) FilterHealthyUpstreamAddresses(a []string) []string { return a }
+func (s *whitelistIntegrationStore) FilterHealthyUpstreamEndpoints(eps []dnsservers.UpstreamEndpoint) []dnsservers.UpstreamEndpoint {
+	return eps
+}
 func (s *whitelistIntegrationStore) RecordUpstreamForwardSuccess(string)                {}
 func (s *whitelistIntegrationStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR, bool) {
 	return false, nil, nil, false
@@ -173,7 +175,9 @@ func (s *localRecordStore) IncrementQueriesAnswered()                          {
 func (s *localRecordStore) IncrementTotalBlocks()                              {}
 func (s *localRecordStore) HasAnyLocalRecords() bool                           { return len(s.records) > 0 }
 func (s *localRecordStore) HasAnyCachedRecords() bool                          { return false }
-func (s *localRecordStore) FilterHealthyUpstreamAddresses(a []string) []string { return a }
+func (s *localRecordStore) FilterHealthyUpstreamEndpoints(eps []dnsservers.UpstreamEndpoint) []dnsservers.UpstreamEndpoint {
+	return eps
+}
 func (s *localRecordStore) RecordUpstreamForwardSuccess(string)                {}
 func (s *localRecordStore) TryFastLocalOrCache(qname, rt string, ptr bool) (bool, []dns.RR, *dns.RR, bool) {
 	if ptr {
@@ -241,7 +245,9 @@ func (s *emptyStore) IncrementQueriesAnswered()                          {}
 func (s *emptyStore) IncrementTotalBlocks()                              {}
 func (s *emptyStore) HasAnyLocalRecords() bool                           { return false }
 func (s *emptyStore) HasAnyCachedRecords() bool                          { return false }
-func (s *emptyStore) FilterHealthyUpstreamAddresses(a []string) []string { return a }
+func (s *emptyStore) FilterHealthyUpstreamEndpoints(eps []dnsservers.UpstreamEndpoint) []dnsservers.UpstreamEndpoint {
+	return eps
+}
 func (s *emptyStore) RecordUpstreamForwardSuccess(string)                {}
 func (s *emptyStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR, bool) {
 	return false, nil, nil, false
@@ -294,7 +300,9 @@ func (s *upstreamOnlyStore) IncrementQueriesAnswered()                          
 func (s *upstreamOnlyStore) IncrementTotalBlocks()                              {}
 func (s *upstreamOnlyStore) HasAnyLocalRecords() bool                           { return false }
 func (s *upstreamOnlyStore) HasAnyCachedRecords() bool                          { return false }
-func (s *upstreamOnlyStore) FilterHealthyUpstreamAddresses(a []string) []string { return a }
+func (s *upstreamOnlyStore) FilterHealthyUpstreamEndpoints(eps []dnsservers.UpstreamEndpoint) []dnsservers.UpstreamEndpoint {
+	return eps
+}
 func (s *upstreamOnlyStore) RecordUpstreamForwardSuccess(string)                {}
 func (s *upstreamOnlyStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR, bool) {
 	return false, nil, nil, false
