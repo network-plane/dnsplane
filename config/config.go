@@ -602,6 +602,13 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	if r, ok := raw["stats_dashboard_enabled"]; ok {
 		_ = json.Unmarshal(r, &c.StatsDashboardEnabled)
 	}
+	// Cache warm: default on when keys absent (legacy configs).
+	if _, ok := raw["cache_warm_enabled"]; !ok {
+		c.CacheWarmEnabled = true
+	}
+	if _, ok := raw["cache_warm_interval_seconds"]; !ok {
+		c.CacheWarmIntervalSeconds = 10
+	}
 	// Opt-out HTML stats UIs: default true when keys are absent (legacy configs).
 	if _, ok := raw["stats_page_enabled"]; !ok {
 		c.StatsPageEnabled = true

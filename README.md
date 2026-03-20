@@ -202,7 +202,7 @@ Besides `file_locations` (and `records_source`, `adblock_list_files`), the confi
 - **DNSRecordSettings:** `auto_build_ptr_from_a`, `forward_ptr_queries`, `add_updates_records`
 - **Log:** `log_dir`, `log_severity`, `log_rotation`, `log_rotation_size_mb`, `log_rotation_time_days`
 
-Use `server config` in the TUI to print all current settings, and `server set <setting> <value>` then `server save` to change and persist them.
+Use `server config` in the TUI to print all current settings, and `server set <setting> <value>` then `server save` to change and persist them. Cache warm can be toggled with `server set cache_warm_enabled true|false` and interval with `server set cache_warm_interval_seconds <n>` (seconds, ≥ 1); in-memory until `server save`.
 
 ### REST API
 
