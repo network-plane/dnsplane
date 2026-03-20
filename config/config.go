@@ -69,12 +69,12 @@ type LogConfig struct {
 // Config captures all persisted settings for dnsplane.
 // Port/socket keys match CLI flags: --port, --apiport, --api, --server-socket, --server-tcp.
 type Config struct {
-	FallbackServerIP   string            `json:"fallback_server_ip"`
-	FallbackServerPort string            `json:"fallback_server_port"`
-	Timeout            int               `json:"timeout"`
-	DNSPort            string            `json:"port"`
-	RESTPort           string            `json:"apiport"`
-	APIEnabled         bool              `json:"api"`
+	FallbackServerIP   string `json:"fallback_server_ip"`
+	FallbackServerPort string `json:"fallback_server_port"`
+	Timeout            int    `json:"timeout"`
+	DNSPort            string `json:"port"`
+	RESTPort           string `json:"apiport"`
+	APIEnabled         bool   `json:"api"`
 	// APIAuthToken when non-empty requires Authorization: Bearer <token> or X-API-Token for all routes except GET/HEAD /health and /ready.
 	APIAuthToken string `json:"api_auth_token,omitempty"`
 	// DNSBind is the IP address to bind for DNS UDP/TCP listeners (e.g. "127.0.0.1"). Empty binds all interfaces.
@@ -98,19 +98,19 @@ type Config struct {
 	FallbackServerTransport string `json:"fallback_server_transport,omitempty"`
 
 	// Inbound DoT (DNS over TLS) server — tcp-tls listener separate from plain DNS port.
-	DOTEnabled   bool   `json:"dot_enabled,omitempty"`
-	DOTBind      string `json:"dot_bind,omitempty"`
-	DOTPort      string `json:"dot_port,omitempty"`
-	DOTCertFile  string `json:"dot_cert_file,omitempty"`
-	DOTKeyFile   string `json:"dot_key_file,omitempty"`
+	DOTEnabled  bool   `json:"dot_enabled,omitempty"`
+	DOTBind     string `json:"dot_bind,omitempty"`
+	DOTPort     string `json:"dot_port,omitempty"`
+	DOTCertFile string `json:"dot_cert_file,omitempty"`
+	DOTKeyFile  string `json:"dot_key_file,omitempty"`
 
 	// Inbound DoH (DNS over HTTPS) — requires TLS; separate from REST API port.
-	DOHEnabled   bool   `json:"doh_enabled,omitempty"`
-	DOHBind      string `json:"doh_bind,omitempty"`
-	DOHPort      string `json:"doh_port,omitempty"`
-	DOHPath      string `json:"doh_path,omitempty"`
-	DOHCertFile  string `json:"doh_cert_file,omitempty"`
-	DOHKeyFile   string `json:"doh_key_file,omitempty"`
+	DOHEnabled  bool   `json:"doh_enabled,omitempty"`
+	DOHBind     string `json:"doh_bind,omitempty"`
+	DOHPort     string `json:"doh_port,omitempty"`
+	DOHPath     string `json:"doh_path,omitempty"`
+	DOHCertFile string `json:"doh_cert_file,omitempty"`
+	DOHKeyFile  string `json:"doh_key_file,omitempty"`
 
 	// DNSResponseLimitMode is "sliding_window" (default) or "rrl" for extra response-side abuse control (0 = use sliding params only when mode set).
 	DNSResponseLimitMode string `json:"dns_response_limit_mode,omitempty"`
@@ -119,13 +119,13 @@ type Config struct {
 	// DNSMaxResponsesPerIPWindow caps responses per client IP per window (sliding_window).
 	DNSMaxResponsesPerIPWindow int `json:"dns_max_responses_per_ip_window,omitempty"`
 	// DNSRRLMaxPerBucket is max responses per (ip,qname) per rrl_window_seconds (rrl mode).
-	DNSRRLMaxPerBucket int `json:"dns_rrl_max_per_bucket,omitempty"`
-	DNSRRLWindowSeconds int `json:"dns_rrl_window_seconds,omitempty"`
+	DNSRRLMaxPerBucket  int     `json:"dns_rrl_max_per_bucket,omitempty"`
+	DNSRRLWindowSeconds int     `json:"dns_rrl_window_seconds,omitempty"`
 	DNSRRLSlip          float64 `json:"dns_rrl_slip,omitempty"`
 
 	// DNSSECValidate enables best-effort RRSIG verification when DNSKEYs are present in upstream replies.
-	DNSSECValidate       bool   `json:"dnssec_validate,omitempty"`
-	DNSSECValidateStrict bool   `json:"dnssec_validate_strict,omitempty"`
+	DNSSECValidate        bool   `json:"dnssec_validate,omitempty"`
+	DNSSECValidateStrict  bool   `json:"dnssec_validate_strict,omitempty"`
 	DNSSECTrustAnchorFile string `json:"dnssec_trust_anchor_file,omitempty"` // reserved for future chain validation
 
 	// DNSSECSignEnabled signs authoritative local answers (dnsrecords) with RRSIG when the client sets DO.
@@ -140,15 +140,15 @@ type Config struct {
 	// DNSRefuseANY when true returns NOTIMP for ANY queries.
 	DNSRefuseANY bool `json:"dns_refuse_any,omitempty"`
 	// DNSMaxEDNSUDPPayload caps the EDNS UDP payload size on responses (0 = no change). Suggested 1232.
-	DNSMaxEDNSUDPPayload uint16 `json:"dns_max_edns_udp_payload,omitempty"`
-	CacheRecords bool   `json:"cache_records"`
-	FullStats          bool              `json:"full_stats"`
-	FullStatsDir       string            `json:"full_stats_dir"`
-	ClientSocketPath   string            `json:"server_socket"`
-	ClientTCPAddress   string            `json:"server_tcp"`
-	FileLocations      FileLocations     `json:"file_locations"`
-	DNSRecordSettings  DNSRecordSettings `json:"DNSRecordSettings"`
-	Log                LogConfig         `json:"log"`
+	DNSMaxEDNSUDPPayload uint16            `json:"dns_max_edns_udp_payload,omitempty"`
+	CacheRecords         bool              `json:"cache_records"`
+	FullStats            bool              `json:"full_stats"`
+	FullStatsDir         string            `json:"full_stats_dir"`
+	ClientSocketPath     string            `json:"server_socket"`
+	ClientTCPAddress     string            `json:"server_tcp"`
+	FileLocations        FileLocations     `json:"file_locations"`
+	DNSRecordSettings    DNSRecordSettings `json:"DNSRecordSettings"`
+	Log                  LogConfig         `json:"log"`
 	// AdblockListFiles is a list of paths to adblock list files (e.g. hosts-style). Loaded in order at startup and merged into a single block list.
 	AdblockListFiles []string `json:"adblock_list_files,omitempty"`
 	// UpstreamHealthCheckEnabled runs periodic probes and excludes failing upstreams from forwarding until they recover.

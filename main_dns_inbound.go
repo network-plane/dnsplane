@@ -12,7 +12,6 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"dnsplane/abuse"
@@ -24,13 +23,7 @@ import (
 	"github.com/miekg/dns"
 )
 
-var (
-	responseLimiter dnsserve.ResponseLimiter
-
-	inboundMu     sync.Mutex
-	dotDNSServer  *dns.Server
-	dohHTTPServer *http.Server
-)
+var responseLimiter dnsserve.ResponseLimiter
 
 func buildResponseLimiter(st config.Config) dnsserve.ResponseLimiter {
 	mode := strings.ToLower(strings.TrimSpace(st.DNSResponseLimitMode))
@@ -151,9 +144,6 @@ func runDotServer(stopCh <-chan struct{}, st config.Config) {
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 	}
-	inboundMu.Lock()
-	dotDNSServer = srv
-	inboundMu.Unlock()
 	if dnsLogger != nil {
 		dnsLogger.Info("Starting DoT listener", "addr", addr)
 	}
@@ -167,9 +157,6 @@ func runDotServer(stopCh <-chan struct{}, st config.Config) {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = srv.ShutdownContext(shutdownCtx)
-		inboundMu.Lock()
-		dotDNSServer = nil
-		inboundMu.Unlock()
 	}()
 }
 
@@ -200,9 +187,6 @@ func runDoHServer(stopCh <-chan struct{}, st config.Config) {
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
-	inboundMu.Lock()
-	dohHTTPServer = srv
-	inboundMu.Unlock()
 	if dnsLogger != nil {
 		dnsLogger.Info("Starting DoH listener", "addr", addr, "path", path)
 	}
@@ -216,9 +200,6 @@ func runDoHServer(stopCh <-chan struct{}, st config.Config) {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
-		inboundMu.Lock()
-		dohHTTPServer = nil
-		inboundMu.Unlock()
 	}()
 }
 
