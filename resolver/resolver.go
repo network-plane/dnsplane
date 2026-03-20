@@ -18,6 +18,8 @@ import (
 	"dnsplane/data"
 	"dnsplane/dnsrecordcache"
 	"dnsplane/dnsrecords"
+	"dnsplane/dnssecsign"
+	"dnsplane/dnssecvalidate"
 	"dnsplane/dnsservers"
 )
 
@@ -40,8 +42,8 @@ type Store interface {
 	// HasAnyLocalRecords / HasAnyCachedRecords enable short-circuits without copying slices.
 	HasAnyLocalRecords() bool
 	HasAnyCachedRecords() bool
-	FilterHealthyUpstreamAddresses(addrs []string) []string
-	RecordUpstreamForwardSuccess(addressPort string)
+	FilterHealthyUpstreamEndpoints(eps []dnsservers.UpstreamEndpoint) []dnsservers.UpstreamEndpoint
+	RecordUpstreamForwardSuccess(healthKey string)
 	// TryFastLocalOrCache: single-lock local-then-cache for non-PTR; returns handled if answered from RAM.
 	// isStale is true when the cache entry is expired but returned for stale-while-revalidate.
 	TryFastLocalOrCache(qname, recordType string, qtypePTR bool) (handled bool, local []dns.RR, cache *dns.RR, isStale bool)
@@ -49,7 +51,7 @@ type Store interface {
 
 // UpstreamClient issues DNS queries to upstream resolvers.
 type UpstreamClient interface {
-	Query(ctx context.Context, question dns.Question, server string) (*dns.Msg, error)
+	Query(ctx context.Context, question dns.Question, ep dnsservers.UpstreamEndpoint) (*dns.Msg, error)
 }
 
 // QueryLogger records human-friendly resolver activity.
@@ -68,6 +70,8 @@ type Config struct {
 	ErrorLogger     ErrorLogger
 	QueryObserver   QueryObserver
 	UpstreamTimeout time.Duration
+	// DNSSECSigner when non-nil signs local authoritative answers when the client sets DO (EDNS).
+	DNSSECSigner *dnssecsign.Signer
 }
 
 // Resolver answers DNS questions using local records, cache, and upstream servers.
@@ -78,6 +82,7 @@ type Resolver struct {
 	errorLogger     ErrorLogger
 	queryObserver   QueryObserver
 	upstreamTimeout time.Duration
+	dnssecSigner    *dnssecsign.Signer
 }
 
 // New constructs a Resolver using the provided configuration.
@@ -93,6 +98,7 @@ func New(cfg Config) *Resolver {
 		errorLogger:     cfg.ErrorLogger,
 		queryObserver:   cfg.QueryObserver,
 		upstreamTimeout: timeout,
+		dnssecSigner:    cfg.DNSSECSigner,
 	}
 }
 
@@ -112,9 +118,9 @@ func (r *Resolver) HandleQuestion(ctx context.Context, question dns.Question, re
 }
 
 type upstreamResult struct {
-	server string
-	msg    *dns.Msg
-	err    error
+	endpoint dnsservers.UpstreamEndpoint
+	msg      *dns.Msg
+	err      error
 }
 
 type parKind int
@@ -160,7 +166,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 		handled, loc, crr, isStale := r.store.TryFastLocalOrCache(question.Name, recordType, false)
 		if handled {
 			if len(loc) > 0 {
-				r.processCachedRecords(question, loc, response)
+				r.processCachedRecords(ctx, question, loc, response)
 				prep := uint64(time.Since(t0))
 				data.RecordResolverAResolve(data.PerfOutcomeLocal, prep, prep, 0, 0, 0, qtypeKey)
 				r.observeQuery(question, "local", "", rrOneLine(loc[0]), t0)
@@ -190,7 +196,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 
 	settings := r.store.GetResolverSettings()
 	allServers := r.store.GetServers()
-	dnsServers := dnsservers.GetServersForQuery(allServers, question.Name, true)
+	dnsServers := dnsservers.GetUpstreamEndpointsForQuery(allServers, question.Name, true)
 	useWhitelist := false
 	for _, s := range allServers {
 		if s.Active && dnsservers.ServerMatchesQuery(s, question.Name) {
@@ -198,24 +204,24 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 			break
 		}
 	}
-	fallback := ""
+	var fallbackEp dnsservers.UpstreamEndpoint
 	if !useWhitelist && settings.FallbackServerIP != "" && settings.FallbackServerPort != "" {
-		fallback = fmt.Sprintf("%s:%s", settings.FallbackServerIP, settings.FallbackServerPort)
+		fallbackEp = dnsservers.FallbackEndpoint(settings.FallbackServerIP, settings.FallbackServerPort, settings.FallbackServerTransport)
 	}
 	serversToQuery := dnsServers
-	if fallback != "" {
+	if fallbackEp.Addr != "" {
 		already := false
 		for _, s := range dnsServers {
-			if s == fallback {
+			if s.HealthKey() == fallbackEp.HealthKey() {
 				already = true
 				break
 			}
 		}
 		if !already {
-			serversToQuery = append(append([]string(nil), dnsServers...), fallback)
+			serversToQuery = append(append([]dnsservers.UpstreamEndpoint(nil), dnsServers...), fallbackEp)
 		}
 	}
-	serversToQuery = r.store.FilterHealthyUpstreamAddresses(serversToQuery)
+	serversToQuery = r.store.FilterHealthyUpstreamEndpoints(serversToQuery)
 	nUp := len(serversToQuery)
 
 	ctx, cancel := context.WithTimeout(ctx, r.upstreamTimeout)
@@ -251,9 +257,9 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 		go func() {
 			resp, err := r.upstream.Query(ctx, question, srv)
 			if err != nil && r != nil && ctx.Err() == nil && !errors.Is(err, context.Canceled) {
-				r.log("Query: %s, Error querying DNS server (%s): %v\n", question.Name, srv, err)
+				r.log("Query: %s, Error querying DNS server (%s): %v\n", question.Name, srv.String(), err)
 			}
-			up := &upstreamResult{server: srv, msg: resp, err: err}
+			up := &upstreamResult{endpoint: srv, msg: resp, err: err}
 			select {
 			case ch <- parMsg{kind: parKindUpstream, up: up, elapsed: time.Since(t0)}:
 			case <-ctx.Done():
@@ -282,7 +288,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 			localNs = uint64(pr.elapsed)
 			if len(pr.local) > 0 {
 				cancel()
-				r.processCachedRecords(question, pr.local, response)
+				r.processCachedRecords(ctx, question, pr.local, response)
 				prep := localNs
 				if cacheDone && cacheNs > prep {
 					prep = cacheNs
@@ -330,15 +336,15 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 		}
 		if localDone && cacheDone && cacheHit == nil && firstUp != nil {
 			cancel()
-			r.store.RecordUpstreamForwardSuccess(firstUp.server)
-			r.processUpstreamAnswer(question, firstUp.msg, response)
+			r.store.RecordUpstreamForwardSuccess(firstUp.endpoint.HealthKey())
+			r.processUpstreamAnswer(ctx, question, firstUp.msg, response)
 			p := prepNs()
 			var w uint64
 			if maxUpNs > p {
 				w = maxUpNs - p
 			}
 			recordPerf(data.PerfOutcomeUpstream, uint64(time.Since(t0)), p, maxUpNs, w)
-			r.observeQuery(question, "upstream", firstUp.server, firstAnswerSummary(firstUp.msg), t0)
+			r.observeQuery(question, "upstream", firstUp.endpoint.HealthKey(), firstAnswerSummary(firstUp.msg), t0)
 			return
 		}
 		if localDone && cacheDone && cacheHit == nil && upstreamSeen == upstreamTotal && firstUp == nil {
@@ -356,7 +362,7 @@ func (r *Resolver) handlePTRQuestion(ctx context.Context, question dns.Question,
 	settings := r.store.GetResolverSettings()
 	ptrRecords := r.store.LookupLocalRRs(question.Name, "PTR", settings.DNSRecordSettings.AutoBuildPTRFromA)
 	if len(ptrRecords) > 0 {
-		r.processCachedRecords(question, ptrRecords, response)
+		r.processCachedRecords(ctx, question, ptrRecords, response)
 		r.observeQuery(question, "local", "", rrOneLine(ptrRecords[0]), t0)
 		return
 	}
@@ -366,10 +372,23 @@ func (r *Resolver) handlePTRQuestion(ctx context.Context, question dns.Question,
 
 // processUpstreamAnswer appends the upstream answer to the response and caches it.
 // The response's Authoritative and Rcode are set from the upstream message.
-func (r *Resolver) processUpstreamAnswer(question dns.Question, answer *dns.Msg, response *dns.Msg) {
+func (r *Resolver) processUpstreamAnswer(ctx context.Context, question dns.Question, answer *dns.Msg, response *dns.Msg) {
+	req := RequestFromContext(ctx)
+	settings := r.store.GetResolverSettings()
+	outcome, servfail := dnssecvalidate.ApplyToUpstreamAnswer(req, answer, question, settings)
+	data.RecordDNSSECOutcome(outcome)
+	if servfail {
+		if req != nil {
+			response.SetRcode(req, dns.RcodeServerFailure)
+		} else {
+			response.Rcode = dns.RcodeServerFailure
+		}
+		return
+	}
 	response.Answer = append(response.Answer, answer.Answer...)
 	response.Authoritative = answer.Authoritative
 	response.Rcode = answer.Rcode
+	response.AuthenticatedData = answer.AuthenticatedData
 	if len(answer.Answer) > 0 {
 		record := answer.Answer[0]
 		name := record.Header().Name
@@ -381,11 +400,15 @@ func (r *Resolver) processUpstreamAnswer(question dns.Question, answer *dns.Msg,
 	cacheDNSResponse(r.store, answer.Answer)
 }
 
-func (r *Resolver) processCachedRecords(question dns.Question, cachedRecords []dns.RR, response *dns.Msg) {
+func (r *Resolver) processCachedRecords(ctx context.Context, question dns.Question, cachedRecords []dns.RR, response *dns.Msg) {
 	if len(cachedRecords) == 0 {
 		return
 	}
 	response.Answer = append(response.Answer, cachedRecords...)
+	if r.dnssecSigner != nil {
+		req := RequestFromContext(ctx)
+		r.dnssecSigner.SignLocalAnswerIfDO(req, question, cachedRecords, response)
+	}
 	response.Authoritative = true
 	if len(cachedRecords) > 0 {
 		r.log("Query: %s, Reply: %d record(s), Method: dnsrecords.json\n", question.Name, len(cachedRecords))
@@ -428,13 +451,15 @@ func (r *Resolver) backgroundRefresh(question dns.Question) {
 	}
 	settings := r.store.GetResolverSettings()
 	allServers := r.store.GetServers()
-	servers := dnsservers.GetServersForQuery(allServers, question.Name, true)
+	servers := dnsservers.GetUpstreamEndpointsForQuery(allServers, question.Name, true)
 	if len(servers) == 0 {
 		if settings.FallbackServerIP != "" && settings.FallbackServerPort != "" {
-			servers = []string{settings.FallbackServerIP + ":" + settings.FallbackServerPort}
+			servers = []dnsservers.UpstreamEndpoint{
+				dnsservers.FallbackEndpoint(settings.FallbackServerIP, settings.FallbackServerPort, settings.FallbackServerTransport),
+			}
 		}
 	}
-	servers = r.store.FilterHealthyUpstreamAddresses(servers)
+	servers = r.store.FilterHealthyUpstreamEndpoints(servers)
 	if len(servers) == 0 {
 		return
 	}

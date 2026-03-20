@@ -69,20 +69,86 @@ type LogConfig struct {
 // Config captures all persisted settings for dnsplane.
 // Port/socket keys match CLI flags: --port, --apiport, --api, --server-socket, --server-tcp.
 type Config struct {
-	FallbackServerIP   string            `json:"fallback_server_ip"`
-	FallbackServerPort string            `json:"fallback_server_port"`
-	Timeout            int               `json:"timeout"`
-	DNSPort            string            `json:"port"`
-	RESTPort           string            `json:"apiport"`
-	APIEnabled         bool              `json:"api"`
-	CacheRecords       bool              `json:"cache_records"`
-	FullStats          bool              `json:"full_stats"`
-	FullStatsDir       string            `json:"full_stats_dir"`
-	ClientSocketPath   string            `json:"server_socket"`
-	ClientTCPAddress   string            `json:"server_tcp"`
-	FileLocations      FileLocations     `json:"file_locations"`
-	DNSRecordSettings  DNSRecordSettings `json:"DNSRecordSettings"`
-	Log                LogConfig         `json:"log"`
+	FallbackServerIP   string `json:"fallback_server_ip"`
+	FallbackServerPort string `json:"fallback_server_port"`
+	Timeout            int    `json:"timeout"`
+	DNSPort            string `json:"port"`
+	RESTPort           string `json:"apiport"`
+	APIEnabled         bool   `json:"api"`
+	// APIAuthToken when non-empty requires Authorization: Bearer <token> or X-API-Token for all routes except GET/HEAD /health and /ready.
+	APIAuthToken string `json:"api_auth_token,omitempty"`
+	// DNSBind is the IP address to bind for DNS UDP/TCP listeners (e.g. "127.0.0.1"). Empty binds all interfaces.
+	DNSBind string `json:"dns_bind,omitempty"`
+	// APIBind is the IP address to bind for the REST API (e.g. "127.0.0.1"). Empty binds all interfaces.
+	APIBind string `json:"api_bind,omitempty"`
+	// APITLSCertFile and APITLSKeyFile when both non-empty enable HTTPS for the REST API (ListenAndServeTLS).
+	APITLSCertFile string `json:"api_tls_cert,omitempty"`
+	APITLSKeyFile  string `json:"api_tls_key,omitempty"`
+	// APIRateLimitPerIP is max sustained HTTP requests per second per client IP (0 = disabled). Uses token bucket.
+	APIRateLimitPerIP float64 `json:"api_rate_limit_rps,omitempty"`
+	// APIRateLimitBurst is max burst size when API rate limiting is enabled (default 20).
+	APIRateLimitBurst int `json:"api_rate_limit_burst,omitempty"`
+	// DNSRateLimitPerIP is max DNS queries per second per client IP UDP/TCP (0 = disabled).
+	DNSRateLimitPerIP float64 `json:"dns_rate_limit_rps,omitempty"`
+	// DNSRateLimitBurst is burst for DNS rate limiting (default 50).
+	DNSRateLimitBurst int `json:"dns_rate_limit_burst,omitempty"`
+	// DNSAmplificationMaxRatio caps packed response size vs packed request (0 = disabled). Default 100 when >0 check enabled.
+	DNSAmplificationMaxRatio int `json:"dns_amplification_max_ratio,omitempty"`
+	// FallbackServerTransport is udp, tcp, dot, or doh for the fallback resolver (default udp).
+	FallbackServerTransport string `json:"fallback_server_transport,omitempty"`
+
+	// Inbound DoT (DNS over TLS) server — tcp-tls listener separate from plain DNS port.
+	DOTEnabled  bool   `json:"dot_enabled,omitempty"`
+	DOTBind     string `json:"dot_bind,omitempty"`
+	DOTPort     string `json:"dot_port,omitempty"`
+	DOTCertFile string `json:"dot_cert_file,omitempty"`
+	DOTKeyFile  string `json:"dot_key_file,omitempty"`
+
+	// Inbound DoH (DNS over HTTPS) — requires TLS; separate from REST API port.
+	DOHEnabled  bool   `json:"doh_enabled,omitempty"`
+	DOHBind     string `json:"doh_bind,omitempty"`
+	DOHPort     string `json:"doh_port,omitempty"`
+	DOHPath     string `json:"doh_path,omitempty"`
+	DOHCertFile string `json:"doh_cert_file,omitempty"`
+	DOHKeyFile  string `json:"doh_key_file,omitempty"`
+
+	// DNSResponseLimitMode is "sliding_window" (default) or "rrl" for extra response-side abuse control (0 = use sliding params only when mode set).
+	DNSResponseLimitMode string `json:"dns_response_limit_mode,omitempty"`
+	// DNSSlidingWindowSeconds is the window for sliding_window mode (default 1).
+	DNSSlidingWindowSeconds int `json:"dns_sliding_window_seconds,omitempty"`
+	// DNSMaxResponsesPerIPWindow caps responses per client IP per window (sliding_window).
+	DNSMaxResponsesPerIPWindow int `json:"dns_max_responses_per_ip_window,omitempty"`
+	// DNSRRLMaxPerBucket is max responses per (ip,qname) per rrl_window_seconds (rrl mode).
+	DNSRRLMaxPerBucket  int     `json:"dns_rrl_max_per_bucket,omitempty"`
+	DNSRRLWindowSeconds int     `json:"dns_rrl_window_seconds,omitempty"`
+	DNSRRLSlip          float64 `json:"dns_rrl_slip,omitempty"`
+
+	// DNSSECValidate enables best-effort RRSIG verification when DNSKEYs are present in upstream replies.
+	DNSSECValidate        bool   `json:"dnssec_validate,omitempty"`
+	DNSSECValidateStrict  bool   `json:"dnssec_validate_strict,omitempty"`
+	DNSSECTrustAnchorFile string `json:"dnssec_trust_anchor_file,omitempty"` // reserved for future chain validation
+
+	// DNSSECSignEnabled signs authoritative local answers (dnsrecords) with RRSIG when the client sets DO.
+	DNSSECSignEnabled bool `json:"dnssec_sign_enabled,omitempty"`
+	// DNSSECSignZone is the zone apex FQDN (e.g. "example.com.") for names covered by signing.
+	DNSSECSignZone string `json:"dnssec_sign_zone,omitempty"`
+	// DNSSECSignKeyFile is the path to the public DNSKEY file (BIND K*.key).
+	DNSSECSignKeyFile string `json:"dnssec_sign_key_file,omitempty"`
+	// DNSSECSignPrivateKeyFile is the path to the private key file (BIND K*.private).
+	DNSSECSignPrivateKeyFile string `json:"dnssec_sign_private_key_file,omitempty"`
+
+	// DNSRefuseANY when true returns NOTIMP for ANY queries.
+	DNSRefuseANY bool `json:"dns_refuse_any,omitempty"`
+	// DNSMaxEDNSUDPPayload caps the EDNS UDP payload size on responses (0 = no change). Suggested 1232.
+	DNSMaxEDNSUDPPayload uint16            `json:"dns_max_edns_udp_payload,omitempty"`
+	CacheRecords         bool              `json:"cache_records"`
+	FullStats            bool              `json:"full_stats"`
+	FullStatsDir         string            `json:"full_stats_dir"`
+	ClientSocketPath     string            `json:"server_socket"`
+	ClientTCPAddress     string            `json:"server_tcp"`
+	FileLocations        FileLocations     `json:"file_locations"`
+	DNSRecordSettings    DNSRecordSettings `json:"DNSRecordSettings"`
+	Log                  LogConfig         `json:"log"`
 	// AdblockListFiles is a list of paths to adblock list files (e.g. hosts-style). Loaded in order at startup and merged into a single block list.
 	AdblockListFiles []string `json:"adblock_list_files,omitempty"`
 	// UpstreamHealthCheckEnabled runs periodic probes and excludes failing upstreams from forwarding until they recover.
@@ -396,6 +462,51 @@ func (c *Config) applyDefaults(configDir string) {
 	if c.ClusterSyncIntervalSeconds < 0 {
 		c.ClusterSyncIntervalSeconds = 0
 	}
+	if c.APIRateLimitBurst < 0 {
+		c.APIRateLimitBurst = 0
+	}
+	if c.DNSRateLimitBurst < 0 {
+		c.DNSRateLimitBurst = 0
+	}
+	if c.DNSAmplificationMaxRatio < 0 {
+		c.DNSAmplificationMaxRatio = 0
+	}
+	if strings.TrimSpace(c.DNSResponseLimitMode) == "" {
+		c.DNSResponseLimitMode = "sliding_window"
+	}
+	if c.DNSRRLWindowSeconds < 0 {
+		c.DNSRRLWindowSeconds = 0
+	}
+	if c.DNSRRLSlip < 0 {
+		c.DNSRRLSlip = 0
+	}
+	if c.DNSSlidingWindowSeconds < 0 {
+		c.DNSSlidingWindowSeconds = 0
+	}
+	if c.DOTPort == "" && c.DOTEnabled {
+		c.DOTPort = "853"
+	}
+	if c.DOHPort == "" && c.DOHEnabled {
+		c.DOHPort = "8443"
+	}
+	if c.DOHPath == "" && c.DOHEnabled {
+		c.DOHPath = "/dns-query"
+	}
+
+	if k := strings.TrimSpace(c.DNSSECSignKeyFile); k != "" {
+		if filepath.IsAbs(k) {
+			c.DNSSECSignKeyFile = filepath.Clean(k)
+		} else {
+			c.DNSSECSignKeyFile = filepath.Join(configDir, k)
+		}
+	}
+	if k := strings.TrimSpace(c.DNSSECSignPrivateKeyFile); k != "" {
+		if filepath.IsAbs(k) {
+			c.DNSSECSignPrivateKeyFile = filepath.Clean(k)
+		} else {
+			c.DNSSECSignPrivateKeyFile = filepath.Join(configDir, k)
+		}
+	}
 
 	c.FileLocations.DNSServerFile = ensureAbsolutePath(configDir, c.FileLocations.DNSServerFile, "dnsservers.json")
 	c.FileLocations.CacheFile = ensureAbsolutePath(configDir, c.FileLocations.CacheFile, "dnscache.json")
@@ -570,6 +681,9 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	c.RESTPort = getStr("apiport", "rest_port")
 	if b, ok := getBool("api", "api_enabled"); ok {
 		c.APIEnabled = b
+	}
+	if r, ok := raw["api_auth_token"]; ok {
+		_ = json.Unmarshal(r, &c.APIAuthToken)
 	}
 	if r, ok := raw["cache_records"]; ok {
 		_ = json.Unmarshal(r, &c.CacheRecords)
