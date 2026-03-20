@@ -148,6 +148,9 @@ var perfPageTemplate = template.Must(template.New("perf").Parse(`<!DOCTYPE html>
 `))
 
 func perfPageHandler(w http.ResponseWriter, r *http.Request) {
+	if !requireStatsHTMLPage(w, r, data.StatsPerfPageHTMLEnabled()) {
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = perfPageTemplate.Execute(w, nil)
 }
