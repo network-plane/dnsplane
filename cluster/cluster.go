@@ -261,7 +261,7 @@ func (m *Manager) AdminPushConfig(peerAddr string, apply AdminConfigApplyMessage
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(45 * time.Second))
 
 	auth, _ := json.Marshal(AuthMessage{Type: TypeAuth, Token: token})
@@ -322,7 +322,7 @@ func (m *Manager) probeOnce(peerAddr, token string) {
 		m.peers.recordProbe(peerAddr, false, 0, err.Error())
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
 
 	auth, _ := json.Marshal(AuthMessage{Type: TypeAuth, Token: token})
@@ -408,7 +408,7 @@ func (m *Manager) pushOnce(peerAddr, token string, payload []byte) {
 		m.log.Warn("cluster: dial peer", "peer", peerAddr, "error", err)
 		return
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 
 	auth, _ := json.Marshal(AuthMessage{Type: TypeAuth, Token: token})
@@ -463,8 +463,8 @@ func (m *Manager) pullOnce(peerAddr, token string) {
 		m.peers.recordPull(peerAddr, false)
 		return
 	}
-	defer conn.SetDeadline(time.Now().Add(30 * time.Second))
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
 
 	auth, _ := json.Marshal(AuthMessage{Type: TypeAuth, Token: token})
 	if err := WriteFrame(conn, auth); err != nil {
@@ -516,7 +516,7 @@ func (m *Manager) pullOnce(peerAddr, token string) {
 }
 
 func (m *Manager) serveConn(ctx context.Context, conn net.Conn) {
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	remote := conn.RemoteAddr().String()
 	_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
 
