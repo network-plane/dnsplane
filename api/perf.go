@@ -52,7 +52,7 @@ var perfPageTemplate = template.Must(template.New("perf").Parse(`<!DOCTYPE html>
 </head>
 <body>
   <h1>Resolver performance (fast path)</h1>
-  <p class="muted">Auto-refresh every 2s · <a href="/stats/perf">JSON</a> · <a href="/stats/page">Stats</a>
+  <p class="muted">Auto-refresh every 2s · <a href="/stats/perf">JSON</a> · <a href="/stats/page">Stats</a> · <a href="/stats/dashboard">Dashboard</a>
     · <button type="button" id="reset">Reset counters</button></p>
   <p id="err"></p>
   <div id="root"></div>
