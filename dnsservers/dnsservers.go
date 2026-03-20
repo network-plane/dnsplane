@@ -20,12 +20,12 @@ import (
 // api.internal.example.com). Empty or nil means the server is "global" and receives
 // all queries not claimed by a whitelisted server.
 type DNSServer struct {
-	Address         string    `json:"address"`
-	Port            string    `json:"port"`
+	Address string `json:"address"`
+	Port    string `json:"port"`
 	// Transport is udp, tcp, dot, or doh (empty = udp).
 	Transport string `json:"transport,omitempty"`
 	// DoHURL is the full HTTPS URL for DNS-over-HTTPS (required for transport doh if address is not a URL).
-	DoHURL string `json:"doh_url,omitempty"`
+	DoHURL          string    `json:"doh_url,omitempty"`
 	Active          bool      `json:"active"`
 	LocalResolver   bool      `json:"local_resolver"`
 	AdBlocker       bool      `json:"adblocker"`

@@ -89,12 +89,12 @@ func (s *Signer) SignLocalAnswerIfDO(req *dns.Msg, q dns.Question, rrset []dns.R
 	ttl := rrset[0].Header().Ttl
 	now := uint32(time.Now().Unix())
 	sig := &dns.RRSIG{
-		Hdr:         dns.RR_Header{Rrtype: dns.TypeRRSIG, Class: q.Qclass, Ttl: ttl},
-		Algorithm:   s.key.Algorithm,
-		Expiration:  now + 30*86400,
-		Inception:   now - 3600,
-		KeyTag:      s.key.KeyTag(),
-		SignerName:  s.zone,
+		Hdr:        dns.RR_Header{Rrtype: dns.TypeRRSIG, Class: q.Qclass, Ttl: ttl},
+		Algorithm:  s.key.Algorithm,
+		Expiration: now + 30*86400,
+		Inception:  now - 3600,
+		KeyTag:     s.key.KeyTag(),
+		SignerName: s.zone,
 	}
 	if err := sig.Sign(s.priv, rrset); err != nil {
 		return
