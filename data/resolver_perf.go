@@ -64,6 +64,8 @@ type perfQTStats struct {
 	outCache    atomic.Uint64
 	outUpstream atomic.Uint64
 	outNone     atomic.Uint64
+	// hist mirrors perfHistTotal buckets for this qtype (Prometheus export with label qtype=…).
+	hist [8]atomic.Uint64
 }
 
 func perfBucketIndex(totalNs uint64) int {
@@ -104,11 +106,13 @@ func RecordResolverAResolve(outcome int, totalNs, prepNs, maxUpstreamNs, upstrea
 		perfFirstRecord.CompareAndSwap(0, time.Now().UnixNano())
 	}
 
+	b := perfBucketIndex(totalNs)
 	if qtype != "" {
 		v, _ := perfQT.LoadOrStore(qtype, &perfQTStats{})
 		qt := v.(*perfQTStats)
 		qt.total.Add(1)
 		qt.sumTotalNs.Add(totalNs)
+		qt.hist[b].Add(1)
 		switch outcome {
 		case PerfOutcomeLocal:
 			qt.outLocal.Add(1)
@@ -139,7 +143,6 @@ func RecordResolverAResolve(outcome int, totalNs, prepNs, maxUpstreamNs, upstrea
 	perfSumTotalNs.Add(totalNs)
 	perfSumPrepNs.Add(prepNs)
 
-	b := perfBucketIndex(totalNs)
 	perfHistTotal[b].Add(1)
 	switch outcome {
 	case PerfOutcomeUpstream:
