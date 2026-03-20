@@ -2194,12 +2194,12 @@ func applyConfigSetting(cfg *config.Config, setting, value string) (successMsg s
 		cfg.DNSRefuseANY = b
 		return fmt.Sprintf("dns_refuse_any set to %v", b), nil
 	case "dns_max_edns_udp_payload":
-		n, e := strconv.Atoi(value)
-		if e != nil || n < 0 {
-			return "", fmt.Errorf("invalid dns_max_edns_udp_payload: %s", value)
+		u, e := strconv.ParseUint(value, 10, 16)
+		if e != nil {
+			return "", fmt.Errorf("invalid dns_max_edns_udp_payload: %s (use 0-65535)", value)
 		}
-		cfg.DNSMaxEDNSUDPPayload = uint16(n)
-		return fmt.Sprintf("dns_max_edns_udp_payload set to %d (0=no cap)", n), nil
+		cfg.DNSMaxEDNSUDPPayload = uint16(u)
+		return fmt.Sprintf("dns_max_edns_udp_payload set to %d (0=no cap)", u), nil
 	case "fallback_server_transport":
 		cfg.FallbackServerTransport = strings.ToLower(strings.TrimSpace(value))
 		return fmt.Sprintf("fallback_server_transport set to %s", cfg.FallbackServerTransport), nil
