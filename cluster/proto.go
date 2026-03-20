@@ -68,10 +68,10 @@ type AuthMessage struct {
 
 // RecordsFullMessage carries a full dnsrecords snapshot.
 type RecordsFullMessage struct {
-	Type      string `json:"type"`
-	NodeID    string `json:"node_id"`
-	Seq       uint64 `json:"seq"`
-	Timestamp int64  `json:"timestamp_unix,omitempty"`
+	Type      string                 `json:"type"`
+	NodeID    string                 `json:"node_id"`
+	Seq       uint64                 `json:"seq"`
+	Timestamp int64                  `json:"timestamp_unix,omitempty"`
 	Records   []dnsrecords.DNSRecord `json:"records"`
 }
 
@@ -83,12 +83,12 @@ type SimpleMessage struct {
 
 // AdminConfigApplyMessage updates cluster-related fields on a peer (requires matching admin_token on target).
 type AdminConfigApplyMessage struct {
-	Type        string `json:"type"`
-	AdminToken  string `json:"admin_token"`
-	AuthToken   string `json:"cluster_auth_token,omitempty"`
-	Peers       []string `json:"cluster_peers,omitempty"`
-	ReplicaOnly *bool    `json:"cluster_replica_only,omitempty"`
-	RejectLocal *bool    `json:"cluster_reject_local_writes,omitempty"`
-	AdminLocal  *bool    `json:"cluster_admin,omitempty"`
-	SyncInterval *int    `json:"cluster_sync_interval_seconds,omitempty"`
+	Type         string   `json:"type"`
+	AdminToken   string   `json:"admin_token"`
+	AuthToken    string   `json:"cluster_auth_token,omitempty"`
+	Peers        []string `json:"cluster_peers,omitempty"`
+	ReplicaOnly  *bool    `json:"cluster_replica_only,omitempty"`
+	RejectLocal  *bool    `json:"cluster_reject_local_writes,omitempty"`
+	AdminLocal   *bool    `json:"cluster_admin,omitempty"`
+	SyncInterval *int     `json:"cluster_sync_interval_seconds,omitempty"`
 }
