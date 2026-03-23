@@ -1260,14 +1260,25 @@ func RegisterCommands() {
 			Context:     "statistics",
 			Name:        "clear",
 			Summary:     "Clear full_stats data",
-			Description: "Deletes all requester and domain:type statistics in the full_stats database and resets session counters since process start.",
+			Description: "Wipes requester and domain:type buckets in the full_stats database and resets session counters (like cache clear). Run statistics save afterward to flush stats.db to disk.",
 			Usage:       "statistics clear",
 			Category:    "Statistics",
 			Tags:        []string{"statistics", "full_stats", "clear"},
 			Examples: []tui.Example{
-				{Description: "Clear aggregated statistics", Command: "statistics clear"},
+				{Description: "Wipe stats (then run statistics save)", Command: "statistics clear"},
+				{Description: "Flush stats.db to disk", Command: "statistics save"},
 			},
 		}, legacyRunner(handleStatisticsClear)),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "statistics",
+			Name:        "save",
+			Summary:     "Save full_stats database",
+			Description: "Flushes the full_stats database file (stats.db) to disk (fsync), same role as cache save after cache clear.",
+			Usage:       "statistics save",
+			Category:    "Statistics",
+			Tags:        []string{"statistics", "full_stats", "save"},
+			Examples:    []tui.Example{{Description: "Persist after clear", Command: "statistics save"}},
+		}, legacyRunner(handleStatisticsSave)),
 
 		newLegacyFactory(tui.CommandSpec{
 			Context:     "record",
@@ -2855,7 +2866,8 @@ func handleStatisticsDomains(args []string) {
 func handleStatisticsClear(args []string) {
 	if cliutil.IsHelpRequest(args) {
 		fmt.Println("Usage: statistics clear")
-		fmt.Println("Description: Delete all full_stats data (persistent DB and in-memory session counters for requesters/domains).")
+		fmt.Println("Description: Delete all full_stats data in memory and in the open database (stats.db). Resets session counters since process start.")
+		fmt.Println("Run statistics save afterward to flush stats.db to disk (same pattern as cache clear + cache save).")
 		printHelpAliasesHint()
 		return
 	}
@@ -2872,7 +2884,30 @@ func handleStatisticsClear(args []string) {
 		fmt.Printf("Error clearing statistics: %v\n", err)
 		return
 	}
-	fmt.Println("Statistics cleared (full_stats database and session counters).")
+	fmt.Println("Statistics cleared. Run statistics save to flush stats.db to disk.")
+}
+
+func handleStatisticsSave(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		fmt.Println("Usage: statistics save")
+		fmt.Println("Description: Flush the full_stats database file (stats.db) to stable storage.")
+		printHelpAliasesHint()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("statistics save does not accept arguments.")
+		printHelpAliasesHint()
+		return
+	}
+	if fullStatsTracker == nil {
+		fmt.Println("Full statistics are disabled. Enable full_stats in server config (e.g. server set full_stats true) and restart.")
+		return
+	}
+	if err := fullStatsTracker.Sync(); err != nil {
+		fmt.Printf("Error saving statistics database: %v\n", err)
+		return
+	}
+	fmt.Println("Full statistics database saved (stats.db flushed to disk).")
 }
 
 func printHelpAliasesHint() {

@@ -203,13 +203,13 @@ func validSortForTable(table, sort string) bool {
 	switch table {
 	case "requests":
 		switch sort {
-		case "count_desc", "count_asc", "key_asc", "last_seen_desc", "last_seen_asc",
-			"first_seen_desc", "first_seen_asc":
+		case "count_desc", "count_asc", "key_asc", "key_desc", "type_asc", "type_desc",
+			"last_seen_desc", "last_seen_asc", "first_seen_desc", "first_seen_asc":
 			return true
 		}
 	case "requesters":
 		switch sort {
-		case "total_desc", "total_asc", "ip_asc", "first_seen_desc", "first_seen_asc":
+		case "total_desc", "total_asc", "ip_asc", "ip_desc", "first_seen_desc", "first_seen_asc":
 			return true
 		}
 	}
@@ -323,6 +323,22 @@ func sortRequestRows(rows []requestRowSortable, sortKey string) {
 			return a.key < b.key
 		case "key_asc":
 			return a.key < b.key
+		case "key_desc":
+			return a.key > b.key
+		case "type_asc":
+			_, ta := splitDomainType(a.key)
+			_, tb := splitDomainType(b.key)
+			if ta != tb {
+				return ta < tb
+			}
+			return a.key < b.key
+		case "type_desc":
+			_, ta := splitDomainType(a.key)
+			_, tb := splitDomainType(b.key)
+			if ta != tb {
+				return ta > tb
+			}
+			return a.key < b.key
 		case "last_seen_desc":
 			if !a.st.LastSeen.Equal(b.st.LastSeen) {
 				return a.st.LastSeen.After(b.st.LastSeen)
@@ -420,6 +436,8 @@ func sortRequesterRows(rows []requesterRowSortable, sortKey string) {
 			return a.ip < b.ip
 		case "ip_asc":
 			return a.ip < b.ip
+		case "ip_desc":
+			return a.ip > b.ip
 		case "first_seen_desc":
 			if !a.st.FirstSeen.Equal(b.st.FirstSeen) {
 				return a.st.FirstSeen.After(b.st.FirstSeen)
