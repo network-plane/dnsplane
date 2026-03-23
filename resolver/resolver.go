@@ -461,7 +461,10 @@ func (r *Resolver) processCachedUpstreamRRs(question dns.Question, cachedRecords
 }
 
 func shouldCacheRRSetForQuestion(q dns.Question, answer []dns.RR) bool {
-	if q.Qtype != dns.TypeA && q.Qtype != dns.TypeAAAA {
+	// CNAME chains: (qname, A|AAAA|HTTPS|SVCB) has no direct RR at qname — cache full Answer as one RRset.
+	switch q.Qtype {
+	case dns.TypeA, dns.TypeAAAA, dns.TypeHTTPS, dns.TypeSVCB:
+	default:
 		return false
 	}
 	if len(answer) == 0 {

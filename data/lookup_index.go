@@ -154,10 +154,12 @@ func (d *DNSResolverData) lookupCacheRRLocked(qname, recordType string, now time
 	return nil, false
 }
 
-// lookupRRSetCacheLocked requires d.mu RLock held. Returns a synthetic multi-RR answer for (qname, A|AAAA).
+// lookupRRSetCacheLocked requires d.mu RLock held. Returns a synthetic multi-RR answer for (qname, A|AAAA|HTTPS|SVCB).
 func (d *DNSResolverData) lookupRRSetCacheLocked(qname, recordType string, now time.Time, stale bool) ([]dns.RR, bool) {
 	rt := dnsrecords.NormalizeRecordType(recordType)
-	if rt != "A" && rt != "AAAA" {
+	switch rt {
+	case "A", "AAAA", "HTTPS", "SVCB":
+	default:
 		return nil, false
 	}
 	if len(d.CacheRecords) == 0 {
@@ -260,7 +262,7 @@ func (d *DNSResolverData) lookupLocalNonPTRLocked(qname, recordType string) []dn
 // TryFastLocalOrCache does local-then-cache under a single RLock. For PTR queries returns handled=false.
 // When stale-while-revalidate is enabled, expired cache entries are returned (with isStale=true)
 // so the caller can serve them immediately and refresh in the background.
-// cacheRRs is set when the answer is a synthetic RRset (e.g. CNAME chain + A/AAAA) keyed by (qname, A|AAAA).
+// cacheRRs is set when the answer is a synthetic RRset (e.g. CNAME chain + A/AAAA/HTTPS/SVCB) keyed by (qname, qtype).
 func (d *DNSResolverData) TryFastLocalOrCache(qname, recordType string, qtypePTR bool) (handled bool, local []dns.RR, cache *dns.RR, cacheRRs []dns.RR, isStale bool) {
 	if qtypePTR {
 		return false, nil, nil, nil, false
