@@ -255,22 +255,29 @@ const dashboardHTML = `<!DOCTYPE html>
       color: var(--muted);
       margin-top: 0.35rem;
     }
+    /* Same 4-column track as .metric-row: cache = 1 col, cluster = 3 cols — aligns gutters with rows above/below */
     .dash-split-row {
-      display: flex;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
       gap: 1rem;
-      align-items: stretch;
       margin-bottom: 1.25rem;
-      flex-wrap: wrap;
+      align-items: stretch;
     }
-    .dash-narrow {
-      flex: 0 0 200px;
-      max-width: 240px;
-      min-width: 180px;
+    .dash-split-cache {
+      min-width: 0;
     }
     .dash-cluster {
-      flex: 1 1 280px;
+      grid-column: span 3;
       min-width: 0;
       margin-bottom: 0;
+    }
+    @media (max-width: 1100px) {
+      .dash-split-row { grid-template-columns: repeat(2, 1fr); }
+      .dash-cluster { grid-column: 1 / -1; }
+    }
+    @media (max-width: 700px) {
+      .dash-split-row { grid-template-columns: 1fr; }
+      .dash-cluster { grid-column: auto; }
     }
     .charts-row {
       display: grid;
@@ -498,7 +505,7 @@ const dashboardHTML = `<!DOCTYPE html>
           <div class="card"><h3>Upstream wins</h3><div class="value" id="m-up">—</div><div class="sub">outcome_upstream</div></div>
         </div>
         <div class="dash-split-row">
-          <div class="card dash-narrow">
+          <div class="card dash-split-cache" id="dash-cache-hit-card" style="grid-column:1/-1">
             <h3>Cache hit ratio</h3>
             <div class="value" id="m-cache-pct">—</div>
             <div class="sub">hits ÷ queries</div>
@@ -959,8 +966,10 @@ const dashboardHTML = `<!DOCTYPE html>
         document.getElementById('log-root').innerHTML = h;
         const cw = document.getElementById('cluster-wrap');
         const cr = document.getElementById('cluster-root');
+        const dashCache = document.getElementById('dash-cache-hit-card');
         if (j.cluster) {
-          cw.style.display = 'block';
+          cw.style.display = '';
+          if (dashCache) dashCache.style.gridColumn = '';
           const cl = j.cluster;
           if (!cl.enabled) {
             cr.innerHTML = '<span class="muted-link">Cluster is disabled.</span>';
@@ -986,6 +995,7 @@ const dashboardHTML = `<!DOCTYPE html>
           }
         } else {
           cw.style.display = 'none';
+          if (dashCache) dashCache.style.gridColumn = '1 / -1';
         }
       } catch (e) {
         document.getElementById('err').textContent = 'Failed to load: ' + e.message;
