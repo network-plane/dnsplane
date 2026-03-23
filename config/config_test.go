@@ -27,6 +27,9 @@ func TestLoadFromPathCreatesDefaultConfig(t *testing.T) {
 	if loaded.Config.PrettyJSON {
 		t.Error("default config should have pretty_json false")
 	}
+	if !loaded.Config.LocalRecordsEnabled {
+		t.Error("default config should have local_records_enabled true")
+	}
 	// Config file should exist
 	if _, err := os.Stat(loaded.Path); err != nil {
 		t.Errorf("config file not created at %q: %v", loaded.Path, err)
