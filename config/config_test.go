@@ -24,6 +24,9 @@ func TestLoadFromPathCreatesDefaultConfig(t *testing.T) {
 	if loaded.Config.ClientSocketPath == "" {
 		t.Error("default config should have non-empty ClientSocketPath")
 	}
+	if loaded.Config.PrettyJSON {
+		t.Error("default config should have pretty_json false")
+	}
 	// Config file should exist
 	if _, err := os.Stat(loaded.Path); err != nil {
 		t.Errorf("config file not created at %q: %v", loaded.Path, err)
