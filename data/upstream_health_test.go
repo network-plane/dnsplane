@@ -15,6 +15,25 @@ import (
 	"dnsplane/dnsrecords"
 )
 
+func TestTryFastLocalOrCache_LocalRecordsDisabledSkipsLocal(t *testing.T) {
+	d := &DNSResolverData{
+		Settings: config.Config{LocalRecordsEnabled: false, CacheRecords: true},
+		DNSRecords: []dnsrecords.DNSRecord{
+			{Name: "only.local.", Type: "A", Value: "10.0.0.1", TTL: 60},
+		},
+		CacheRecords: nil,
+	}
+	d.mu.Lock()
+	d.rebuildDNSRecordIndexLocked()
+	d.rebuildCacheIndexLocked()
+	d.mu.Unlock()
+
+	ok, loc, crr, crs, _ := d.TryFastLocalOrCache("only.local.", "A", false)
+	if ok || len(loc) != 0 || crr != nil || len(crs) != 0 {
+		t.Fatalf("want no local answer when local_records_enabled is false, got ok=%v loc=%d crr=%v crs=%d", ok, len(loc), crr != nil, len(crs))
+	}
+}
+
 func TestTryFastLocalOrCache_CacheHitWithLocalZoneElsewhere(t *testing.T) {
 	d := &DNSResolverData{
 		DNSRecords: []dnsrecords.DNSRecord{
@@ -36,6 +55,57 @@ func TestTryFastLocalOrCache_CacheHitWithLocalZoneElsewhere(t *testing.T) {
 	ok, loc, crr, crs, _ := d.TryFastLocalOrCache("example.com.", "A", false)
 	if !ok || len(loc) != 0 || crr == nil || len(crs) != 0 {
 		t.Fatalf("want cache hit, got ok=%v loc=%d crr=%v crs=%d", ok, len(loc), crr != nil, len(crs))
+	}
+}
+
+// When both a direct A at qname and an RRset (CNAME+A) exist, we must prefer the RRset.
+// Otherwise a stale direct A from an older upstream response can win and clients get the wrong IP
+// (e.g. wrong Google edge → TLS cert mismatch).
+func TestTryFastLocalOrCache_PrefersRRSetOverDirectA(t *testing.T) {
+	cname := &dns.CNAME{
+		Hdr:    dns.RR_Header{Name: "www.example.com.", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 60},
+		Target: "origin.example.com.",
+	}
+	a := &dns.A{
+		Hdr: dns.RR_Header{Name: "origin.example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+		A:   net.IPv4(9, 8, 7, 6),
+	}
+	d := &DNSResolverData{
+		Settings: config.Config{CacheRecords: true},
+		CacheRecords: []dnsrecordcache.CacheRecord{
+			{
+				DNSRecord: dnsrecords.DNSRecord{
+					Name:  "www.example.com.",
+					Type:  "A",
+					Value: "1.2.3.4",
+					TTL:   60,
+				},
+				Expiry: time.Now().Add(time.Hour),
+			},
+			{
+				DNSRecord: dnsrecords.DNSRecord{
+					Name:  "www.example.com.",
+					Type:  "A",
+					Value: BuildRRSetCacheValue([]dns.RR{cname, a}),
+					TTL:   60,
+				},
+				Expiry: time.Now().Add(time.Hour),
+			},
+		},
+	}
+	d.mu.Lock()
+	d.rebuildCacheIndexLocked()
+	d.mu.Unlock()
+
+	ok, loc, crr, crs, _ := d.TryFastLocalOrCache("www.example.com.", "A", false)
+	if !ok || len(loc) != 0 || crr != nil || len(crs) != 2 {
+		t.Fatalf("want RRset (2 RRs), not direct A; got ok=%v loc=%d crr=%v crs=%d", ok, len(loc), crr != nil, len(crs))
+	}
+	if _, ok := crs[0].(*dns.CNAME); !ok {
+		t.Fatalf("first RR want CNAME, got %T", crs[0])
+	}
+	if got := crs[1].(*dns.A).A.String(); got != "9.8.7.6" {
+		t.Fatalf("A want 9.8.7.6, got %s", got)
 	}
 }
 

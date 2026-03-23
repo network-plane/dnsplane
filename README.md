@@ -114,7 +114,7 @@ When you run `dnsplane client` (or connect over TCP), you get an interactive TUI
 - **server** – **config** (show all settings), **set** (e.g. `server set apiport 8080`; in-memory until you run **save**), **save** (write config to disk), **load** (reload config from disk), **start** / **stop** (dns, api, or client listeners), **status**, **version**.
 - **adblock** – **load** &lt;file or URL&gt; (merge into block list), **list** (loaded sources and counts), **domains** (list blocked domains), **add** / **remove** / **clear**.
 - **tools** – **dig** (e.g. `tools dig example.com`, `tools dig example.com @8.8.8.8`).
-- **cache** – List, clear cache.
+- **cache** – `cache list`, **`cache clear`** (empty in-memory cache; **`cache save`** to persist `dnscache.json`), `cache load` / `cache save`, `cache remove …`.
 - **stats** – Query counts, cache hits, block list size, runtime stats.
 - **statistics** – View aggregated data from the full_stats DB: `statistics requesters [full]` (top requesters by IP, or all with `full`), `statistics domains [full]` (top domains, or all). Requires `full_stats: true` in config.
 
@@ -242,7 +242,8 @@ A **complete key listing with defaults** is in **[docs/dnsplane.example.json](do
 
 | Key | Meaning |
 | --- | --- |
-| `cache_records` | Enable resolver cache. |
+| `cache_records` | Enable resolver cache (`false` = no `dnscache.json` lookups; upstream only). |
+| `local_records_enabled` | **Default `true`.** If `false`, **dnsrecords are not used for DNS answers** (forward-only to upstreams + fallback). Records still load for API/TUI unless you use read-only/cluster modes. **`localhost`** is still answered locally (RFC 6761). |
 | `min_cache_ttl_seconds` | Floor for cached TTL (default `600`; `0` = use upstream TTL). |
 | `stale_while_revalidate` | Serve stale entries (TTL=1) while refreshing in background. |
 | `cache_warm_enabled`, `cache_warm_interval_seconds` | Keep-alive self-query (defaults: on, every 10s). |

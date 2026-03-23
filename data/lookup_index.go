@@ -269,7 +269,7 @@ func (d *DNSResolverData) TryFastLocalOrCache(qname, recordType string, qtypePTR
 	}
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	if len(d.DNSRecords) > 0 {
+	if d.Settings.LocalRecordsEnabled && len(d.DNSRecords) > 0 {
 		local = d.lookupLocalNonPTRLocked(qname, recordType)
 		if len(local) > 0 {
 			return true, local, nil, nil, false
@@ -280,12 +280,19 @@ func (d *DNSResolverData) TryFastLocalOrCache(qname, recordType string, qtypePTR
 	}
 	allowStale := d.Settings.StaleWhileRevalidate
 	now := time.Now()
+	rt := strings.ToUpper(strings.TrimSpace(recordType))
+	// Prefer RRset (full upstream Answer: CNAME chain + final A/AAAA/HTTPS/SVCB) over a lone per-RR A/AAAA
+	// at the same qname. cacheDNSResponse also adds per-RR rows; upstream can change from direct A to
+	// CNAME+A, leaving a stale direct A at qname until TTL expiry. Serving RRset first avoids wrong IP/TLS.
+	switch rt {
+	case "A", "AAAA", "HTTPS", "SVCB":
+		if rrset, st := d.lookupRRSetCacheLocked(qname, recordType, now, allowStale); len(rrset) > 0 {
+			return true, nil, nil, rrset, st
+		}
+	}
 	cache, isStale = d.lookupCacheRRLocked(qname, recordType, now, allowStale)
 	if cache != nil {
 		return true, nil, cache, nil, isStale
-	}
-	if rrset, st := d.lookupRRSetCacheLocked(qname, recordType, now, allowStale); len(rrset) > 0 {
-		return true, nil, nil, rrset, st
 	}
 	return false, nil, nil, nil, false
 }
@@ -294,6 +301,9 @@ func (d *DNSResolverData) TryFastLocalOrCache(qname, recordType string, qtypePTR
 func (d *DNSResolverData) LookupLocalRRs(qname, recordType string, autoBuildPTRFromA bool) []dns.RR {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
+	if !d.Settings.LocalRecordsEnabled {
+		return nil
+	}
 	rt := strings.ToUpper(strings.TrimSpace(recordType))
 	if rt == "PTR" {
 		return dnsrecords.FindAllRecords(d.DNSRecords, qname, recordType, autoBuildPTRFromA)
@@ -325,7 +335,7 @@ func (d *DNSResolverData) WarmIndexes() {
 func (d *DNSResolverData) HasAnyLocalRecords() bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	return len(d.DNSRecords) > 0
+	return d.Settings.LocalRecordsEnabled && len(d.DNSRecords) > 0
 }
 
 // HasAnyCachedRecords reports whether the cache has any entries (cheap; skip cache lookup when empty).

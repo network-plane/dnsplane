@@ -6,15 +6,6 @@ package commandhandler
 import (
 	"bytes"
 	"context"
-	"dnsplane/adblock"
-	"dnsplane/cliutil"
-	"dnsplane/config"
-	"dnsplane/data"
-	"dnsplane/dnsrecordcache"
-	"dnsplane/dnsrecords"
-	"dnsplane/dnsservers"
-	"dnsplane/fullstats"
-	"dnsplane/resolver"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +19,16 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"dnsplane/adblock"
+	"dnsplane/cliutil"
+	"dnsplane/config"
+	"dnsplane/data"
+	"dnsplane/dnsrecordcache"
+	"dnsplane/dnsrecords"
+	"dnsplane/dnsservers"
+	"dnsplane/fullstats"
+	"dnsplane/resolver"
 
 	"github.com/miekg/dns"
 	tui "github.com/network-plane/planetui"
@@ -528,7 +529,7 @@ func runCacheClear() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResul
 		if cliutil.IsHelpRequest(input.Raw) {
 			msgs := infoMessages(
 				"Usage: cache clear",
-				"Description: Remove every cached DNS entry.",
+				"Description: Remove every cached DNS entry from memory only. Run cache save to persist an empty dnscache.json (otherwise the file on disk is unchanged until the next cache save or background persist).",
 				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
 			)
 			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
@@ -539,7 +540,10 @@ func runCacheClear() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResul
 		}
 		dnsData := data.GetInstance()
 		dnsData.UpdateCacheRecordsInMemory([]dnsrecordcache.CacheRecord{})
-		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("Cache cleared.")}
+		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages(
+			"Cache cleared in memory.",
+			"Run cache save to write an empty dnscache.json (optional).",
+		)}
 	}
 }
 
@@ -1367,7 +1371,7 @@ func RegisterCommands() {
 			Context:     "cache",
 			Name:        "clear",
 			Summary:     "Clear cache",
-			Description: "Empties all cached DNS entries.",
+			Description: "Empties all cached DNS entries in memory; use cache save to persist an empty dnscache.json.",
 			Usage:       "cache clear",
 			Category:    "Cache",
 			Tags:        []string{"cache", "clear"},
@@ -1927,7 +1931,8 @@ func printAllServerConfig(settings config.Config) {
 	fmt.Printf("    server_socket: %s\n", settings.ClientSocketPath)
 	fmt.Printf("    server_tcp:    %s\n", settings.ClientTCPAddress)
 	fmt.Println("  Behaviour:")
-	fmt.Printf("    cache_records:  %v\n", settings.CacheRecords)
+	fmt.Printf("    cache_records:        %v\n", settings.CacheRecords)
+	fmt.Printf("    local_records_enabled: %v\n", settings.LocalRecordsEnabled)
 	fmt.Printf("    cache_warm_enabled:          %v\n", settings.CacheWarmEnabled)
 	fmt.Printf("    cache_warm_interval_seconds: %d\n", settings.CacheWarmIntervalSeconds)
 	fmt.Printf("    pprof_enabled:               %v\n", settings.PprofEnabled)
@@ -2213,6 +2218,13 @@ func applyConfigSetting(cfg *config.Config, setting, value string) (successMsg s
 		}
 		cfg.CacheRecords = b
 		return fmt.Sprintf("Cache records set to %v", b), nil
+	case "local_records_enabled":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid value for local_records_enabled: %s (use true/false)", value)
+		}
+		cfg.LocalRecordsEnabled = b
+		return fmt.Sprintf("local_records_enabled set to %v (dnsrecords ignored for DNS answers when false)", b), nil
 	case "cache_warm_enabled":
 		b, e := strconv.ParseBool(value)
 		if e != nil {
@@ -2663,7 +2675,7 @@ func printServerSetUsage() {
 	fmt.Println("Usage: server set <setting> <value>")
 	fmt.Println("Description: Set a config setting in memory. Run 'server save' to write to the config file.")
 	fmt.Println("Example: server set apiport 8080")
-	fmt.Println("Settings: dns_port, api_port, fallback_ip, fallback_port, timeout, api, cache_records, cache_warm_enabled, cache_warm_interval_seconds, stats_page_enabled, stats_perf_page_enabled, stats_dashboard_enabled, full_stats, full_stats_dir, pprof_enabled, pprof_listen, pretty_json, server_socket, server_tcp, dnsservers_file, cache_file, records_source_location (or dnsrecords), records_source_type (file|url|git), auto_build_ptr_from_a, forward_ptr_queries, add_updates_records, log_dir, log_severity, log_rotation, log_rotation_size_mb, log_rotation_time_days; see README and docs/dnsplane.example.json for the full list.")
+	fmt.Println("Settings: dns_port, api_port, fallback_ip, fallback_port, timeout, api, cache_records, local_records_enabled, cache_warm_enabled, cache_warm_interval_seconds, stats_page_enabled, stats_perf_page_enabled, stats_dashboard_enabled, full_stats, full_stats_dir, pprof_enabled, pprof_listen, pretty_json, server_socket, server_tcp, dnsservers_file, cache_file, records_source_location (or dnsrecords), records_source_type (file|url|git), auto_build_ptr_from_a, forward_ptr_queries, add_updates_records, log_dir, log_severity, log_rotation, log_rotation_size_mb, log_rotation_time_days; see README and docs/dnsplane.example.json for the full list.")
 	printHelpAliasesHint()
 }
 
