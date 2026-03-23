@@ -60,11 +60,19 @@ func fullstatsBrowseHandler(w http.ResponseWriter, r *http.Request) {
 		out := make([]fullStatsRequestRowJSON, len(slice))
 		for i, row := range slice {
 			domain, rtype := splitDomainType(row.key)
+			var src map[string]uint64
+			if row.st != nil && row.st.SourceCount != nil {
+				src = make(map[string]uint64, len(row.st.SourceCount))
+				for k, v := range row.st.SourceCount {
+					src[k] = v
+				}
+			}
 			out[i] = fullStatsRequestRowJSON{
 				Key: row.key, Domain: domain, RecordType: rtype,
-				Count:     row.st.Count,
-				FirstSeen: formatRFC3339(row.st.FirstSeen),
-				LastSeen:  formatRFC3339(row.st.LastSeen),
+				Count:       row.st.Count,
+				SourceCount: src,
+				FirstSeen:   formatRFC3339(row.st.FirstSeen),
+				LastSeen:    formatRFC3339(row.st.LastSeen),
 			}
 		}
 		writeJSON(w, http.StatusOK, fullStatsBrowseResponseJSON{
@@ -90,9 +98,15 @@ func fullstatsBrowseHandler(w http.ResponseWriter, r *http.Request) {
 					byType[k] = v
 				}
 			}
+			bySrc := map[string]uint64{}
+			if row.st.SourceCount != nil {
+				for k, v := range row.st.SourceCount {
+					bySrc[k] = v
+				}
+			}
 			out[i] = fullStatsRequesterRowJSON{
 				IP: row.ip, TotalRequests: row.total, FirstSeen: formatRFC3339(row.st.FirstSeen),
-				ByType: byType,
+				ByType: byType, BySource: bySrc,
 			}
 		}
 		writeJSON(w, http.StatusOK, fullStatsBrowseResponseJSON{
@@ -227,12 +241,18 @@ func collectRequestRows(tracker *fullstats.Tracker, scope string) ([]requestRowS
 			continue
 		}
 		cp := *st
+		if st.SourceCount != nil {
+			cp.SourceCount = make(map[string]uint64, len(st.SourceCount))
+			for sk, sv := range st.SourceCount {
+				cp.SourceCount[sk] = sv
+			}
+		}
 		out = append(out, requestRowSortable{key: k, st: &cp})
 	}
 	return out, nil
 }
 
-// filterRequestRows keeps rows whose key, domain, or record type contains q (case-insensitive substring).
+// filterRequestRows keeps rows whose key, domain, record type, or source label matches q (case-insensitive substring).
 func filterRequestRows(rows []requestRowSortable, needle string) []requestRowSortable {
 	if needle == "" {
 		return rows
@@ -245,6 +265,15 @@ func filterRequestRows(rows []requestRowSortable, needle string) []requestRowSor
 			strings.Contains(strings.ToLower(domain), n) ||
 			strings.Contains(strings.ToLower(rtype), n) {
 			out = append(out, row)
+			continue
+		}
+		if row.st != nil && row.st.SourceCount != nil {
+			for sk := range row.st.SourceCount {
+				if strings.Contains(strings.ToLower(sk), n) {
+					out = append(out, row)
+					break
+				}
+			}
 		}
 	}
 	return out
@@ -257,6 +286,7 @@ func filterRequesterRows(rows []requesterRowSortable, needle string) []requester
 	}
 	n := strings.ToLower(needle)
 	out := make([]requesterRowSortable, 0, len(rows))
+rows:
 	for _, row := range rows {
 		if strings.Contains(strings.ToLower(row.ip), n) {
 			out = append(out, row)
@@ -266,7 +296,15 @@ func filterRequesterRows(rows []requesterRowSortable, needle string) []requester
 			for rk := range row.st.TypeCount {
 				if strings.Contains(strings.ToLower(rk), n) {
 					out = append(out, row)
-					break
+					continue rows
+				}
+			}
+		}
+		if row.st != nil && row.st.SourceCount != nil {
+			for sk := range row.st.SourceCount {
+				if strings.Contains(strings.ToLower(sk), n) {
+					out = append(out, row)
+					continue rows
 				}
 			}
 		}
@@ -358,6 +396,13 @@ func collectRequesterRows(tracker *fullstats.Tracker, scope string) ([]requester
 			}
 			cp.TypeCount = tc
 		}
+		if cp.SourceCount != nil {
+			sc := make(map[string]uint64, len(cp.SourceCount))
+			for k, v := range cp.SourceCount {
+				sc[k] = v
+			}
+			cp.SourceCount = sc
+		}
 		tot := requesterTotal(&cp)
 		out = append(out, requesterRowSortable{ip: ip, st: &cp, total: tot})
 	}
@@ -419,12 +464,13 @@ func paginateSlice[T any](rows []T, page, perPage int) (outPage, totalPages int,
 }
 
 type fullStatsRequestRowJSON struct {
-	Key        string `json:"key"`
-	Domain     string `json:"domain"`
-	RecordType string `json:"record_type"`
-	Count      uint64 `json:"count"`
-	FirstSeen  string `json:"first_seen"`
-	LastSeen   string `json:"last_seen"`
+	Key         string            `json:"key"`
+	Domain      string            `json:"domain"`
+	RecordType  string            `json:"record_type"`
+	Count       uint64            `json:"count"`
+	SourceCount map[string]uint64 `json:"source_count,omitempty"`
+	FirstSeen   string            `json:"first_seen"`
+	LastSeen    string            `json:"last_seen"`
 }
 
 type fullStatsRequesterRowJSON struct {
@@ -432,6 +478,7 @@ type fullStatsRequesterRowJSON struct {
 	TotalRequests uint64            `json:"total_requests"`
 	FirstSeen     string            `json:"first_seen"`
 	ByType        map[string]uint64 `json:"by_type"`
+	BySource      map[string]uint64 `json:"by_source,omitempty"`
 }
 
 type fullStatsBrowseResponseJSON struct {

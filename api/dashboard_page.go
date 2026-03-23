@@ -468,7 +468,7 @@ const dashboardHTML = `<!DOCTYPE html>
             <option value="50">50</option>
             <option value="100">100</option>
           </select></label>
-          <label style="flex:1 1 14rem;min-width:10rem">Search <input type="search" id="fs-q" placeholder="Substring: name, type, key, IP…" autocomplete="off" spellcheck="false" aria-label="Filter rows"></label>
+          <label style="flex:1 1 14rem;min-width:10rem">Search <input type="search" id="fs-q" placeholder="Name, type, key, IP, or source (local, cache, …)" autocomplete="off" spellcheck="false" aria-label="Filter rows"></label>
           <button type="button" class="fs-btn" id="fs-refresh">Refresh</button>
         </div>
         <div class="fs-table-wrap">
@@ -661,7 +661,7 @@ const dashboardHTML = `<!DOCTYPE html>
         var thead = document.getElementById('fs-thead');
         var tbody = document.getElementById('fs-tbody');
         if (j.table === 'requesters') {
-          thead.innerHTML = '<tr><th>IP</th><th class="num">Total</th><th>First seen</th><th>By record type</th></tr>';
+          thead.innerHTML = '<tr><th>IP</th><th class="num">Total</th><th>First seen</th><th>By record type</th><th>Reply from</th></tr>';
           var rows = j.rows || [];
           var h = '';
           for (var i = 0; i < rows.length; i++) {
@@ -669,22 +669,24 @@ const dashboardHTML = `<!DOCTYPE html>
             h += '<tr><td style="font-family:ui-monospace,monospace">' + esc(row.ip) + '</td>';
             h += '<td class="num">' + esc(String(row.total_requests)) + '</td>';
             h += '<td>' + esc(row.first_seen || '—') + '</td>';
-            h += '<td class="fs-by-type">' + esc(fsFormatByType(row.by_type)) + '</td></tr>';
+            h += '<td class="fs-by-type">' + esc(fsFormatByType(row.by_type)) + '</td>';
+            h += '<td class="fs-by-type">' + esc(fsFormatByType(row.by_source)) + '</td></tr>';
           }
-          if (!rows.length) h = '<tr><td colspan="4" style="color:var(--muted)">No requester rows for this scope.</td></tr>';
+          if (!rows.length) h = '<tr><td colspan="5" style="color:var(--muted)">No requester rows for this scope.</td></tr>';
           tbody.innerHTML = h;
         } else {
-          thead.innerHTML = '<tr><th>Domain</th><th>Type</th><th class="num">Count</th><th>First seen</th><th>Last seen</th><th>Key</th></tr>';
+          thead.innerHTML = '<tr><th>Domain</th><th>Type</th><th class="num">Count</th><th>Reply from</th><th>First seen</th><th>Last seen</th><th>Key</th></tr>';
           var rows2 = j.rows || [];
           var h2 = '';
           for (var k = 0; k < rows2.length; k++) {
             var r2 = rows2[k];
             h2 += '<tr><td>' + esc(r2.domain) + '</td><td>' + esc(r2.record_type) + '</td>';
             h2 += '<td class="num">' + esc(String(r2.count)) + '</td>';
+            h2 += '<td class="fs-by-type">' + esc(fsFormatByType(r2.source_count)) + '</td>';
             h2 += '<td>' + esc(r2.first_seen || '—') + '</td><td>' + esc(r2.last_seen || '—') + '</td>';
             h2 += '<td style="font-family:ui-monospace,monospace;font-size:0.78rem">' + esc(r2.key) + '</td></tr>';
           }
-          if (!rows2.length) h2 = '<tr><td colspan="6" style="color:var(--muted)">No domain:type rows for this scope.</td></tr>';
+          if (!rows2.length) h2 = '<tr><td colspan="7" style="color:var(--muted)">No domain:type rows for this scope.</td></tr>';
           tbody.innerHTML = h2;
         }
         var tp = j.total_pages || 1;
