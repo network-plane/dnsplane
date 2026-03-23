@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"dnsplane/fullstats"
 )
 
 func TestParseFullStatsBrowseParams(t *testing.T) {
@@ -17,8 +19,18 @@ func TestParseFullStatsBrowseParams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.Scope != "session" || p.Table != "requesters" || p.Sort != "ip_asc" || p.Page != 2 || p.PerPage != 50 {
+	if p.Scope != "session" || p.Table != "requesters" || p.Sort != "ip_asc" || p.Page != 2 || p.PerPage != 50 || p.Query != "" {
 		t.Fatalf("unexpected params: %+v", p)
+	}
+	reqQ := httptest.NewRequest(http.MethodGet, "/x?q=amazonvideo&table=requests", nil)
+	pq, err := parseFullStatsBrowseParams(reqQ)
+	if err != nil || pq.Query != "amazonvideo" || pq.Table != "requests" {
+		t.Fatalf("q param: %+v err %v", pq, err)
+	}
+	long := strings.Repeat("x", fullStatsBrowseMaxQuery+1)
+	reqLong := httptest.NewRequest(http.MethodGet, "/x?q="+url.QueryEscape(long), nil)
+	if _, err := parseFullStatsBrowseParams(reqLong); err == nil {
+		t.Fatal("expected error for q too long")
 	}
 
 	req2 := httptest.NewRequest(http.MethodGet, "/x", nil)
@@ -62,6 +74,35 @@ func TestPaginateSlice(t *testing.T) {
 	page, tp, slice = paginateSlice(rows, 99, 2)
 	if page != 3 || tp != 3 || len(slice) != 1 || slice[0] != 5 {
 		t.Fatalf("clamp page: page=%d tp=%d slice=%v", page, tp, slice)
+	}
+}
+
+func TestFilterRequestRows(t *testing.T) {
+	rows := []requestRowSortable{
+		{key: "a.com:A", st: &fullstats.RequestStats{Count: 1}},
+		{key: "b.in-addr.arpa.:PTR", st: &fullstats.RequestStats{Count: 2}},
+	}
+	out := filterRequestRows(rows, "ptr")
+	if len(out) != 1 || out[0].key != "b.in-addr.arpa.:PTR" {
+		t.Fatalf("got %+v", out)
+	}
+	if len(filterRequestRows(rows, "")) != 2 {
+		t.Fatal("empty q should keep all")
+	}
+}
+
+func TestFilterRequesterRows(t *testing.T) {
+	rows := []requesterRowSortable{
+		{ip: "192.168.1.1", st: &fullstats.RequesterStats{TypeCount: map[string]uint64{"A": 1}}, total: 1},
+		{ip: "10.0.0.1", st: &fullstats.RequesterStats{TypeCount: map[string]uint64{"PTR": 5}}, total: 5},
+	}
+	out := filterRequesterRows(rows, "ptr")
+	if len(out) != 1 || out[0].ip != "10.0.0.1" {
+		t.Fatalf("got %+v", out)
+	}
+	out2 := filterRequesterRows(rows, "192")
+	if len(out2) != 1 || out2[0].ip != "192.168.1.1" {
+		t.Fatalf("got %+v", out2)
 	}
 }
 

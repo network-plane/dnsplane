@@ -338,6 +338,18 @@ const dashboardHTML = `<!DOCTYPE html>
       padding: 0.35rem 0.5rem;
       font-size: 0.85rem;
     }
+    .fs-toolbar input[type="search"] {
+      min-width: 12rem;
+      max-width: 28rem;
+      flex: 1 1 12rem;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.35rem 0.65rem;
+      font-size: 0.85rem;
+    }
+    .fs-toolbar input[type="search"]::placeholder { color: var(--muted); }
     .fs-btn {
       background: var(--surface-hover);
       color: var(--text);
@@ -456,6 +468,7 @@ const dashboardHTML = `<!DOCTYPE html>
             <option value="50">50</option>
             <option value="100">100</option>
           </select></label>
+          <label style="flex:1 1 14rem;min-width:10rem">Search <input type="search" id="fs-q" placeholder="Substring: name, type, key, IP…" autocomplete="off" spellcheck="false" aria-label="Filter rows"></label>
           <button type="button" class="fs-btn" id="fs-refresh">Refresh</button>
         </div>
         <div class="fs-table-wrap">
@@ -551,7 +564,7 @@ const dashboardHTML = `<!DOCTYPE html>
         a.classList.toggle('active', a === el);
       });
     }
-    var fsState = { scope: 'total', table: 'requests', sort: 'count_desc', page: 1, perPage: 25 };
+    var fsState = { scope: 'total', table: 'requests', sort: 'count_desc', page: 1, perPage: 25, search: '' };
     function fsSortOptions(table) {
       if (table === 'requesters') {
         return [
@@ -594,6 +607,7 @@ const dashboardHTML = `<!DOCTYPE html>
       p.set('sort', fsState.sort);
       p.set('page', String(fsState.page));
       p.set('per_page', String(fsState.perPage));
+      if (fsState.search) p.set('q', fsState.search);
       return p.toString();
     }
     function fsFormatByType(by) {
@@ -607,6 +621,7 @@ const dashboardHTML = `<!DOCTYPE html>
       fsState.table = document.getElementById('fs-table').value;
       fsState.sort = document.getElementById('fs-sort').value;
       fsState.perPage = parseInt(document.getElementById('fs-per').value, 10) || 25;
+      fsState.search = (document.getElementById('fs-q').value || '').trim();
     }
     async function loadFullStats() {
       var msg = document.getElementById('fs-msg');
@@ -637,6 +652,10 @@ const dashboardHTML = `<!DOCTYPE html>
         fsState.scope = j.scope;
         fsState.table = j.table;
         fsState.sort = j.sort;
+        if (typeof j.q === 'string') {
+          fsState.search = j.q;
+          document.getElementById('fs-q').value = j.q;
+        }
         fsSyncSortSelect();
         document.getElementById('fs-sort').value = j.sort;
         var thead = document.getElementById('fs-thead');
@@ -686,6 +705,9 @@ const dashboardHTML = `<!DOCTYPE html>
       document.getElementById('fs-sort').addEventListener('change', function() { fsReadControls(); fsState.page = 1; loadFullStats(); });
       document.getElementById('fs-per').addEventListener('change', function() { fsReadControls(); fsState.page = 1; loadFullStats(); });
       document.getElementById('fs-refresh').addEventListener('click', function() { fsReadControls(); loadFullStats(); });
+      document.getElementById('fs-q').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); fsReadControls(); fsState.page = 1; loadFullStats(); }
+      });
       document.getElementById('fs-prev').addEventListener('click', function() { fsReadControls(); if (fsState.page > 1) { fsState.page--; loadFullStats(); } });
       document.getElementById('fs-next').addEventListener('click', function() { fsReadControls(); fsState.page++; loadFullStats(); });
     }
