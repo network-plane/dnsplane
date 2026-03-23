@@ -91,8 +91,8 @@ func (s *whitelistIntegrationStore) FilterHealthyUpstreamEndpoints(eps []dnsserv
 	return eps
 }
 func (s *whitelistIntegrationStore) RecordUpstreamForwardSuccess(string) {}
-func (s *whitelistIntegrationStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR, bool) {
-	return false, nil, nil, false
+func (s *whitelistIntegrationStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR, []dns.RR, bool) {
+	return false, nil, nil, nil, false
 }
 
 // TestWhitelistIntegration verifies that for a query matching a whitelist server only that server
@@ -179,15 +179,15 @@ func (s *localRecordStore) FilterHealthyUpstreamEndpoints(eps []dnsservers.Upstr
 	return eps
 }
 func (s *localRecordStore) RecordUpstreamForwardSuccess(string) {}
-func (s *localRecordStore) TryFastLocalOrCache(qname, rt string, ptr bool) (bool, []dns.RR, *dns.RR, bool) {
+func (s *localRecordStore) TryFastLocalOrCache(qname, rt string, ptr bool) (bool, []dns.RR, *dns.RR, []dns.RR, bool) {
 	if ptr {
-		return false, nil, nil, false
+		return false, nil, nil, nil, false
 	}
 	loc := dnsrecords.FindAllRecords(s.records, qname, rt, false)
 	if len(loc) > 0 {
-		return true, loc, nil, false
+		return true, loc, nil, nil, false
 	}
-	return false, nil, nil, false
+	return false, nil, nil, nil, false
 }
 
 // TestResolver_LocalRecordReturnsA is a minimal integration test: resolver with in-memory store
@@ -249,8 +249,8 @@ func (s *emptyStore) FilterHealthyUpstreamEndpoints(eps []dnsservers.UpstreamEnd
 	return eps
 }
 func (s *emptyStore) RecordUpstreamForwardSuccess(string) {}
-func (s *emptyStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR, bool) {
-	return false, nil, nil, false
+func (s *emptyStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR, []dns.RR, bool) {
+	return false, nil, nil, nil, false
 }
 
 // TestResolver_NoLocalCacheUpstream_ReturnsEmpty verifies that when the store has no local
@@ -304,8 +304,8 @@ func (s *upstreamOnlyStore) FilterHealthyUpstreamEndpoints(eps []dnsservers.Upst
 	return eps
 }
 func (s *upstreamOnlyStore) RecordUpstreamForwardSuccess(string) {}
-func (s *upstreamOnlyStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR, bool) {
-	return false, nil, nil, false
+func (s *upstreamOnlyStore) TryFastLocalOrCache(string, string, bool) (bool, []dns.RR, *dns.RR, []dns.RR, bool) {
+	return false, nil, nil, nil, false
 }
 
 func TestResolver_AAAA_upstreamFastPath(t *testing.T) {
@@ -366,5 +366,162 @@ func TestResolver_PTR_miss_usesUpstreamFastPath(t *testing.T) {
 	}
 	if len(rec.recorded()) < 1 {
 		t.Fatal("expected upstream query for PTR miss")
+	}
+}
+
+// cnameChainUpstream returns a CNAME + A chain for any query (for synthetic RRset cache tests).
+type cnameChainUpstream struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (u *cnameChainUpstream) Query(ctx context.Context, question dns.Question, ep dnsservers.UpstreamEndpoint) (*dns.Msg, error) {
+	u.mu.Lock()
+	u.calls++
+	u.mu.Unlock()
+	msg := &dns.Msg{}
+	msg.SetReply(&dns.Msg{Question: []dns.Question{question}})
+	msg.Rcode = dns.RcodeSuccess
+	msg.Answer = []dns.RR{
+		&dns.CNAME{
+			Hdr:    dns.RR_Header{Name: question.Name, Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 300},
+			Target: "target.example.com.",
+		},
+		&dns.A{
+			Hdr: dns.RR_Header{Name: "target.example.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+			A:   net.IPv4(1, 2, 3, 4),
+		},
+	}
+	return msg, nil
+}
+
+func (u *cnameChainUpstream) callCount() int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.calls
+}
+
+// cnameHTTPSUpstream returns CNAME + HTTPS (SVCB-style) for HTTPS qtype tests.
+type cnameHTTPSUpstream struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (u *cnameHTTPSUpstream) Query(ctx context.Context, question dns.Question, ep dnsservers.UpstreamEndpoint) (*dns.Msg, error) {
+	u.mu.Lock()
+	u.calls++
+	u.mu.Unlock()
+	httpsRR, err := dns.NewRR("target.example.com. 300 IN HTTPS 1 .")
+	if err != nil {
+		return nil, err
+	}
+	msg := &dns.Msg{}
+	msg.SetReply(&dns.Msg{Question: []dns.Question{question}})
+	msg.Rcode = dns.RcodeSuccess
+	msg.Answer = []dns.RR{
+		&dns.CNAME{
+			Hdr:    dns.RR_Header{Name: question.Name, Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 300},
+			Target: "target.example.com.",
+		},
+		httpsRR,
+	}
+	return msg, nil
+}
+
+func (u *cnameHTTPSUpstream) callCount() int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.calls
+}
+
+func TestResolver_CNAMEHTTPS_SecondQueryUsesSynthCache(t *testing.T) {
+	store := &data.DNSResolverData{
+		Settings: config.Config{
+			CacheRecords:       true,
+			MinCacheTTLSeconds: 60,
+		},
+		DNSServers: []dnsservers.DNSServer{{Address: "8.8.8.8", Port: "53", Active: true}},
+		BlockList:  adblock.NewBlockList(),
+	}
+	store.WarmIndexes()
+	up := &cnameHTTPSUpstream{}
+	r := New(Config{Store: store, Upstream: up, UpstreamTimeout: 2 * time.Second})
+	q := dns.Question{Name: "www.example.com.", Qtype: dns.TypeHTTPS, Qclass: dns.ClassINET}
+	ctx := context.Background()
+
+	msg1 := &dns.Msg{}
+	msg1.SetQuestion(q.Name, q.Qtype)
+	r.HandleQuestion(ctx, q, msg1)
+	if up.callCount() != 1 {
+		t.Fatalf("first query: want 1 upstream call, got %d", up.callCount())
+	}
+	if len(msg1.Answer) != 2 {
+		t.Fatalf("want 2 answers, got %d", len(msg1.Answer))
+	}
+
+	msg2 := &dns.Msg{}
+	msg2.SetQuestion(q.Name, q.Qtype)
+	r.HandleQuestion(ctx, q, msg2)
+	if up.callCount() != 1 {
+		t.Fatalf("second query: want 1 upstream call total, got %d", up.callCount())
+	}
+	if len(msg2.Answer) != 2 {
+		t.Fatalf("second response: want 2 answers, got %d", len(msg2.Answer))
+	}
+}
+
+func TestResolver_BuiltinLocalhost_NoUpstream(t *testing.T) {
+	store := &emptyStore{config: config.Config{}}
+	rec := &recordingUpstream{}
+	r := New(Config{Store: store, Upstream: rec, UpstreamTimeout: 2 * time.Second})
+	q := dns.Question{Name: "localhost.", Qtype: dns.TypeA, Qclass: dns.ClassINET}
+	msg := &dns.Msg{}
+	msg.SetQuestion(q.Name, q.Qtype)
+	r.HandleQuestion(context.Background(), q, msg)
+	if len(msg.Answer) != 1 {
+		t.Fatalf("want 1 answer, got %d", len(msg.Answer))
+	}
+	a, ok := msg.Answer[0].(*dns.A)
+	if !ok || !a.A.Equal(net.IPv4(127, 0, 0, 1)) {
+		t.Fatalf("want 127.0.0.1, got %v", msg.Answer[0])
+	}
+	if len(rec.recorded()) != 0 {
+		t.Fatalf("builtin localhost must not query upstream, got %d calls", len(rec.recorded()))
+	}
+}
+
+func TestResolver_CNAMEChain_SecondQueryUsesSynthCache(t *testing.T) {
+	store := &data.DNSResolverData{
+		Settings: config.Config{
+			CacheRecords:       true,
+			MinCacheTTLSeconds: 60,
+		},
+		DNSServers: []dnsservers.DNSServer{{Address: "8.8.8.8", Port: "53", Active: true}},
+		BlockList:  adblock.NewBlockList(),
+	}
+	store.WarmIndexes()
+	up := &cnameChainUpstream{}
+	r := New(Config{Store: store, Upstream: up, UpstreamTimeout: 2 * time.Second})
+	q := dns.Question{Name: "www.example.com.", Qtype: dns.TypeA, Qclass: dns.ClassINET}
+	ctx := context.Background()
+
+	msg1 := &dns.Msg{}
+	msg1.SetQuestion(q.Name, q.Qtype)
+	r.HandleQuestion(ctx, q, msg1)
+	if up.callCount() != 1 {
+		t.Fatalf("first query: want 1 upstream call, got %d", up.callCount())
+	}
+	if len(msg1.Answer) != 2 {
+		t.Fatalf("want 2 answers, got %d", len(msg1.Answer))
+	}
+
+	msg2 := &dns.Msg{}
+	msg2.SetQuestion(q.Name, q.Qtype)
+	r.HandleQuestion(ctx, q, msg2)
+	if up.callCount() != 1 {
+		t.Fatalf("second query: want 1 upstream call total, got %d", up.callCount())
+	}
+	if len(msg2.Answer) != 2 {
+		t.Fatalf("second response: want 2 answers, got %d", len(msg2.Answer))
 	}
 }

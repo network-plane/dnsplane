@@ -24,6 +24,12 @@ func TestLoadFromPathCreatesDefaultConfig(t *testing.T) {
 	if loaded.Config.ClientSocketPath == "" {
 		t.Error("default config should have non-empty ClientSocketPath")
 	}
+	if loaded.Config.PrettyJSON {
+		t.Error("default config should have pretty_json false")
+	}
+	if !loaded.Config.LocalRecordsEnabled {
+		t.Error("default config should have local_records_enabled true")
+	}
 	// Config file should exist
 	if _, err := os.Stat(loaded.Path); err != nil {
 		t.Errorf("config file not created at %q: %v", loaded.Path, err)
@@ -46,5 +52,13 @@ func TestUnmarshalJSON_CacheWarmLegacyDefaults(t *testing.T) {
 	}
 	if c.CacheWarmIntervalSeconds != 10 {
 		t.Fatalf("cache_warm_interval_seconds absent: want 10, got %d", c.CacheWarmIntervalSeconds)
+	}
+}
+
+func TestApplyDefaults_PprofListenWhenEnabled(t *testing.T) {
+	c := &Config{PprofEnabled: true, PprofListen: ""}
+	c.applyDefaults(t.TempDir())
+	if c.PprofListen != "127.0.0.1:6060" {
+		t.Fatalf("PprofListen = %q, want 127.0.0.1:6060", c.PprofListen)
 	}
 }

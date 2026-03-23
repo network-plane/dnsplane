@@ -91,13 +91,6 @@ func handleRequestProto(w dns.ResponseWriter, request *dns.Msg, proto string) {
 	go func() {
 		dnsData := data.GetInstance()
 		dnsData.IncrementTotalQueries()
-		for _, question := range request.Question {
-			if fullStatsTracker != nil {
-				recordType := dns.TypeToString[question.Qtype]
-				key := fmt.Sprintf("%s:%s", question.Name, recordType)
-				_ = fullStatsTracker.RecordRequest(key, requesterIP, recordType)
-			}
-		}
 		if err != nil && asyncLogQueue != nil && dnsLogger != nil {
 			errCopy := err
 			asyncLogQueue.Enqueue(func() { dnsLogger.Error("Error writing response", "error", errCopy) })
@@ -249,10 +242,12 @@ func doHHandler(w http.ResponseWriter, r *http.Request, path string) {
 		return
 	}
 	requesterIP := "unknown"
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		requesterIP = host
-	} else {
-		requesterIP = r.RemoteAddr
+	if r.RemoteAddr != "" {
+		if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+			requesterIP = host
+		} else {
+			requesterIP = r.RemoteAddr
+		}
 	}
 	ctx := resolver.ContextWithRequest(context.Background(), req)
 	dep := dnsserve.Dependencies{
@@ -275,12 +270,5 @@ func doHHandler(w http.ResponseWriter, r *http.Request, path string) {
 	go func() {
 		dnsData := data.GetInstance()
 		dnsData.IncrementTotalQueries()
-		for _, question := range req.Question {
-			if fullStatsTracker != nil {
-				recordType := dns.TypeToString[question.Qtype]
-				key := fmt.Sprintf("%s:%s", question.Name, recordType)
-				_ = fullStatsTracker.RecordRequest(key, requesterIP, recordType)
-			}
-		}
 	}()
 }

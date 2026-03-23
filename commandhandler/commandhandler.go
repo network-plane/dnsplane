@@ -6,15 +6,6 @@ package commandhandler
 import (
 	"bytes"
 	"context"
-	"dnsplane/adblock"
-	"dnsplane/cliutil"
-	"dnsplane/config"
-	"dnsplane/data"
-	"dnsplane/dnsrecordcache"
-	"dnsplane/dnsrecords"
-	"dnsplane/dnsservers"
-	"dnsplane/fullstats"
-	"dnsplane/resolver"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +19,16 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"dnsplane/adblock"
+	"dnsplane/cliutil"
+	"dnsplane/config"
+	"dnsplane/data"
+	"dnsplane/dnsrecordcache"
+	"dnsplane/dnsrecords"
+	"dnsplane/dnsservers"
+	"dnsplane/fullstats"
+	"dnsplane/resolver"
 
 	"github.com/miekg/dns"
 	tui "github.com/network-plane/planetui"
@@ -528,7 +529,7 @@ func runCacheClear() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResul
 		if cliutil.IsHelpRequest(input.Raw) {
 			msgs := infoMessages(
 				"Usage: cache clear",
-				"Description: Remove every cached DNS entry.",
+				"Description: Remove every cached DNS entry from memory only. Run cache save to persist an empty dnscache.json (otherwise the file on disk is unchanged until the next cache save or background persist).",
 				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
 			)
 			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
@@ -539,7 +540,10 @@ func runCacheClear() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResul
 		}
 		dnsData := data.GetInstance()
 		dnsData.UpdateCacheRecordsInMemory([]dnsrecordcache.CacheRecord{})
-		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("Cache cleared.")}
+		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages(
+			"Cache cleared in memory.",
+			"Run cache save to write an empty dnscache.json (optional).",
+		)}
 	}
 }
 
@@ -1252,6 +1256,29 @@ func RegisterCommands() {
 				{Description: "All domains", Command: "statistics domains full"},
 			},
 		}, legacyRunner(handleStatisticsDomains)),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "statistics",
+			Name:        "clear",
+			Summary:     "Clear full_stats data",
+			Description: "Wipes requester and domain:type buckets in the full_stats database and resets session counters (like cache clear). Run statistics save afterward to flush stats.db to disk.",
+			Usage:       "statistics clear",
+			Category:    "Statistics",
+			Tags:        []string{"statistics", "full_stats", "clear"},
+			Examples: []tui.Example{
+				{Description: "Wipe stats (then run statistics save)", Command: "statistics clear"},
+				{Description: "Flush stats.db to disk", Command: "statistics save"},
+			},
+		}, legacyRunner(handleStatisticsClear)),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "statistics",
+			Name:        "save",
+			Summary:     "Save full_stats database",
+			Description: "Flushes the full_stats database file (stats.db) to disk (fsync), same role as cache save after cache clear.",
+			Usage:       "statistics save",
+			Category:    "Statistics",
+			Tags:        []string{"statistics", "full_stats", "save"},
+			Examples:    []tui.Example{{Description: "Persist after clear", Command: "statistics save"}},
+		}, legacyRunner(handleStatisticsSave)),
 
 		newLegacyFactory(tui.CommandSpec{
 			Context:     "record",
@@ -1367,7 +1394,7 @@ func RegisterCommands() {
 			Context:     "cache",
 			Name:        "clear",
 			Summary:     "Clear cache",
-			Description: "Empties all cached DNS entries.",
+			Description: "Empties all cached DNS entries in memory; use cache save to persist an empty dnscache.json.",
 			Usage:       "cache clear",
 			Category:    "Cache",
 			Tags:        []string{"cache", "clear"},
@@ -1927,9 +1954,13 @@ func printAllServerConfig(settings config.Config) {
 	fmt.Printf("    server_socket: %s\n", settings.ClientSocketPath)
 	fmt.Printf("    server_tcp:    %s\n", settings.ClientTCPAddress)
 	fmt.Println("  Behaviour:")
-	fmt.Printf("    cache_records:  %v\n", settings.CacheRecords)
+	fmt.Printf("    cache_records:        %v\n", settings.CacheRecords)
+	fmt.Printf("    local_records_enabled: %v\n", settings.LocalRecordsEnabled)
 	fmt.Printf("    cache_warm_enabled:          %v\n", settings.CacheWarmEnabled)
 	fmt.Printf("    cache_warm_interval_seconds: %d\n", settings.CacheWarmIntervalSeconds)
+	fmt.Printf("    pprof_enabled:               %v\n", settings.PprofEnabled)
+	fmt.Printf("    pprof_listen:                %s\n", settings.PprofListen)
+	fmt.Printf("    pretty_json:                 %v\n", settings.PrettyJSON)
 	fmt.Printf("    stats_page_enabled:       %v\n", settings.StatsPageEnabled)
 	fmt.Printf("    stats_perf_page_enabled:  %v\n", settings.StatsPerfPageEnabled)
 	fmt.Printf("    stats_dashboard_enabled:  %v\n", settings.StatsDashboardEnabled)
@@ -2210,6 +2241,13 @@ func applyConfigSetting(cfg *config.Config, setting, value string) (successMsg s
 		}
 		cfg.CacheRecords = b
 		return fmt.Sprintf("Cache records set to %v", b), nil
+	case "local_records_enabled":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid value for local_records_enabled: %s (use true/false)", value)
+		}
+		cfg.LocalRecordsEnabled = b
+		return fmt.Sprintf("local_records_enabled set to %v (dnsrecords ignored for DNS answers when false)", b), nil
 	case "cache_warm_enabled":
 		b, e := strconv.ParseBool(value)
 		if e != nil {
@@ -2245,6 +2283,23 @@ func applyConfigSetting(cfg *config.Config, setting, value string) (successMsg s
 		}
 		cfg.StatsDashboardEnabled = b
 		return fmt.Sprintf("Stats dashboard (/stats/dashboard) enabled set to %v", b), nil
+	case "pretty_json":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid pretty_json: %s (use true/false)", value)
+		}
+		cfg.PrettyJSON = b
+		return fmt.Sprintf("pretty_json set to %v (affects JSON writes for dnsservers, dnsrecords, dnscache)", b), nil
+	case "pprof_enabled":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid pprof_enabled: %s (use true/false)", value)
+		}
+		cfg.PprofEnabled = b
+		return fmt.Sprintf("pprof_enabled set to %v (restart DNS process to apply)", b), nil
+	case "pprof_listen":
+		cfg.PprofListen = strings.TrimSpace(value)
+		return fmt.Sprintf("pprof_listen set to %q (restart DNS process to apply)", cfg.PprofListen), nil
 	case "full_stats":
 		b, e := strconv.ParseBool(value)
 		if e != nil {
@@ -2643,7 +2698,7 @@ func printServerSetUsage() {
 	fmt.Println("Usage: server set <setting> <value>")
 	fmt.Println("Description: Set a config setting in memory. Run 'server save' to write to the config file.")
 	fmt.Println("Example: server set apiport 8080")
-	fmt.Println("Settings: dns_port, api_port, fallback_ip, fallback_port, timeout, api, cache_records, cache_warm_enabled, cache_warm_interval_seconds, stats_page_enabled, stats_perf_page_enabled, stats_dashboard_enabled, full_stats, full_stats_dir, server_socket, server_tcp, dnsservers_file, cache_file, records_source_location (or dnsrecords), records_source_type (file|url|git), auto_build_ptr_from_a, forward_ptr_queries, add_updates_records, log_dir, log_severity, log_rotation, log_rotation_size_mb, log_rotation_time_days")
+	fmt.Println("Settings: dns_port, api_port, fallback_ip, fallback_port, timeout, api, cache_records, local_records_enabled, cache_warm_enabled, cache_warm_interval_seconds, stats_page_enabled, stats_perf_page_enabled, stats_dashboard_enabled, full_stats, full_stats_dir, pprof_enabled, pprof_listen, pretty_json, server_socket, server_tcp, dnsservers_file, cache_file, records_source_location (or dnsrecords), records_source_type (file|url|git), auto_build_ptr_from_a, forward_ptr_queries, add_updates_records, log_dir, log_severity, log_rotation, log_rotation_size_mb, log_rotation_time_days; see README and docs/dnsplane.example.json for the full list.")
 	printHelpAliasesHint()
 }
 
@@ -2806,6 +2861,53 @@ func handleStatisticsDomains(args []string) {
 	if !showFull && len(all) > statisticsDefaultLimit {
 		fmt.Printf("... and %d more. Use 'statistics domains full' to show all.\n", len(all)-statisticsDefaultLimit)
 	}
+}
+
+func handleStatisticsClear(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		fmt.Println("Usage: statistics clear")
+		fmt.Println("Description: Delete all full_stats data in memory and in the open database (stats.db). Resets session counters since process start.")
+		fmt.Println("Run statistics save afterward to flush stats.db to disk (same pattern as cache clear + cache save).")
+		printHelpAliasesHint()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("statistics clear does not accept arguments.")
+		printHelpAliasesHint()
+		return
+	}
+	if fullStatsTracker == nil {
+		fmt.Println("Full statistics are disabled. Enable full_stats in server config (e.g. server set full_stats true) and restart.")
+		return
+	}
+	if err := fullStatsTracker.Clear(); err != nil {
+		fmt.Printf("Error clearing statistics: %v\n", err)
+		return
+	}
+	fmt.Println("Statistics cleared. Run statistics save to flush stats.db to disk.")
+}
+
+func handleStatisticsSave(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		fmt.Println("Usage: statistics save")
+		fmt.Println("Description: Flush the full_stats database file (stats.db) to stable storage.")
+		printHelpAliasesHint()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("statistics save does not accept arguments.")
+		printHelpAliasesHint()
+		return
+	}
+	if fullStatsTracker == nil {
+		fmt.Println("Full statistics are disabled. Enable full_stats in server config (e.g. server set full_stats true) and restart.")
+		return
+	}
+	if err := fullStatsTracker.Sync(); err != nil {
+		fmt.Printf("Error saving statistics database: %v\n", err)
+		return
+	}
+	fmt.Println("Full statistics database saved (stats.db flushed to disk).")
 }
 
 func printHelpAliasesHint() {

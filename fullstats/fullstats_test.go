@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestNew_Disabled(t *testing.T) {
@@ -32,5 +33,47 @@ func TestNew_Enabled(t *testing.T) {
 	dbPath := filepath.Join(dir, dbFileName)
 	if _, err := os.Stat(dbPath); err != nil {
 		t.Errorf("database file not created: %v", err)
+	}
+}
+
+func TestTracker_Clear(t *testing.T) {
+	dir := t.TempDir()
+	tracker, err := New(dir, true)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = tracker.Close() }()
+
+	if err := tracker.RecordRequest("example.com:A", "192.0.2.1", "A", "local"); err != nil {
+		t.Fatalf("RecordRequest: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	all, err := tracker.GetAllRequests()
+	if err != nil {
+		t.Fatalf("GetAllRequests: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("before Clear: len(requests) = %d, want 1", len(all))
+	}
+	if err := tracker.Clear(); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	all, err = tracker.GetAllRequests()
+	if err != nil {
+		t.Fatalf("GetAllRequests after clear: %v", err)
+	}
+	if len(all) != 0 {
+		t.Fatalf("after Clear: len(requests) = %d, want 0", len(all))
+	}
+	req, err := tracker.GetAllRequesters()
+	if err != nil {
+		t.Fatalf("GetAllRequesters after clear: %v", err)
+	}
+	if len(req) != 0 {
+		t.Fatalf("after Clear: len(requesters) = %d, want 0", len(req))
+	}
+	sess, _ := tracker.GetSessionRequests()
+	if len(sess) != 0 {
+		t.Fatalf("after Clear: len(session requests) = %d, want 0", len(sess))
 	}
 }

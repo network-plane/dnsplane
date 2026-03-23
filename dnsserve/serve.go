@@ -89,6 +89,7 @@ func ServeDNS(ctx context.Context, req *dns.Msg, meta ServeMeta, dep Dependencie
 	}
 
 	if dep.Resolver != nil {
+		ctx = resolver.ContextWithClientIP(ctx, clientIP)
 		for _, q := range req.Question {
 			dep.Resolver.HandleQuestion(ctx, q, resp)
 		}
