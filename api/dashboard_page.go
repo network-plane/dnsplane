@@ -5,6 +5,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"dnsplane/cluster"
 	"dnsplane/data"
@@ -21,6 +22,51 @@ func dashboardDataHandler(w http.ResponseWriter, r *http.Request) {
 	dnsData := data.GetInstance()
 	stats := dnsData.GetStats()
 	perf := data.GetResolverPerfReport()
+
+	tq := stats.TotalQueries
+	tch := stats.TotalCacheHits
+	tb := stats.TotalBlocks
+	var cacheHitRatio any
+	var blockRate any
+	if tq > 0 {
+		cacheHitRatio = float64(tch) / float64(tq)
+		blockRate = float64(tb) / float64(tq)
+	}
+
+	activeUpstreams := 0
+	for _, s := range dnsData.GetServers() {
+		if s.Active {
+			activeUpstreams++
+		}
+	}
+	st, healthChecksOn := dnsData.UpstreamHealthStatuses()
+	upstreamHealth := map[string]any{
+		"checks_enabled":  healthChecksOn,
+		"active":          activeUpstreams,
+		"configured_rows": len(st),
+		"healthy":         0,
+		"unhealthy":       0,
+	}
+	if len(st) > 0 {
+		bad := 0
+		for i := range st {
+			if st[i].Unhealthy {
+				bad++
+			}
+		}
+		upstreamHealth["healthy"] = len(st) - bad
+		upstreamHealth["unhealthy"] = bad
+	}
+
+	summary := map[string]any{
+		"server_start":    stats.ServerStartTime.UTC().Format(time.RFC3339),
+		"uptime_seconds":  int64(time.Since(stats.ServerStartTime).Seconds()),
+		"cache_hit_ratio": cacheHitRatio,
+		"block_rate":      blockRate,
+		"total_blocks":    tb,
+		"upstream":        upstreamHealth,
+	}
+
 	payload := map[string]any{
 		"counters": map[string]any{
 			"total_queries":           stats.TotalQueries,
@@ -38,13 +84,23 @@ func dashboardDataHandler(w http.ResponseWriter, r *http.Request) {
 			"avg_total_ms":     perf.AResolve.AvgTotalMs,
 			"max_total_ms":     perf.AResolve.MaxTotalMs,
 		},
-		"series": data.GetDashboardSeries(),
-		"log":    data.GetDashboardLogNewestFirst(200),
+		"summary": summary,
+		"series":  data.GetDashboardSeries(),
+		"log":     data.GetDashboardLogNewestFirst(200),
+	}
+	if tot, sess, ok := getFullStatsCounts(); ok {
+		payload["fullstats"] = map[string]any{
+			"domains_total":      tot.DomainsCount,
+			"requesters_total":   tot.RequestersCount,
+			"domains_session":    sess.DomainsCount,
+			"requesters_session": sess.RequestersCount,
+		}
 	}
 	if mgr := cluster.GlobalManager(); mgr != nil {
 		snap := mgr.StatusSnapshot()
 		payload["cluster"] = snap
 	}
+	payload["build"] = BuildInfo()
 	writeJSON(w, http.StatusOK, payload)
 }
 
@@ -198,6 +254,23 @@ const dashboardHTML = `<!DOCTYPE html>
       font-size: 0.8rem;
       color: var(--muted);
       margin-top: 0.35rem;
+    }
+    .dash-split-row {
+      display: flex;
+      gap: 1rem;
+      align-items: stretch;
+      margin-bottom: 1.25rem;
+      flex-wrap: wrap;
+    }
+    .dash-narrow {
+      flex: 0 0 200px;
+      max-width: 240px;
+      min-width: 180px;
+    }
+    .dash-cluster {
+      flex: 1 1 280px;
+      min-width: 0;
+      margin-bottom: 0;
     }
     .charts-row {
       display: grid;
@@ -424,10 +497,40 @@ const dashboardHTML = `<!DOCTYPE html>
           <div class="card"><h3>Avg resolve (fast path)</h3><div class="value" id="m-avg">—</div><div class="sub">ms · A/AAAA perf</div></div>
           <div class="card"><h3>Upstream wins</h3><div class="value" id="m-up">—</div><div class="sub">outcome_upstream</div></div>
         </div>
-        <div class="chart-card" id="cluster-wrap" style="display:none;margin-bottom:1.25rem;max-width:100%">
-          <h2>Cluster</h2>
-          <p class="muted-link" style="margin:0 0 0.75rem 0;font-size:0.85rem">Read-only · manage via TUI (<code>cluster</code>)</p>
-          <div id="cluster-root" style="font-size:0.85rem"></div>
+        <div class="dash-split-row">
+          <div class="card dash-narrow">
+            <h3>Cache hit ratio</h3>
+            <div class="value" id="m-cache-pct">—</div>
+            <div class="sub">hits ÷ queries</div>
+          </div>
+          <div class="chart-card dash-cluster" id="cluster-wrap" style="display:none">
+            <h2>Cluster</h2>
+            <div id="cluster-root" style="font-size:0.85rem"></div>
+          </div>
+        </div>
+        <div class="metric-row">
+          <div class="card"><h3>Block rate</h3><div class="value" id="m-block-rate">—</div><div class="sub">blocks ÷ queries</div></div>
+          <div class="card"><h3>Total blocks</h3><div class="value" id="m-blocks">—</div><div class="sub">adblock</div></div>
+          <div class="card"><h3>Uptime</h3><div class="value" id="m-uptime">—</div><div class="sub">since start</div></div>
+          <div class="card"><h3>Upstreams</h3><div class="value" id="m-up-health">—</div><div class="sub">healthy / configured</div></div>
+        </div>
+        <div class="metric-row">
+          <div class="card"><h3>Answered</h3><div class="value" id="m-answered">—</div><div class="sub">queries answered</div></div>
+          <div class="card"><h3>Forwarded</h3><div class="value" id="m-forwarded">—</div><div class="sub">upstream forwards</div></div>
+          <div class="card"><h3>A/AAAA samples</h3><div class="value" id="m-perf-total">—</div><div class="sub">perf fast-path count</div></div>
+          <div class="card"><h3>Version</h3><div class="value" id="m-version" style="font-size:1.1rem">—</div><div class="sub">build</div></div>
+        </div>
+        <div class="metric-row">
+          <div class="card"><h3>Local</h3><div class="value" id="m-oc-local">—</div><div class="sub">A/AAAA outcome</div></div>
+          <div class="card"><h3>Cache</h3><div class="value" id="m-oc-cache">—</div><div class="sub">A/AAAA outcome</div></div>
+          <div class="card"><h3>Upstream</h3><div class="value" id="m-oc-up">—</div><div class="sub">A/AAAA outcome</div></div>
+          <div class="card"><h3>None</h3><div class="value" id="m-oc-none">—</div><div class="sub">no answer</div></div>
+        </div>
+        <div class="metric-row" id="fullstats-kpi-row" style="display:none">
+          <div class="card"><h3>Stored domains</h3><div class="value" id="m-fs-dom">—</div><div class="sub">full_stats · total</div></div>
+          <div class="card"><h3>Stored requesters</h3><div class="value" id="m-fs-req">—</div><div class="sub">full_stats · total</div></div>
+          <div class="card"><h3>Domains (session)</h3><div class="value" id="m-fs-dom-s">—</div><div class="sub">since process start</div></div>
+          <div class="card"><h3>Requesters (session)</h3><div class="value" id="m-fs-req-s">—</div><div class="sub">since process start</div></div>
         </div>
         <div class="charts-row">
           <div class="charts-stack">
@@ -505,6 +608,22 @@ const dashboardHTML = `<!DOCTYPE html>
     function esc(s) {
       if (s == null) return '';
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+    function fmtPctRatio(x) {
+      if (x == null || isNaN(x)) return '—';
+      return (Number(x) * 100).toFixed(1) + '%';
+    }
+    function fmtUptimeSec(sec) {
+      if (sec == null || isNaN(sec) || sec < 0) return '—';
+      var s = Math.floor(Number(sec));
+      var d = Math.floor(s / 86400);
+      s -= d * 86400;
+      var h = Math.floor(s / 3600);
+      s -= h * 3600;
+      var m = Math.floor(s / 60);
+      if (d > 0) return d + 'd ' + h + 'h';
+      if (h > 0) return h + 'h ' + m + 'm';
+      return m + 'm';
     }
     let chartReplies, chartLatency;
     let dashboardTimer = null;
@@ -775,6 +894,43 @@ const dashboardHTML = `<!DOCTYPE html>
         const p = j.perf || {};
         document.getElementById('m-avg').textContent = p.avg_total_ms != null ? fmtMs(p.avg_total_ms) : '—';
         document.getElementById('m-up').textContent = p.outcome_upstream != null ? p.outcome_upstream : '—';
+        const sum = j.summary || {};
+        document.getElementById('m-cache-pct').textContent = sum.cache_hit_ratio != null && sum.cache_hit_ratio !== undefined ? fmtPctRatio(sum.cache_hit_ratio) : '—';
+        document.getElementById('m-block-rate').textContent = sum.block_rate != null && sum.block_rate !== undefined ? fmtPctRatio(sum.block_rate) : '—';
+        document.getElementById('m-blocks').textContent = c.total_blocks != null ? c.total_blocks : '—';
+        document.getElementById('m-uptime').textContent = fmtUptimeSec(sum.uptime_seconds);
+        const uh = sum.upstream || {};
+        var upTxt = '—';
+        if (uh.configured_rows > 0) {
+          if (uh.checks_enabled) {
+            upTxt = String(uh.healthy) + ' / ' + String(uh.configured_rows) + ' OK';
+          } else {
+            upTxt = String(uh.active || 0) + ' active';
+          }
+        } else {
+          upTxt = String(uh.active || 0) + ' active';
+        }
+        document.getElementById('m-up-health').textContent = upTxt;
+        document.getElementById('m-answered').textContent = c.total_queries_answered != null ? c.total_queries_answered : '—';
+        document.getElementById('m-forwarded').textContent = c.total_queries_forwarded != null ? c.total_queries_forwarded : '—';
+        document.getElementById('m-perf-total').textContent = p.total != null ? p.total : '—';
+        document.getElementById('m-oc-local').textContent = p.outcome_local != null ? p.outcome_local : '—';
+        document.getElementById('m-oc-cache').textContent = p.outcome_cache != null ? p.outcome_cache : '—';
+        document.getElementById('m-oc-up').textContent = p.outcome_upstream != null ? p.outcome_upstream : '—';
+        document.getElementById('m-oc-none').textContent = p.outcome_none != null ? p.outcome_none : '—';
+        const build = j.build || {};
+        document.getElementById('m-version').textContent = build.version ? esc(build.version) : '—';
+        const fsRow = document.getElementById('fullstats-kpi-row');
+        if (j.fullstats) {
+          fsRow.style.display = '';
+          const fs = j.fullstats;
+          document.getElementById('m-fs-dom').textContent = fs.domains_total != null ? fs.domains_total : '—';
+          document.getElementById('m-fs-req').textContent = fs.requesters_total != null ? fs.requesters_total : '—';
+          document.getElementById('m-fs-dom-s').textContent = fs.domains_session != null ? fs.domains_session : '—';
+          document.getElementById('m-fs-req-s').textContent = fs.requesters_session != null ? fs.requesters_session : '—';
+        } else {
+          fsRow.style.display = 'none';
+        }
         const series = j.series || [];
         const labels = series.map(function(s) { return shortLabel(s.t); });
         const replies = series.map(function(s) { return s.replies || 0; });
