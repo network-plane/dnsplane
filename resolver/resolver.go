@@ -45,8 +45,9 @@ type Store interface {
 	FilterHealthyUpstreamEndpoints(eps []dnsservers.UpstreamEndpoint) []dnsservers.UpstreamEndpoint
 	RecordUpstreamForwardSuccess(healthKey string)
 	// TryFastLocalOrCache: single-lock local-then-cache for non-PTR; returns handled if answered from RAM.
+	// cacheRRs is a full cached answer (e.g. CNAME chain + A/AAAA) when non-nil/empty.
 	// isStale is true when the cache entry is expired but returned for stale-while-revalidate.
-	TryFastLocalOrCache(qname, recordType string, qtypePTR bool) (handled bool, local []dns.RR, cache *dns.RR, isStale bool)
+	TryFastLocalOrCache(qname, recordType string, qtypePTR bool) (handled bool, local []dns.RR, cache *dns.RR, cacheRRs []dns.RR, isStale bool)
 }
 
 // UpstreamClient issues DNS queries to upstream resolvers.
@@ -163,13 +164,24 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 	// Local/cache first without loading settings — one RLock (TryFastLocalOrCache) instead of
 	// GetResolverSettings + TryFastLocalOrCache; matches the old dedicated A/cache hot path.
 	if !isPTR {
-		handled, loc, crr, isStale := r.store.TryFastLocalOrCache(question.Name, recordType, false)
+		handled, loc, crr, crs, isStale := r.store.TryFastLocalOrCache(question.Name, recordType, false)
 		if handled {
 			if len(loc) > 0 {
 				r.processCachedRecords(ctx, question, loc, response)
 				prep := uint64(time.Since(t0))
 				data.RecordResolverAResolve(data.PerfOutcomeLocal, prep, prep, 0, 0, 0, qtypeKey)
 				r.observeQuery(question, "local", "", rrOneLine(loc[0]), t0)
+				return
+			}
+			if len(crs) > 0 {
+				r.store.IncrementCacheHits()
+				r.processCachedUpstreamRRs(question, crs, response)
+				prep := uint64(time.Since(t0))
+				data.RecordResolverAResolve(data.PerfOutcomeCache, prep, prep, 0, 0, 0, qtypeKey)
+				r.observeQuery(question, "cache", "", rrOneLine(crs[0]), t0)
+				if isStale {
+					go r.backgroundRefresh(question)
+				}
 				return
 			}
 			if crr != nil {
@@ -183,6 +195,18 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 				}
 				return
 			}
+		}
+	}
+
+	// Built-in localhost (RFC 6761): never forward to public DNS. Local dnsrecords + cache win above.
+	if !isPTR {
+		if loc := builtinLocalhostRRs(question); len(loc) > 0 {
+			response.Answer = append(response.Answer, loc...)
+			response.Rcode = dns.RcodeSuccess
+			prep := uint64(time.Since(t0))
+			data.RecordResolverAResolve(data.PerfOutcomeLocal, prep, prep, 0, 0, 0, qtypeKey)
+			r.observeQuery(question, "local", "", rrOneLine(loc[0]), t0)
+			return
 		}
 	}
 
@@ -397,7 +421,7 @@ func (r *Resolver) processUpstreamAnswer(ctx context.Context, question dns.Quest
 		}
 		r.log("Query: %s, Reply: %s, Method: DNS server: %s\n", question.Name, record.String(), name)
 	}
-	cacheDNSResponse(r.store, answer.Answer)
+	cacheUpstreamAnswerAfterSuccess(r.store, question, answer.Answer)
 }
 
 func (r *Resolver) processCachedRecords(ctx context.Context, question dns.Question, cachedRecords []dns.RR, response *dns.Msg) {
@@ -422,6 +446,101 @@ func (r *Resolver) processCachedRecords(ctx context.Context, question dns.Questi
 func (r *Resolver) processCacheRecord(question dns.Question, cachedRecord *dns.RR, response *dns.Msg) {
 	response.Answer = append(response.Answer, *cachedRecord)
 	r.log("Query: %s, Reply: %s, Method: dnscache.json\n", question.Name, (*cachedRecord).String())
+}
+
+// processCachedUpstreamRRs appends a full cached upstream answer (e.g. CNAME + A) without authoritative local semantics.
+func (r *Resolver) processCachedUpstreamRRs(question dns.Question, cachedRecords []dns.RR, response *dns.Msg) {
+	if len(cachedRecords) == 0 {
+		return
+	}
+	response.Answer = append(response.Answer, cachedRecords...)
+	r.log("Query: %s, Reply: %d record(s), Method: dnscache.json (RRset)\n", question.Name, len(cachedRecords))
+	for _, rr := range cachedRecords {
+		r.log("  %s\n", rr.String())
+	}
+}
+
+func shouldCacheRRSetForQuestion(q dns.Question, answer []dns.RR) bool {
+	if q.Qtype != dns.TypeA && q.Qtype != dns.TypeAAAA {
+		return false
+	}
+	if len(answer) == 0 {
+		return false
+	}
+	if len(answer) > 1 {
+		return true
+	}
+	_, ok := answer[0].(*dns.CNAME)
+	return ok
+}
+
+func cacheSyntheticRRSetAnswer(store Store, question dns.Question, answer []dns.RR) {
+	if store == nil || len(answer) == 0 {
+		return
+	}
+	settings := store.GetResolverSettings()
+	if !settings.CacheRecords {
+		return
+	}
+	minTTL := uint32(settings.MinCacheTTLSeconds)
+	if settings.MinCacheTTLSeconds == 0 {
+		minTTL = 600
+	}
+	var ttl uint32
+	for _, rr := range answer {
+		t := rr.Header().Ttl
+		if ttl == 0 || t < ttl {
+			ttl = t
+		}
+	}
+	if ttl == 0 {
+		ttl = minTTL
+	}
+	if minTTL > 0 && ttl < minTTL {
+		ttl = minTTL
+	}
+	rt := dns.TypeToString[question.Qtype]
+	cr := dnsrecordcache.CacheRecord{
+		DNSRecord: dnsrecords.DNSRecord{
+			Name:  question.Name,
+			Type:  rt,
+			Value: data.BuildRRSetCacheValue(answer),
+			TTL:   ttl,
+		},
+		Expiry:    time.Now().Add(time.Duration(ttl) * time.Second),
+		Timestamp: time.Now(),
+		LastQuery: time.Now(),
+	}
+	cache := store.GetCacheRecords()
+	nameKey := dnsrecords.NormalizeRecordNameKey(question.Name)
+	idx := -1
+	for i := range cache {
+		if dnsrecords.NormalizeRecordNameKey(cache[i].DNSRecord.Name) != nameKey {
+			continue
+		}
+		if cache[i].DNSRecord.Type != rt {
+			continue
+		}
+		if strings.HasPrefix(cache[i].DNSRecord.Value, data.RRSetCachePrefix) {
+			idx = i
+			break
+		}
+	}
+	if idx >= 0 {
+		cache[idx].DNSRecord = cr.DNSRecord
+		cache[idx].Expiry = cr.Expiry
+		cache[idx].LastQuery = cr.LastQuery
+	} else {
+		cache = append(cache, cr)
+	}
+	store.UpdateCacheRecords(cache)
+}
+
+func cacheUpstreamAnswerAfterSuccess(store Store, question dns.Question, answer []dns.RR) {
+	cacheDNSResponse(store, answer)
+	if shouldCacheRRSetForQuestion(question, answer) {
+		cacheSyntheticRRSetAnswer(store, question, answer)
+	}
 }
 
 func cacheDNSResponse(store Store, rrs []dns.RR) {
@@ -468,7 +587,7 @@ func (r *Resolver) backgroundRefresh(question dns.Question) {
 	for _, srv := range servers {
 		resp, err := r.upstream.Query(ctx, question, srv)
 		if err == nil && resp != nil && resp.Rcode == dns.RcodeSuccess && len(resp.Answer) > 0 {
-			cacheDNSResponse(r.store, resp.Answer)
+			cacheUpstreamAnswerAfterSuccess(r.store, question, resp.Answer)
 			return
 		}
 	}
@@ -486,6 +605,34 @@ func (r *Resolver) observeQuery(question dns.Question, outcome, upstream, record
 		return
 	}
 	r.queryObserver(question.Name, perfQTypeString(question), outcome, upstream, recordSummary, time.Since(t0))
+}
+
+func isLocalhostQNAME(name string) bool {
+	n := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(name)), ".")
+	return n == "localhost"
+}
+
+// builtinLocalhostRRs returns 127.0.0.1 / ::1 for name localhost when qtype is A/AAAA.
+func builtinLocalhostRRs(q dns.Question) []dns.RR {
+	if !isLocalhostQNAME(q.Name) {
+		return nil
+	}
+	switch q.Qtype {
+	case dns.TypeA:
+		rr, err := dns.NewRR("localhost. 604800 IN A 127.0.0.1")
+		if err != nil {
+			return nil
+		}
+		return []dns.RR{rr}
+	case dns.TypeAAAA:
+		rr, err := dns.NewRR("localhost. 604800 IN AAAA ::1")
+		if err != nil {
+			return nil
+		}
+		return []dns.RR{rr}
+	default:
+		return nil
+	}
 }
 
 func rrOneLine(rr dns.RR) string {
