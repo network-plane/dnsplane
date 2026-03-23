@@ -17,10 +17,11 @@ import (
 const (
 	fullStatsBrowseMaxPerPage = 100
 	fullStatsBrowseDefaultPer = 25
+	fullStatsBrowseMaxQuery   = 256
 )
 
 // fullstatsBrowseHandler returns paginated full_stats (bbolt) or session data for the dashboard.
-// Query: scope=total|session, table=requests|requesters, sort=..., page=1, per_page=25
+// Query: scope=total|session, table=requests|requesters, sort=..., page=1, per_page=25, q=substring (optional)
 func fullstatsBrowseHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -53,6 +54,7 @@ func fullstatsBrowseHandler(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		rows = filterRequestRows(rows, params.Query)
 		sortRequestRows(rows, params.Sort)
 		page, totalPages, slice := paginateSlice(rows, params.Page, params.PerPage)
 		out := make([]fullStatsRequestRowJSON, len(slice))
@@ -60,13 +62,14 @@ func fullstatsBrowseHandler(w http.ResponseWriter, r *http.Request) {
 			domain, rtype := splitDomainType(row.key)
 			out[i] = fullStatsRequestRowJSON{
 				Key: row.key, Domain: domain, RecordType: rtype,
-				Count: row.st.Count,
+				Count:     row.st.Count,
 				FirstSeen: formatRFC3339(row.st.FirstSeen),
 				LastSeen:  formatRFC3339(row.st.LastSeen),
 			}
 		}
 		writeJSON(w, http.StatusOK, fullStatsBrowseResponseJSON{
 			Enabled: true, Scope: params.Scope, Table: params.Table, Sort: params.Sort,
+			Q:    params.Query,
 			Page: page, PerPage: params.PerPage, TotalRows: len(rows), TotalPages: totalPages,
 			Rows: out,
 		})
@@ -76,6 +79,7 @@ func fullstatsBrowseHandler(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		rows = filterRequesterRows(rows, params.Query)
 		sortRequesterRows(rows, params.Sort)
 		page, totalPages, slice := paginateSlice(rows, params.Page, params.PerPage)
 		out := make([]fullStatsRequesterRowJSON, len(slice))
@@ -93,6 +97,7 @@ func fullstatsBrowseHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, fullStatsBrowseResponseJSON{
 			Enabled: true, Scope: params.Scope, Table: params.Table, Sort: params.Sort,
+			Q:    params.Query,
 			Page: page, PerPage: params.PerPage, TotalRows: len(rows), TotalPages: totalPages,
 			Rows: out,
 		})
@@ -112,6 +117,7 @@ type fullStatsBrowseParams struct {
 	Scope   string
 	Table   string
 	Sort    string
+	Query   string
 	Page    int
 	PerPage int
 }
@@ -155,7 +161,11 @@ func parseFullStatsBrowseParams(r *http.Request) (fullStatsBrowseParams, error) 
 		}
 		perPage = n
 	}
-	return fullStatsBrowseParams{Scope: scope, Table: table, Sort: sortKey, Page: page, PerPage: perPage}, nil
+	searchQ := strings.TrimSpace(q.Get("q"))
+	if len(searchQ) > fullStatsBrowseMaxQuery {
+		return fullStatsBrowseParams{}, errInvalid("q must be at most " + strconv.Itoa(fullStatsBrowseMaxQuery) + " characters")
+	}
+	return fullStatsBrowseParams{Scope: scope, Table: table, Sort: sortKey, Query: searchQ, Page: page, PerPage: perPage}, nil
 }
 
 type invalidParamError string
@@ -220,6 +230,48 @@ func collectRequestRows(tracker *fullstats.Tracker, scope string) ([]requestRowS
 		out = append(out, requestRowSortable{key: k, st: &cp})
 	}
 	return out, nil
+}
+
+// filterRequestRows keeps rows whose key, domain, or record type contains q (case-insensitive substring).
+func filterRequestRows(rows []requestRowSortable, needle string) []requestRowSortable {
+	if needle == "" {
+		return rows
+	}
+	n := strings.ToLower(needle)
+	out := make([]requestRowSortable, 0, len(rows))
+	for _, row := range rows {
+		domain, rtype := splitDomainType(row.key)
+		if strings.Contains(strings.ToLower(row.key), n) ||
+			strings.Contains(strings.ToLower(domain), n) ||
+			strings.Contains(strings.ToLower(rtype), n) {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// filterRequesterRows keeps rows whose IP or any counted record type contains q (case-insensitive substring).
+func filterRequesterRows(rows []requesterRowSortable, needle string) []requesterRowSortable {
+	if needle == "" {
+		return rows
+	}
+	n := strings.ToLower(needle)
+	out := make([]requesterRowSortable, 0, len(rows))
+	for _, row := range rows {
+		if strings.Contains(strings.ToLower(row.ip), n) {
+			out = append(out, row)
+			continue
+		}
+		if row.st != nil && row.st.TypeCount != nil {
+			for rk := range row.st.TypeCount {
+				if strings.Contains(strings.ToLower(rk), n) {
+					out = append(out, row)
+					break
+				}
+			}
+		}
+	}
+	return out
 }
 
 func sortRequestRows(rows []requestRowSortable, sortKey string) {
@@ -388,6 +440,7 @@ type fullStatsBrowseResponseJSON struct {
 	Scope      string `json:"scope,omitempty"`
 	Table      string `json:"table,omitempty"`
 	Sort       string `json:"sort,omitempty"`
+	Q          string `json:"q,omitempty"`
 	Page       int    `json:"page,omitempty"`
 	PerPage    int    `json:"per_page,omitempty"`
 	TotalRows  int    `json:"total_rows,omitempty"`
