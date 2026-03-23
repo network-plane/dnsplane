@@ -1256,6 +1256,18 @@ func RegisterCommands() {
 				{Description: "All domains", Command: "statistics domains full"},
 			},
 		}, legacyRunner(handleStatisticsDomains)),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "statistics",
+			Name:        "clear",
+			Summary:     "Clear full_stats data",
+			Description: "Deletes all requester and domain:type statistics in the full_stats database and resets session counters since process start.",
+			Usage:       "statistics clear",
+			Category:    "Statistics",
+			Tags:        []string{"statistics", "full_stats", "clear"},
+			Examples: []tui.Example{
+				{Description: "Clear aggregated statistics", Command: "statistics clear"},
+			},
+		}, legacyRunner(handleStatisticsClear)),
 
 		newLegacyFactory(tui.CommandSpec{
 			Context:     "record",
@@ -2838,6 +2850,29 @@ func handleStatisticsDomains(args []string) {
 	if !showFull && len(all) > statisticsDefaultLimit {
 		fmt.Printf("... and %d more. Use 'statistics domains full' to show all.\n", len(all)-statisticsDefaultLimit)
 	}
+}
+
+func handleStatisticsClear(args []string) {
+	if cliutil.IsHelpRequest(args) {
+		fmt.Println("Usage: statistics clear")
+		fmt.Println("Description: Delete all full_stats data (persistent DB and in-memory session counters for requesters/domains).")
+		printHelpAliasesHint()
+		return
+	}
+	if len(args) > 0 {
+		fmt.Println("statistics clear does not accept arguments.")
+		printHelpAliasesHint()
+		return
+	}
+	if fullStatsTracker == nil {
+		fmt.Println("Full statistics are disabled. Enable full_stats in server config (e.g. server set full_stats true) and restart.")
+		return
+	}
+	if err := fullStatsTracker.Clear(); err != nil {
+		fmt.Printf("Error clearing statistics: %v\n", err)
+		return
+	}
+	fmt.Println("Statistics cleared (full_stats database and session counters).")
 }
 
 func printHelpAliasesHint() {

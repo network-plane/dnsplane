@@ -116,7 +116,7 @@ When you run `dnsplane client` (or connect over TCP), you get an interactive TUI
 - **tools** – **dig** (e.g. `tools dig example.com`, `tools dig example.com @8.8.8.8`).
 - **cache** – `cache list`, **`cache clear`** (empty in-memory cache; **`cache save`** to persist `dnscache.json`), `cache load` / `cache save`, `cache remove …`.
 - **stats** – Query counts, cache hits, block list size, runtime stats.
-- **statistics** – View aggregated data from the full_stats DB: `statistics requesters [full]` (top requesters by IP, or all with `full`), `statistics domains [full]` (top domains, or all). Requires `full_stats: true` in config.
+- **statistics** – View aggregated data from the full_stats DB: `statistics requesters [full]`, `statistics domains [full]`, **`statistics clear`** (wipe DB + session counters). Requires `full_stats: true` in config.
 
 Use `?` or `help` after a command in the TUI for usage.
 
