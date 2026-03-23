@@ -50,10 +50,7 @@ const (
 	tuiClientKillCmd = "dnsplane-kill"
 )
 
-// appVersion is the dnsplane release string. CI/build services should inject with:
-//
-//	go build -ldflags "-X main.appVersion=v1.2.3"
-var appVersion = "1.4.141"
+var appVersion = "1.4.153"
 
 var (
 	appState         = daemon.NewState()
@@ -377,7 +374,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 					asyncLogQueue.Enqueue(func() { dnsLogger.Error(msg, keyValues...) })
 				}
 			},
-			QueryObserver: func(qname, qtype, outcome, upstream, recordSummary string, elapsed time.Duration) {
+			QueryObserver: func(qname, qtype, outcome, upstream, recordSummary string, elapsed time.Duration, clientIP string) {
 				ms := elapsed.Seconds() * 1000
 				data.RecordDashboardResolution(data.DashboardResolution{
 					Qname:      qname,
@@ -387,6 +384,14 @@ func runServer(cmd *cobra.Command, args []string) error {
 					Record:     recordSummary,
 					DurationMs: ms,
 				})
+				if fullStatsTracker != nil {
+					ip := strings.TrimSpace(clientIP)
+					if ip == "" {
+						ip = "unknown"
+					}
+					key := fmt.Sprintf("%s:%s", qname, qtype)
+					_ = fullStatsTracker.RecordRequest(key, ip, qtype, outcome)
+				}
 				if asyncLogQueue == nil || dnsLogger == nil || !appState.DaemonMode() {
 					return
 				}
@@ -437,6 +442,13 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	go runUpstreamHealthProbeLoop(dnsData, dnsLogger)
 	go runCacheWarmLoop(dnsData, port)
+
+	if s := dnsData.GetResolverSettings(); s.PprofEnabled {
+		addr := strings.TrimSpace(s.PprofListen)
+		if addr != "" {
+			startPprof(addr, dnsLogger)
+		}
+	}
 
 	appState.SetReadlineConfig(readline.Config{
 		Prompt:                 "> ",
@@ -499,6 +511,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		dnsLogger.Info("Shutting down")
 	}
 	fmt.Println("Shutting down.")
+	stopPprof()
 	clusterCancel()
 	clusterMgr.Stop()
 	cluster.SetGlobalManager(nil)

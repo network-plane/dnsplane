@@ -140,15 +140,17 @@ type Config struct {
 	// DNSRefuseANY when true returns NOTIMP for ANY queries.
 	DNSRefuseANY bool `json:"dns_refuse_any,omitempty"`
 	// DNSMaxEDNSUDPPayload caps the EDNS UDP payload size on responses (0 = no change). Suggested 1232.
-	DNSMaxEDNSUDPPayload uint16            `json:"dns_max_edns_udp_payload,omitempty"`
-	CacheRecords         bool              `json:"cache_records"`
-	FullStats            bool              `json:"full_stats"`
-	FullStatsDir         string            `json:"full_stats_dir"`
-	ClientSocketPath     string            `json:"server_socket"`
-	ClientTCPAddress     string            `json:"server_tcp"`
-	FileLocations        FileLocations     `json:"file_locations"`
-	DNSRecordSettings    DNSRecordSettings `json:"DNSRecordSettings"`
-	Log                  LogConfig         `json:"log"`
+	DNSMaxEDNSUDPPayload uint16 `json:"dns_max_edns_udp_payload,omitempty"`
+	CacheRecords         bool   `json:"cache_records"`
+	// LocalRecordsEnabled when false skips dnsrecords (and PTR from local zone) for DNS answers — pure forwarder to upstreams. Records file still loaded for API/TUI unless cluster rejects writes. Builtin localhost (RFC 6761) still answers when name is localhost. Default true.
+	LocalRecordsEnabled bool              `json:"local_records_enabled,omitempty"`
+	FullStats           bool              `json:"full_stats"`
+	FullStatsDir        string            `json:"full_stats_dir"`
+	ClientSocketPath    string            `json:"server_socket"`
+	ClientTCPAddress    string            `json:"server_tcp"`
+	FileLocations       FileLocations     `json:"file_locations"`
+	DNSRecordSettings   DNSRecordSettings `json:"DNSRecordSettings"`
+	Log                 LogConfig         `json:"log"`
 	// AdblockListFiles is a list of paths to adblock list files (e.g. hosts-style). Loaded in order at startup and merged into a single block list.
 	AdblockListFiles []string `json:"adblock_list_files,omitempty"`
 	// UpstreamHealthCheckEnabled runs periodic probes and excludes failing upstreams from forwarding until they recover.
@@ -176,6 +178,13 @@ type Config struct {
 	StatsPerfPageEnabled bool `json:"stats_perf_page_enabled,omitempty"`
 	// StatsDashboardEnabled serves GET /stats/dashboard and /stats/dashboard/data. Default true.
 	StatsDashboardEnabled bool `json:"stats_dashboard_enabled,omitempty"`
+	// PprofEnabled when true starts an HTTP server for Go runtime/pprof (CPU, heap, mutex, block, etc.).
+	// Default false. Bind address is PprofListen (default 127.0.0.1:6060 when enabled).
+	PprofEnabled bool `json:"pprof_enabled,omitempty"`
+	// PprofListen is the listen address for the pprof HTTP server (e.g. "127.0.0.1:6060"). Empty uses default when PprofEnabled.
+	PprofListen string `json:"pprof_listen,omitempty"`
+	// PrettyJSON when true writes indented JSON for dnscache, dnsservers, and dnsrecords saves. Default false (compact; less CPU on large cache).
+	PrettyJSON bool `json:"pretty_json,omitempty"`
 	// ClusterEnabled turns on multi-node DNS record sync over TCP (see docs/clustering.md).
 	ClusterEnabled bool `json:"cluster_enabled,omitempty"`
 	// ClusterListenAddr is the TCP listen address for incoming cluster connections (e.g. ":7946"). Empty uses :7946 when enabled.
@@ -385,17 +394,18 @@ func defaultConfig(baseDir string) *Config {
 		logDir = filepath.Join(baseDir, "log")
 	}
 	return &Config{
-		FallbackServerIP:   "1.1.1.1",
-		FallbackServerPort: "53",
-		Timeout:            2,
-		DNSPort:            "53",
-		RESTPort:           "8080",
-		APIEnabled:         false,
-		CacheRecords:       true,
-		FullStats:          false,
-		FullStatsDir:       filepath.Join(baseDir, "fullstats"),
-		ClientSocketPath:   defaultSocketPath(),
-		ClientTCPAddress:   "0.0.0.0:8053",
+		FallbackServerIP:    "1.1.1.1",
+		FallbackServerPort:  "53",
+		Timeout:             2,
+		DNSPort:             "53",
+		RESTPort:            "8080",
+		APIEnabled:          false,
+		CacheRecords:        true,
+		LocalRecordsEnabled: true,
+		FullStats:           false,
+		FullStatsDir:        filepath.Join(baseDir, "fullstats"),
+		ClientSocketPath:    defaultSocketPath(),
+		ClientTCPAddress:    "0.0.0.0:8053",
 		FileLocations: FileLocations{
 			DNSServerFile: filepath.Join(baseDir, "dnsservers.json"),
 			CacheFile:     filepath.Join(baseDir, "dnscache.json"),
@@ -412,6 +422,9 @@ func defaultConfig(baseDir string) *Config {
 		StatsPageEnabled:         true,
 		StatsPerfPageEnabled:     true,
 		StatsDashboardEnabled:    true,
+		PrettyJSON:               false,
+		PprofEnabled:             false,
+		PprofListen:              "",
 		Log: LogConfig{
 			Dir:            logDir,
 			Severity:       "none",
@@ -482,6 +495,9 @@ func (c *Config) applyDefaults(configDir string) {
 	}
 	if c.DNSSlidingWindowSeconds < 0 {
 		c.DNSSlidingWindowSeconds = 0
+	}
+	if c.PprofEnabled && strings.TrimSpace(c.PprofListen) == "" {
+		c.PprofListen = "127.0.0.1:6060"
 	}
 	if c.DOTPort == "" && c.DOTEnabled {
 		c.DOTPort = "853"
@@ -688,6 +704,9 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	if r, ok := raw["cache_records"]; ok {
 		_ = json.Unmarshal(r, &c.CacheRecords)
 	}
+	if r, ok := raw["local_records_enabled"]; ok {
+		_ = json.Unmarshal(r, &c.LocalRecordsEnabled)
+	}
 	if r, ok := raw["full_stats"]; ok {
 		_ = json.Unmarshal(r, &c.FullStats)
 	}
@@ -740,6 +759,19 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	}
 	if r, ok := raw["stats_dashboard_enabled"]; ok {
 		_ = json.Unmarshal(r, &c.StatsDashboardEnabled)
+	}
+	if r, ok := raw["pprof_enabled"]; ok {
+		_ = json.Unmarshal(r, &c.PprofEnabled)
+	}
+	if r, ok := raw["pprof_listen"]; ok {
+		_ = json.Unmarshal(r, &c.PprofListen)
+	}
+	if r, ok := raw["pretty_json"]; ok {
+		_ = json.Unmarshal(r, &c.PrettyJSON)
+	}
+	// Local records for resolution: default on when key absent (legacy configs).
+	if _, ok := raw["local_records_enabled"]; !ok {
+		c.LocalRecordsEnabled = true
 	}
 	// Cache warm: default on when keys absent (legacy configs).
 	if _, ok := raw["cache_warm_enabled"]; !ok {
