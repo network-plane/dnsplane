@@ -242,10 +242,12 @@ func doHHandler(w http.ResponseWriter, r *http.Request, path string) {
 		return
 	}
 	requesterIP := "unknown"
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		requesterIP = host
-	} else {
-		requesterIP = r.RemoteAddr
+	if r.RemoteAddr != "" {
+		if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+			requesterIP = host
+		} else {
+			requesterIP = r.RemoteAddr
+		}
 	}
 	ctx := resolver.ContextWithRequest(context.Background(), req)
 	dep := dnsserve.Dependencies{
