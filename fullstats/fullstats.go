@@ -365,6 +365,33 @@ func (t *Tracker) GetAllRequesters() (map[string]*RequesterStats, error) {
 	return result, err
 }
 
+// Clear removes all persisted request/requester statistics and resets in-memory session counters.
+// In-flight async records may still be written immediately after this returns.
+func (t *Tracker) Clear() error {
+	if t == nil || !t.enabled {
+		return nil
+	}
+	err := t.db.Update(func(tx *bbolt.Tx) error {
+		_ = tx.DeleteBucket([]byte(requestsBucket))
+		_ = tx.DeleteBucket([]byte(requestersBucket))
+		if _, err := tx.CreateBucketIfNotExists([]byte(requestsBucket)); err != nil {
+			return err
+		}
+		if _, err := tx.CreateBucketIfNotExists([]byte(requestersBucket)); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	t.sessionMu.Lock()
+	t.sessionRequests = make(map[string]*RequestStats)
+	t.sessionRequesters = make(map[string]*RequesterStats)
+	t.sessionMu.Unlock()
+	return nil
+}
+
 // Close closes the async channel, waits for the worker to drain, then closes the database.
 func (t *Tracker) Close() error {
 	if t == nil || !t.enabled {
