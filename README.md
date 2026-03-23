@@ -48,6 +48,7 @@ flowchart TD
 | **[docs/host-tuning.md](docs/host-tuning.md)** | Optional **Linux OS / host tuning** for DNS latency: UDP buffer sizes, open-file limits, CPU governor, containers, and how to measure. |
 | **[docs/upstream-health.md](docs/upstream-health.md)** | **Upstream health checks**: periodic probes, marking servers down, config keys, logs, and **curl** examples. |
 | **[docs/clustering.md](docs/clustering.md)** | **Multi-node record sync**: TCP peer protocol, `cluster_*` config keys, auth token, sequences, deployment notes. |
+| **[docs/dnsplane.example.json](docs/dnsplane.example.json)** | **Full example `dnsplane.json`** with every documented key and typical defaults (paths under `/etc/dnsplane/` — adjust for your install). |
 
 **Inbound:** DoT (`dot_*`), DoH (`doh_*`), DNSSEC validation (`dnssec_validate`, …), and optional **DNSSEC signing** for local zones (`dnssec_sign_*`) — see [docs/security-public-dns.md](docs/security-public-dns.md) and [TODO](TODO.md).
 
@@ -184,28 +185,96 @@ Blocked domains are stored in a single in-memory list. You can:
 - **TUI:** `adblock load <filepath|url>` (one file or URL per command; each load is merged), `adblock list` (sources and count per source), `adblock domains` (all blocked domains), `adblock add` / `adblock remove` / `adblock clear`.
 - **Config:** In `dnsplane.json`, set `adblock_list_files` to an array of paths. Those files are loaded in order at startup and merged into the block list (same hosts-style format: `0.0.0.0 domain1.com domain2.com`). Stats show "Adblock list: N domains".
 
-### Main config options (dnsplane.json)
+### Main config options (`dnsplane.json`)
 
-Besides `file_locations` (and `records_source`, `adblock_list_files`), the config supports:
+A **complete key listing with defaults** is in **[docs/dnsplane.example.json](docs/dnsplane.example.json)**. Below is a grouped reference; boolean defaults are noted where they matter.
 
-- **DNS / fallback:** `port`, `apiport`, `fallback_server_ip`, `fallback_server_port`, `timeout`
-- **API:** `api` (bool), `apiport`
-- **Client access:** `server_socket` (UNIX socket), `server_tcp` (TCP address for remote TUI clients)
-- **Behaviour:**
-    - `cache_records` — enable/disable DNS cache.
-    - `min_cache_ttl_seconds` — minimum TTL for cached upstream answers (default 600; set 0 to use upstream TTL as-is).
-    - `stale_while_revalidate` — when true, expired cache entries are served instantly (TTL=1) while upstream is refreshed in the background; eliminates latency spikes on cache expiry.
-    - `cache_warm_enabled` — when true (default), a background self-query runs every `cache_warm_interval_seconds` to keep the process hot and prevent cold-start latency after idle periods.
-    - `cache_warm_interval_seconds` — seconds between keep-alive self-queries (default 10).
-    - `stats_page_enabled` — when true (default), serves HTML **`/stats/page`**; set `false` to disable (JSON **`/stats`** is unchanged).
-    - `stats_perf_page_enabled` — when true (default), serves HTML **`/stats/perf/page`**; set `false` to disable (JSON **`/stats/perf`** and **`POST /stats/perf/reset`** unchanged).
-    - `stats_dashboard_enabled` — when true (default), serves **`/stats/dashboard`** and **`/stats/dashboard/data`**; set `false` to disable both.
-    - `full_stats`, `full_stats_dir` — optional aggregated stats tracking.
-- **Upstream health (optional):** `upstream_health_check_enabled`, `upstream_health_check_failures` (default 3), `upstream_health_check_interval_seconds` (default 30), `upstream_health_check_query_name` (default `google.com.`). When enabled, failed upstreams are skipped for forwarding until they pass a probe or a query succeeds. See [docs/upstream-health.md](docs/upstream-health.md).
-- **DNSRecordSettings:** `auto_build_ptr_from_a`, `forward_ptr_queries`, `add_updates_records`
-- **Log:** `log_dir`, `log_severity`, `log_rotation`, `log_rotation_size_mb`, `log_rotation_time_days`
+**DNS and fallback**
 
-Use `server config` in the TUI to print all current settings, and `server set <setting> <value>` then `server save` to change and persist them. Cache warm can be toggled with `server set cache_warm_enabled true|false` and interval with `server set cache_warm_interval_seconds <n>` (seconds, ≥ 1); in-memory until `server save`.
+| Key | Meaning |
+| --- | --- |
+| `port` | DNS UDP/TCP listen port (default `53`). |
+| `dns_bind` | IP to bind for DNS (empty = all interfaces). |
+| `fallback_server_ip`, `fallback_server_port` | Resolver used when no upstream matches or for recursion-style paths. |
+| `timeout` | Upstream query timeout (seconds). |
+| `fallback_server_transport` | `udp` (default), `tcp`, `dot`, or `doh` for the fallback resolver. |
+| `dns_refuse_any` | If true, answer NOTIMP for `ANY` queries. |
+| `dns_max_edns_udp_payload` | Cap EDNS UDP payload on responses (`0` = unchanged; e.g. `1232`). |
+
+**REST API and client access**
+
+| Key | Meaning |
+| --- | --- |
+| `api` | Enable REST API listener. |
+| `apiport` | API listen port (e.g. `8080`). |
+| `api_bind` | API bind address (empty = all interfaces). |
+| `api_auth_token` | If set, requires `Authorization: Bearer` or `X-API-Token` except `GET/HEAD /health` and `/ready`. |
+| `api_tls_cert`, `api_tls_key` | PEM paths; both set → HTTPS for the API. |
+| `api_rate_limit_rps`, `api_rate_limit_burst` | Per-client HTTP rate limit (`0` RPS = disabled). |
+| `server_socket` | UNIX socket for TUI control. |
+| `server_tcp` | TCP address for remote TUI clients (default `0.0.0.0:8053`). |
+
+**DoT / DoH (inbound)**
+
+| Key | Meaning |
+| --- | --- |
+| `dot_enabled`, `dot_bind`, `dot_port`, `dot_cert_file`, `dot_key_file` | DNS over TLS listener. |
+| `doh_enabled`, `doh_bind`, `doh_port`, `doh_path`, `doh_cert_file`, `doh_key_file` | DNS over HTTPS. |
+
+**Response / abuse limits**
+
+| Key | Meaning |
+| --- | --- |
+| `dns_rate_limit_rps`, `dns_rate_limit_burst` | Per-IP DNS rate limit (`0` = off). |
+| `dns_amplification_max_ratio` | Max packed response vs request ratio (`0` = off). |
+| `dns_response_limit_mode` | `sliding_window` or `rrl`. |
+| `dns_sliding_window_seconds`, `dns_max_responses_per_ip_window` | Sliding-window mode. |
+| `dns_rrl_max_per_bucket`, `dns_rrl_window_seconds`, `dns_rrl_slip` | RRL mode. |
+
+**DNSSEC**
+
+| Key | Meaning |
+| --- | --- |
+| `dnssec_validate`, `dnssec_validate_strict`, `dnssec_trust_anchor_file` | Validation when upstream returns DNSSEC material. |
+| `dnssec_sign_enabled`, `dnssec_sign_zone`, `dnssec_sign_key_file`, `dnssec_sign_private_key_file` | Sign local authoritative answers (see docs). |
+
+**Cache and performance**
+
+| Key | Meaning |
+| --- | --- |
+| `cache_records` | Enable resolver cache. |
+| `min_cache_ttl_seconds` | Floor for cached TTL (default `600`; `0` = use upstream TTL). |
+| `stale_while_revalidate` | Serve stale entries (TTL=1) while refreshing in background. |
+| `cache_warm_enabled`, `cache_warm_interval_seconds` | Keep-alive self-query (defaults: on, every 10s). |
+| `pretty_json` | **Default `false`.** If `true`, writes **indented** JSON for `dnsservers.json`, `dnsrecords.json` (file source), and `dnscache.json`. If `false`, writes **compact** JSON (less CPU and I/O on large caches). Does not affect `dnsplane.json` itself (the main config file is always written indented when saved). |
+
+**Stats, dashboard, and profiling**
+
+| Key | Meaning |
+| --- | --- |
+| `stats_page_enabled` | HTML `/stats/page` (default on). |
+| `stats_perf_page_enabled` | HTML `/stats/perf/page` (default on). |
+| `stats_dashboard_enabled` | `/stats/dashboard` and `/stats/dashboard/data` (default on). |
+| `full_stats`, `full_stats_dir` | Optional aggregated stats DB + TUI `statistics` commands. |
+| `pprof_enabled` | **Default `false`.** If `true`, starts an HTTP server for Go **`net/http/pprof`** (CPU, heap, goroutines, etc.). |
+| `pprof_listen` | Listen address when `pprof_enabled` is true (empty → **`127.0.0.1:6060`** after defaults). **Bind to loopback** in production unless you protect the port. |
+
+**pprof usage:** With `pprof_enabled` true, the process serves `net/http/pprof` on `pprof_listen` (default `127.0.0.1:6060` when enabled). Examples: `go tool pprof http://127.0.0.1:6060/debug/pprof/profile?seconds=30` (CPU), or browse `/debug/pprof/heap`, `/debug/pprof/goroutine`, etc. Changing **`pprof_enabled`** or **`pprof_listen`** requires a **process restart** so the listener starts or stops. **`pretty_json`** applies to the next write of data JSON files; set it with `server set` + `server save` (no restart needed for that flag alone).
+
+**Upstream health** — `upstream_health_check_enabled`, `upstream_health_check_failures`, `upstream_health_check_interval_seconds`, `upstream_health_check_query_name`. See [docs/upstream-health.md](docs/upstream-health.md).
+
+**Clustering** — `cluster_enabled`, `cluster_listen_addr`, `cluster_peers`, `cluster_auth_token`, `cluster_node_id`, `cluster_sync_interval_seconds`, `cluster_advertise_addr`, `cluster_replica_only`, `cluster_reject_local_writes`, `cluster_admin`, `cluster_admin_token`. See [docs/clustering.md](docs/clustering.md).
+
+**Files and records**
+
+- `file_locations` — `dnsservers`, `cache`, `records_source` (`type` + `location` + optional `refresh_interval_seconds` for url/git). See [Records source](#records-source-file-url-or-git) above.
+- `adblock_list_files` — list of hosts-style list paths loaded at startup.
+
+**`DNSRecordSettings`** — `auto_build_ptr_from_a`, `forward_ptr_queries`, `add_updates_records`.
+
+**`log`** — `log_dir`, `log_severity`, `log_rotation`, `log_rotation_size_mb`, `log_rotation_time_days`.
+
+Use **`server config`** in the TUI to print current settings, and **`server set <setting> <value>`** then **`server save`** to persist. Many keys (including `pretty_json`, `pprof_enabled`, `pprof_listen`) are listed in `server set` help; see **[docs/dnsplane.example.json](docs/dnsplane.example.json)** for names that match the JSON file exactly.
 
 ### REST API
 

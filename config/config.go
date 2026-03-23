@@ -181,6 +181,8 @@ type Config struct {
 	PprofEnabled bool `json:"pprof_enabled,omitempty"`
 	// PprofListen is the listen address for the pprof HTTP server (e.g. "127.0.0.1:6060"). Empty uses default when PprofEnabled.
 	PprofListen string `json:"pprof_listen,omitempty"`
+	// PrettyJSON when true writes indented JSON for dnscache, dnsservers, and dnsrecords saves. Default false (compact; less CPU on large cache).
+	PrettyJSON bool `json:"pretty_json,omitempty"`
 	// ClusterEnabled turns on multi-node DNS record sync over TCP (see docs/clustering.md).
 	ClusterEnabled bool `json:"cluster_enabled,omitempty"`
 	// ClusterListenAddr is the TCP listen address for incoming cluster connections (e.g. ":7946"). Empty uses :7946 when enabled.
@@ -417,6 +419,9 @@ func defaultConfig(baseDir string) *Config {
 		StatsPageEnabled:         true,
 		StatsPerfPageEnabled:     true,
 		StatsDashboardEnabled:    true,
+		PrettyJSON:               false,
+		PprofEnabled:             false,
+		PprofListen:              "",
 		Log: LogConfig{
 			Dir:            logDir,
 			Severity:       "none",
@@ -754,6 +759,9 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	}
 	if r, ok := raw["pprof_listen"]; ok {
 		_ = json.Unmarshal(r, &c.PprofListen)
+	}
+	if r, ok := raw["pretty_json"]; ok {
+		_ = json.Unmarshal(r, &c.PrettyJSON)
 	}
 	// Cache warm: default on when keys absent (legacy configs).
 	if _, ok := raw["cache_warm_enabled"]; !ok {

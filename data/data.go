@@ -482,9 +482,10 @@ func LoadFromJSON[T any](filePath string) (T, error) {
 	return result, nil
 }
 
-// SaveToJSON marshals data and saves it to a JSON file (indented for human-edited configs).
+// SaveToJSON marshals data and saves it to a JSON file. Indentation follows config pretty_json (default off = compact).
 func SaveToJSON[T any](filePath string, data T) error {
-	return writeJSONFile(filePath, data, true)
+	pretty := currentConfig().Config.PrettyJSON
+	return writeJSONFile(filePath, data, pretty)
 }
 
 // writeJSONFile writes JSON to path. indent=false avoids SetIndent for large machine-written files (e.g. dnscache.json).
@@ -602,9 +603,8 @@ func SaveCacheRecords(cacheRecords []dnsrecordcache.CacheRecord) error {
 	}
 
 	data := cacheType{Cache: cacheRecords}
-	_ = data
-	paths := currentConfig().Config.FileLocations
-	return writeJSONFile(paths.CacheFile, data, false)
+	cfg := currentConfig().Config
+	return writeJSONFile(cfg.FileLocations.CacheFile, data, cfg.PrettyJSON)
 }
 
 func (d *DNSResolverData) storeRecords(records []dnsrecords.DNSRecord, persist bool) {
