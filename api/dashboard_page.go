@@ -139,7 +139,7 @@ const dashboardHTML = `<!DOCTYPE html>
       --success: #3fb950;
       --warning: #d29922;
       --danger: #f85149;
-      --sidebar-w: 220px;
+      --sidebar-w: 150px;
       --radius: 8px;
     }
     * { box-sizing: border-box; }
@@ -225,10 +225,14 @@ const dashboardHTML = `<!DOCTYPE html>
     @media (max-width: 1100px) {
       .metric-row { grid-template-columns: repeat(2, 1fr); }
     }
+    .metric-row.metric-row--pair {
+      grid-template-columns: repeat(2, 1fr);
+    }
     @media (max-width: 700px) {
       .app { flex-direction: column; }
       aside { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
       .metric-row { grid-template-columns: 1fr; }
+      .metric-row.metric-row--pair { grid-template-columns: 1fr; }
     }
     .card {
       background: var(--surface);
@@ -255,30 +259,13 @@ const dashboardHTML = `<!DOCTYPE html>
       color: var(--muted);
       margin-top: 0.35rem;
     }
-    /* Same 4-column track as .metric-row: cache = 1 col, cluster = 3 cols — aligns gutters with rows above/below */
-    .dash-split-row {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 1rem;
-      margin-bottom: 1.25rem;
-      align-items: stretch;
+    .cluster-panel-inner {
+      font-size: 0.82rem;
+      max-height: 14rem;
+      overflow: auto;
+      margin-top: 0.35rem;
     }
-    .dash-split-cache {
-      min-width: 0;
-    }
-    .dash-cluster {
-      grid-column: span 3;
-      min-width: 0;
-      margin-bottom: 0;
-    }
-    @media (max-width: 1100px) {
-      .dash-split-row { grid-template-columns: repeat(2, 1fr); }
-      .dash-cluster { grid-column: 1 / -1; }
-    }
-    @media (max-width: 700px) {
-      .dash-split-row { grid-template-columns: 1fr; }
-      .dash-cluster { grid-column: auto; }
-    }
+    .cluster-panel-inner table { font-size: 0.78rem; }
     .charts-row {
       display: grid;
       grid-template-columns: 1fr 380px;
@@ -470,6 +457,15 @@ const dashboardHTML = `<!DOCTYPE html>
     .fs-table td.num { font-variant-numeric: tabular-nums; text-align: right; }
     .fs-table th.num { text-align: right; }
     .fs-by-type { font-size: 0.78rem; color: var(--muted); max-width: 28rem; word-break: break-word; }
+    .fs-table th.fs-mw-wrap,
+    .fs-table td.fs-mw-wrap {
+      max-width: 300px;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+      vertical-align: top;
+    }
+    .fs-table th.fs-mw-wrap { white-space: normal; }
+    .fs-table th.fs-mw-wrap .fs-sort-btn { white-space: normal; text-align: left; }
     .fs-pagination {
       display: flex;
       flex-wrap: wrap;
@@ -478,6 +474,49 @@ const dashboardHTML = `<!DOCTYPE html>
       margin-top: 1rem;
       font-size: 0.85rem;
     }
+    .fs-per-page {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin: 0;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .fs-per-page select {
+      font: inherit;
+      padding: 0.25rem 0.5rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+    }
+    .fs-th-sort { padding: 0; vertical-align: bottom; }
+    .fs-sort-btn {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.35rem;
+      width: 100%;
+      margin: 0;
+      padding: 0.55rem 0.75rem;
+      font: inherit;
+      font-size: 0.76rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: var(--muted);
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      text-align: left;
+      white-space: nowrap;
+      border-radius: 4px;
+    }
+    .fs-th-sort.num .fs-sort-btn { justify-content: flex-end; }
+    .fs-sort-btn:hover { color: var(--text); background: var(--surface-hover); }
+    .fs-th-sort.fs-sort-active .fs-sort-btn { color: var(--text); }
+    .fs-sort-ind { font-size: 0.65rem; opacity: 0.9; flex-shrink: 0; }
+    .fs-th-plain { display: block; padding: 0.55rem 0.75rem; }
   </style>
 </head>
 <body>
@@ -504,32 +543,32 @@ const dashboardHTML = `<!DOCTYPE html>
           <div class="card"><h3>Avg resolve (fast path)</h3><div class="value" id="m-avg">—</div><div class="sub">ms · A/AAAA perf</div></div>
           <div class="card"><h3>Upstream wins</h3><div class="value" id="m-up">—</div><div class="sub">outcome_upstream</div></div>
         </div>
-        <div class="dash-split-row">
-          <div class="card dash-split-cache" id="dash-cache-hit-card" style="grid-column:1/-1">
+        <div class="metric-row">
+          <div class="card">
             <h3>Cache hit ratio</h3>
             <div class="value" id="m-cache-pct">—</div>
             <div class="sub">hits ÷ queries</div>
           </div>
-          <div class="chart-card dash-cluster" id="cluster-wrap" style="display:none">
-            <h2>Cluster</h2>
-            <div id="cluster-root" style="font-size:0.85rem"></div>
+          <div class="card" id="cluster-wrap" style="display:none">
+            <h3>Cluster</h3>
+            <div id="cluster-root" class="cluster-panel-inner"></div>
           </div>
-        </div>
-        <div class="metric-row">
           <div class="card"><h3>Block rate</h3><div class="value" id="m-block-rate">—</div><div class="sub">blocks ÷ queries</div></div>
           <div class="card"><h3>Total blocks</h3><div class="value" id="m-blocks">—</div><div class="sub">adblock</div></div>
+        </div>
+        <div class="metric-row">
           <div class="card"><h3>Uptime</h3><div class="value" id="m-uptime">—</div><div class="sub">since start</div></div>
           <div class="card"><h3>Upstreams</h3><div class="value" id="m-up-health">—</div><div class="sub">healthy / configured</div></div>
-        </div>
-        <div class="metric-row">
           <div class="card"><h3>Answered</h3><div class="value" id="m-answered">—</div><div class="sub">queries answered</div></div>
           <div class="card"><h3>Forwarded</h3><div class="value" id="m-forwarded">—</div><div class="sub">upstream forwards</div></div>
-          <div class="card"><h3>A/AAAA samples</h3><div class="value" id="m-perf-total">—</div><div class="sub">perf fast-path count</div></div>
-          <div class="card"><h3>Version</h3><div class="value" id="m-version" style="font-size:1.1rem">—</div><div class="sub">build</div></div>
         </div>
         <div class="metric-row">
+          <div class="card"><h3>A/AAAA samples</h3><div class="value" id="m-perf-total">—</div><div class="sub">perf fast-path count</div></div>
+          <div class="card"><h3>Version</h3><div class="value" id="m-version" style="font-size:1.1rem">—</div><div class="sub">build</div></div>
           <div class="card"><h3>Local</h3><div class="value" id="m-oc-local">—</div><div class="sub">A/AAAA outcome</div></div>
           <div class="card"><h3>Cache</h3><div class="value" id="m-oc-cache">—</div><div class="sub">A/AAAA outcome</div></div>
+        </div>
+        <div class="metric-row metric-row--pair">
           <div class="card"><h3>Upstream</h3><div class="value" id="m-oc-up">—</div><div class="sub">A/AAAA outcome</div></div>
           <div class="card"><h3>None</h3><div class="value" id="m-oc-none">—</div><div class="sub">no answer</div></div>
         </div>
@@ -572,12 +611,6 @@ const dashboardHTML = `<!DOCTYPE html>
             <option value="requests">Domain : type</option>
             <option value="requesters">Requesters (by IP)</option>
           </select></label>
-          <label>Sort <select id="fs-sort" aria-label="Sort"></select></label>
-          <label>Per page <select id="fs-per" aria-label="Rows per page">
-            <option value="25">25</option>
-            <option value="50">50</option>
-            <option value="100">100</option>
-          </select></label>
           <label style="flex:1 1 14rem;min-width:10rem">Search <input type="search" id="fs-q" placeholder="Name, type, key, IP, or source (local, cache, …)" autocomplete="off" spellcheck="false" aria-label="Filter rows"></label>
           <button type="button" class="fs-btn" id="fs-refresh">Refresh</button>
         </div>
@@ -591,6 +624,11 @@ const dashboardHTML = `<!DOCTYPE html>
           <button type="button" class="fs-btn" id="fs-prev">Previous</button>
           <span id="fs-page-info" class="muted-link"></span>
           <button type="button" class="fs-btn" id="fs-next">Next</button>
+          <label class="fs-per-page">Per page <select id="fs-per" aria-label="Rows per page">
+            <option value="25">25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select></label>
           <span id="fs-total" class="muted-link"></span>
         </div>
       </div>
@@ -691,40 +729,84 @@ const dashboardHTML = `<!DOCTYPE html>
       });
     }
     var fsState = { scope: 'total', table: 'requests', sort: 'count_desc', page: 1, perPage: 25, search: '' };
-    function fsSortOptions(table) {
+    function fsValidSorts(table) {
       if (table === 'requesters') {
-        return [
-          ['total_desc', 'Total (high → low)'],
-          ['total_asc', 'Total (low → high)'],
-          ['ip_asc', 'IP (A–Z)'],
-          ['first_seen_desc', 'First seen (newest)'],
-          ['first_seen_asc', 'First seen (oldest)']
-        ];
+        return { total_desc: 1, total_asc: 1, ip_asc: 1, ip_desc: 1, first_seen_desc: 1, first_seen_asc: 1 };
       }
-      return [
-        ['count_desc', 'Count (high → low)'],
-        ['count_asc', 'Count (low → high)'],
-        ['key_asc', 'Key (A–Z)'],
-        ['last_seen_desc', 'Last seen (newest)'],
-        ['last_seen_asc', 'Last seen (oldest)'],
-        ['first_seen_desc', 'First seen (newest)'],
-        ['first_seen_asc', 'First seen (oldest)']
-      ];
+      return { count_desc: 1, count_asc: 1, key_asc: 1, key_desc: 1, type_asc: 1, type_desc: 1, last_seen_desc: 1, last_seen_asc: 1, first_seen_desc: 1, first_seen_asc: 1 };
     }
-    function fsSyncSortSelect() {
-      var sel = document.getElementById('fs-sort');
-      var opts = fsSortOptions(fsState.table);
-      var allowed = {};
-      for (var i = 0; i < opts.length; i++) allowed[opts[i][0]] = true;
-      if (!allowed[fsState.sort]) fsState.sort = opts[0][0];
-      sel.innerHTML = '';
-      for (var j = 0; j < opts.length; j++) {
-        var o = document.createElement('option');
-        o.value = opts[j][0];
-        o.textContent = opts[j][1];
-        if (opts[j][0] === fsState.sort) o.selected = true;
-        sel.appendChild(o);
+    function fsEnsureValidSort() {
+      var allowed = fsValidSorts(fsState.table);
+      if (!allowed[fsState.sort]) fsState.sort = fsState.table === 'requesters' ? 'total_desc' : 'count_desc';
+    }
+    function fsColSortDim(table, col) {
+      if (table === 'requesters') {
+        if (col === 'ip') return { desc: 'ip_desc', asc: 'ip_asc' };
+        if (col === 'total') return { desc: 'total_desc', asc: 'total_asc' };
+        if (col === 'first_seen') return { desc: 'first_seen_desc', asc: 'first_seen_asc' };
+        return null;
       }
+      if (table === 'requests') {
+        if (col === 'domain' || col === 'key') return { desc: 'key_desc', asc: 'key_asc' };
+        if (col === 'type') return { desc: 'type_desc', asc: 'type_asc' };
+        if (col === 'count') return { desc: 'count_desc', asc: 'count_asc' };
+        if (col === 'first_seen') return { desc: 'first_seen_desc', asc: 'first_seen_asc' };
+        if (col === 'last_seen') return { desc: 'last_seen_desc', asc: 'last_seen_asc' };
+        return null;
+      }
+      return null;
+    }
+    function fsSortInd(sort, dim) {
+      if (!dim) return '';
+      if (sort === dim.desc) return '▼';
+      if (sort === dim.asc) return '▲';
+      return '';
+    }
+    function fsThPlain(label, numClass) {
+      var c = numClass ? ' class="num"' : '';
+      return '<th scope="col"' + c + '><span class="fs-th-plain">' + esc(label) + '</span></th>';
+    }
+    function fsThSortable(label, col, table, sort, numClass) {
+      var dim = fsColSortDim(table, col);
+      if (!dim) return fsThPlain(label, numClass);
+      var ind = fsSortInd(sort, dim);
+      var active = ind ? ' fs-sort-active' : '';
+      var wrap = (table === 'requests' && (col === 'domain' || col === 'key')) ? ' fs-mw-wrap' : '';
+      var cls = 'fs-th-sort' + active + (numClass ? ' num' : '') + wrap;
+      return '<th scope="col" class="' + cls + '"><button type="button" class="fs-sort-btn" data-fs-col="' + esc(col) + '">' + esc(label) + ' <span class="fs-sort-ind" aria-hidden="true">' + esc(ind) + '</span></button></th>';
+    }
+    function fsBuildTheadRequesters(sort) {
+      return '<tr>' +
+        fsThSortable('IP', 'ip', 'requesters', sort, false) +
+        fsThSortable('Total', 'total', 'requesters', sort, true) +
+        fsThSortable('First seen', 'first_seen', 'requesters', sort, false) +
+        fsThPlain('By record type', false) +
+        fsThPlain('Reply from', false) +
+        '</tr>';
+    }
+    function fsBuildTheadRequests(sort) {
+      return '<tr>' +
+        fsThSortable('Domain', 'domain', 'requests', sort, false) +
+        fsThSortable('Type', 'type', 'requests', sort, false) +
+        fsThSortable('Count', 'count', 'requests', sort, true) +
+        fsThPlain('Reply from', false) +
+        fsThSortable('First seen', 'first_seen', 'requests', sort, false) +
+        fsThSortable('Last seen', 'last_seen', 'requests', sort, false) +
+        fsThSortable('Key', 'key', 'requests', sort, false) +
+        '</tr>';
+    }
+    function fsBuildThead(table, sort) {
+      return table === 'requesters' ? fsBuildTheadRequesters(sort) : fsBuildTheadRequests(sort);
+    }
+    function fsToggleSort(col) {
+      var dim = fsColSortDim(fsState.table, col);
+      if (!dim) return;
+      var cur = fsState.sort;
+      if (cur === dim.desc) fsState.sort = dim.asc;
+      else if (cur === dim.asc) fsState.sort = dim.desc;
+      else fsState.sort = dim.desc;
+      fsState.page = 1;
+      loadFullStats();
     }
     function fsBuildQuery() {
       var p = new URLSearchParams();
@@ -745,7 +827,6 @@ const dashboardHTML = `<!DOCTYPE html>
     function fsReadControls() {
       fsState.scope = document.getElementById('fs-scope').value;
       fsState.table = document.getElementById('fs-table').value;
-      fsState.sort = document.getElementById('fs-sort').value;
       fsState.perPage = parseInt(document.getElementById('fs-per').value, 10) || 25;
       fsState.search = (document.getElementById('fs-q').value || '').trim();
     }
@@ -782,12 +863,11 @@ const dashboardHTML = `<!DOCTYPE html>
           fsState.search = j.q;
           document.getElementById('fs-q').value = j.q;
         }
-        fsSyncSortSelect();
-        document.getElementById('fs-sort').value = j.sort;
+        fsEnsureValidSort();
         var thead = document.getElementById('fs-thead');
         var tbody = document.getElementById('fs-tbody');
+        thead.innerHTML = fsBuildThead(j.table, fsState.sort);
         if (j.table === 'requesters') {
-          thead.innerHTML = '<tr><th>IP</th><th class="num">Total</th><th>First seen</th><th>By record type</th><th>Reply from</th></tr>';
           var rows = j.rows || [];
           var h = '';
           for (var i = 0; i < rows.length; i++) {
@@ -801,16 +881,15 @@ const dashboardHTML = `<!DOCTYPE html>
           if (!rows.length) h = '<tr><td colspan="5" style="color:var(--muted)">No requester rows for this scope.</td></tr>';
           tbody.innerHTML = h;
         } else {
-          thead.innerHTML = '<tr><th>Domain</th><th>Type</th><th class="num">Count</th><th>Reply from</th><th>First seen</th><th>Last seen</th><th>Key</th></tr>';
           var rows2 = j.rows || [];
           var h2 = '';
           for (var k = 0; k < rows2.length; k++) {
             var r2 = rows2[k];
-            h2 += '<tr><td>' + esc(r2.domain) + '</td><td>' + esc(r2.record_type) + '</td>';
+            h2 += '<tr><td class="fs-mw-wrap">' + esc(r2.domain) + '</td><td>' + esc(r2.record_type) + '</td>';
             h2 += '<td class="num">' + esc(String(r2.count)) + '</td>';
             h2 += '<td class="fs-by-type">' + esc(fsFormatByType(r2.source_count)) + '</td>';
             h2 += '<td>' + esc(r2.first_seen || '—') + '</td><td>' + esc(r2.last_seen || '—') + '</td>';
-            h2 += '<td style="font-family:ui-monospace,monospace;font-size:0.78rem">' + esc(r2.key) + '</td></tr>';
+            h2 += '<td class="fs-mw-wrap" style="font-family:ui-monospace,monospace;font-size:0.78rem">' + esc(r2.key) + '</td></tr>';
           }
           if (!rows2.length) h2 = '<tr><td colspan="7" style="color:var(--muted)">No domain:type rows for this scope.</td></tr>';
           tbody.innerHTML = h2;
@@ -827,10 +906,14 @@ const dashboardHTML = `<!DOCTYPE html>
       }
     }
     function wireFullStats() {
-      fsSyncSortSelect();
+      fsEnsureValidSort();
       document.getElementById('fs-scope').addEventListener('change', function() { fsReadControls(); fsState.page = 1; loadFullStats(); });
-      document.getElementById('fs-table').addEventListener('change', function() { fsReadControls(); fsState.page = 1; fsSyncSortSelect(); fsState.sort = document.getElementById('fs-sort').value; loadFullStats(); });
-      document.getElementById('fs-sort').addEventListener('change', function() { fsReadControls(); fsState.page = 1; loadFullStats(); });
+      document.getElementById('fs-table').addEventListener('change', function() {
+        fsReadControls();
+        fsState.page = 1;
+        fsState.sort = fsState.table === 'requesters' ? 'total_desc' : 'count_desc';
+        loadFullStats();
+      });
       document.getElementById('fs-per').addEventListener('change', function() { fsReadControls(); fsState.page = 1; loadFullStats(); });
       document.getElementById('fs-refresh').addEventListener('click', function() { fsReadControls(); loadFullStats(); });
       document.getElementById('fs-q').addEventListener('keydown', function(e) {
@@ -838,6 +921,14 @@ const dashboardHTML = `<!DOCTYPE html>
       });
       document.getElementById('fs-prev').addEventListener('click', function() { fsReadControls(); if (fsState.page > 1) { fsState.page--; loadFullStats(); } });
       document.getElementById('fs-next').addEventListener('click', function() { fsReadControls(); fsState.page++; loadFullStats(); });
+      document.getElementById('fs-thead').addEventListener('click', function(e) {
+        var btn = e.target.closest('.fs-sort-btn');
+        if (!btn || !document.getElementById('fs-thead').contains(btn)) return;
+        var col = btn.getAttribute('data-fs-col');
+        if (!col) return;
+        fsReadControls();
+        fsToggleSort(col);
+      });
     }
     function showDashboard(anchor) {
       if (anchor) setActiveNav(anchor);
@@ -857,7 +948,7 @@ const dashboardHTML = `<!DOCTYPE html>
       iframe.classList.add('hidden');
       iframe.src = 'about:blank';
       fsReadControls();
-      fsSyncSortSelect();
+      fsEnsureValidSort();
       loadFullStats();
     }
     function showEmbed(url, anchor) {
@@ -966,10 +1057,8 @@ const dashboardHTML = `<!DOCTYPE html>
         document.getElementById('log-root').innerHTML = h;
         const cw = document.getElementById('cluster-wrap');
         const cr = document.getElementById('cluster-root');
-        const dashCache = document.getElementById('dash-cache-hit-card');
         if (j.cluster) {
           cw.style.display = '';
-          if (dashCache) dashCache.style.gridColumn = '';
           const cl = j.cluster;
           if (!cl.enabled) {
             cr.innerHTML = '<span class="muted-link">Cluster is disabled.</span>';
@@ -995,7 +1084,6 @@ const dashboardHTML = `<!DOCTYPE html>
           }
         } else {
           cw.style.display = 'none';
-          if (dashCache) dashCache.style.gridColumn = '1 / -1';
         }
       } catch (e) {
         document.getElementById('err').textContent = 'Failed to load: ' + e.message;

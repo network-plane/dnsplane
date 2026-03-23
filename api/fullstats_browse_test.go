@@ -59,6 +59,16 @@ func TestParseFullStatsBrowseParams_TableQuery(t *testing.T) {
 	if p.Table != "requests" || p.Sort != "key_asc" {
 		t.Fatalf("%+v", p)
 	}
+	u2, _ := url.Parse("/stats/dashboard/fullstats/data")
+	u2.RawQuery = url.Values{"table": {"requests"}, "sort": {"type_desc"}}.Encode()
+	req2 := httptest.NewRequest(http.MethodGet, u2.String(), nil)
+	p2, err := parseFullStatsBrowseParams(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p2.Sort != "type_desc" {
+		t.Fatalf("type_desc: %+v", p2)
+	}
 }
 
 func TestPaginateSlice(t *testing.T) {

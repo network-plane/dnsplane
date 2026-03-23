@@ -412,6 +412,7 @@ func (t *Tracker) GetAllRequesters() (map[string]*RequesterStats, error) {
 
 // Clear removes all persisted request/requester statistics and resets in-memory session counters.
 // In-flight async records may still be written immediately after this returns.
+// Call Sync afterward if you want an explicit fsync (e.g. statistics save in the TUI).
 func (t *Tracker) Clear() error {
 	if t == nil || !t.enabled {
 		return nil
@@ -435,6 +436,15 @@ func (t *Tracker) Clear() error {
 	t.sessionRequesters = make(map[string]*RequesterStats)
 	t.sessionMu.Unlock()
 	return nil
+}
+
+// Sync flushes the full_stats database file to stable storage (fsync). Run after statistics clear
+// if you want the cleared state committed to disk the same way as cache save after cache clear.
+func (t *Tracker) Sync() error {
+	if t == nil || !t.enabled {
+		return nil
+	}
+	return t.db.Sync()
 }
 
 // Close closes the async channel, waits for the worker to drain, then closes the database.
