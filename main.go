@@ -438,6 +438,13 @@ func runServer(cmd *cobra.Command, args []string) error {
 	go runUpstreamHealthProbeLoop(dnsData, dnsLogger)
 	go runCacheWarmLoop(dnsData, port)
 
+	if s := dnsData.GetResolverSettings(); s.PprofEnabled {
+		addr := strings.TrimSpace(s.PprofListen)
+		if addr != "" {
+			startPprof(addr, dnsLogger)
+		}
+	}
+
 	appState.SetReadlineConfig(readline.Config{
 		Prompt:                 "> ",
 		HistoryFile:            "/tmp/dnsplane.history",
@@ -499,6 +506,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 		dnsLogger.Info("Shutting down")
 	}
 	fmt.Println("Shutting down.")
+	stopPprof()
 	clusterCancel()
 	clusterMgr.Stop()
 	cluster.SetGlobalManager(nil)

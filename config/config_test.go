@@ -48,3 +48,11 @@ func TestUnmarshalJSON_CacheWarmLegacyDefaults(t *testing.T) {
 		t.Fatalf("cache_warm_interval_seconds absent: want 10, got %d", c.CacheWarmIntervalSeconds)
 	}
 }
+
+func TestApplyDefaults_PprofListenWhenEnabled(t *testing.T) {
+	c := &Config{PprofEnabled: true, PprofListen: ""}
+	c.applyDefaults(t.TempDir())
+	if c.PprofListen != "127.0.0.1:6060" {
+		t.Fatalf("PprofListen = %q, want 127.0.0.1:6060", c.PprofListen)
+	}
+}

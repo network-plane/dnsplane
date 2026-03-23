@@ -1930,6 +1930,8 @@ func printAllServerConfig(settings config.Config) {
 	fmt.Printf("    cache_records:  %v\n", settings.CacheRecords)
 	fmt.Printf("    cache_warm_enabled:          %v\n", settings.CacheWarmEnabled)
 	fmt.Printf("    cache_warm_interval_seconds: %d\n", settings.CacheWarmIntervalSeconds)
+	fmt.Printf("    pprof_enabled:               %v\n", settings.PprofEnabled)
+	fmt.Printf("    pprof_listen:                %s\n", settings.PprofListen)
 	fmt.Printf("    stats_page_enabled:       %v\n", settings.StatsPageEnabled)
 	fmt.Printf("    stats_perf_page_enabled:  %v\n", settings.StatsPerfPageEnabled)
 	fmt.Printf("    stats_dashboard_enabled:  %v\n", settings.StatsDashboardEnabled)
