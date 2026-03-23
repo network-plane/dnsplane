@@ -176,6 +176,11 @@ type Config struct {
 	StatsPerfPageEnabled bool `json:"stats_perf_page_enabled,omitempty"`
 	// StatsDashboardEnabled serves GET /stats/dashboard and /stats/dashboard/data. Default true.
 	StatsDashboardEnabled bool `json:"stats_dashboard_enabled,omitempty"`
+	// PprofEnabled when true starts an HTTP server for Go runtime/pprof (CPU, heap, mutex, block, etc.).
+	// Default false. Bind address is PprofListen (default 127.0.0.1:6060 when enabled).
+	PprofEnabled bool `json:"pprof_enabled,omitempty"`
+	// PprofListen is the listen address for the pprof HTTP server (e.g. "127.0.0.1:6060"). Empty uses default when PprofEnabled.
+	PprofListen string `json:"pprof_listen,omitempty"`
 	// ClusterEnabled turns on multi-node DNS record sync over TCP (see docs/clustering.md).
 	ClusterEnabled bool `json:"cluster_enabled,omitempty"`
 	// ClusterListenAddr is the TCP listen address for incoming cluster connections (e.g. ":7946"). Empty uses :7946 when enabled.
@@ -483,6 +488,9 @@ func (c *Config) applyDefaults(configDir string) {
 	if c.DNSSlidingWindowSeconds < 0 {
 		c.DNSSlidingWindowSeconds = 0
 	}
+	if c.PprofEnabled && strings.TrimSpace(c.PprofListen) == "" {
+		c.PprofListen = "127.0.0.1:6060"
+	}
 	if c.DOTPort == "" && c.DOTEnabled {
 		c.DOTPort = "853"
 	}
@@ -740,6 +748,12 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	}
 	if r, ok := raw["stats_dashboard_enabled"]; ok {
 		_ = json.Unmarshal(r, &c.StatsDashboardEnabled)
+	}
+	if r, ok := raw["pprof_enabled"]; ok {
+		_ = json.Unmarshal(r, &c.PprofEnabled)
+	}
+	if r, ok := raw["pprof_listen"]; ok {
+		_ = json.Unmarshal(r, &c.PprofListen)
 	}
 	// Cache warm: default on when keys absent (legacy configs).
 	if _, ok := raw["cache_warm_enabled"]; !ok {

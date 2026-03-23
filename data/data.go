@@ -482,8 +482,13 @@ func LoadFromJSON[T any](filePath string) (T, error) {
 	return result, nil
 }
 
-// SaveToJSON marshals data and saves it to a JSON file
+// SaveToJSON marshals data and saves it to a JSON file (indented for human-edited configs).
 func SaveToJSON[T any](filePath string, data T) error {
+	return writeJSONFile(filePath, data, true)
+}
+
+// writeJSONFile writes JSON to path. indent=false avoids SetIndent for large machine-written files (e.g. dnscache.json).
+func writeJSONFile[T any](filePath string, data T, indent bool) error {
 	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
 		return err
 	}
@@ -494,7 +499,9 @@ func SaveToJSON[T any](filePath string, data T) error {
 	defer func() { _ = file.Close() }()
 
 	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
+	if indent {
+		encoder.SetIndent("", "  ")
+	}
 	return encoder.Encode(data)
 }
 
@@ -597,7 +604,7 @@ func SaveCacheRecords(cacheRecords []dnsrecordcache.CacheRecord) error {
 	data := cacheType{Cache: cacheRecords}
 	_ = data
 	paths := currentConfig().Config.FileLocations
-	return SaveToJSON(paths.CacheFile, data)
+	return writeJSONFile(paths.CacheFile, data, false)
 }
 
 func (d *DNSResolverData) storeRecords(records []dnsrecords.DNSRecord, persist bool) {
