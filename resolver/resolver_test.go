@@ -401,6 +401,75 @@ func (u *cnameChainUpstream) callCount() int {
 	return u.calls
 }
 
+// cnameHTTPSUpstream returns CNAME + HTTPS (SVCB-style) for HTTPS qtype tests.
+type cnameHTTPSUpstream struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (u *cnameHTTPSUpstream) Query(ctx context.Context, question dns.Question, ep dnsservers.UpstreamEndpoint) (*dns.Msg, error) {
+	u.mu.Lock()
+	u.calls++
+	u.mu.Unlock()
+	httpsRR, err := dns.NewRR("target.example.com. 300 IN HTTPS 1 .")
+	if err != nil {
+		return nil, err
+	}
+	msg := &dns.Msg{}
+	msg.SetReply(&dns.Msg{Question: []dns.Question{question}})
+	msg.Rcode = dns.RcodeSuccess
+	msg.Answer = []dns.RR{
+		&dns.CNAME{
+			Hdr:    dns.RR_Header{Name: question.Name, Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 300},
+			Target: "target.example.com.",
+		},
+		httpsRR,
+	}
+	return msg, nil
+}
+
+func (u *cnameHTTPSUpstream) callCount() int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.calls
+}
+
+func TestResolver_CNAMEHTTPS_SecondQueryUsesSynthCache(t *testing.T) {
+	store := &data.DNSResolverData{
+		Settings: config.Config{
+			CacheRecords:       true,
+			MinCacheTTLSeconds: 60,
+		},
+		DNSServers: []dnsservers.DNSServer{{Address: "8.8.8.8", Port: "53", Active: true}},
+		BlockList:  adblock.NewBlockList(),
+	}
+	store.WarmIndexes()
+	up := &cnameHTTPSUpstream{}
+	r := New(Config{Store: store, Upstream: up, UpstreamTimeout: 2 * time.Second})
+	q := dns.Question{Name: "www.example.com.", Qtype: dns.TypeHTTPS, Qclass: dns.ClassINET}
+	ctx := context.Background()
+
+	msg1 := &dns.Msg{}
+	msg1.SetQuestion(q.Name, q.Qtype)
+	r.HandleQuestion(ctx, q, msg1)
+	if up.callCount() != 1 {
+		t.Fatalf("first query: want 1 upstream call, got %d", up.callCount())
+	}
+	if len(msg1.Answer) != 2 {
+		t.Fatalf("want 2 answers, got %d", len(msg1.Answer))
+	}
+
+	msg2 := &dns.Msg{}
+	msg2.SetQuestion(q.Name, q.Qtype)
+	r.HandleQuestion(ctx, q, msg2)
+	if up.callCount() != 1 {
+		t.Fatalf("second query: want 1 upstream call total, got %d", up.callCount())
+	}
+	if len(msg2.Answer) != 2 {
+		t.Fatalf("second response: want 2 answers, got %d", len(msg2.Answer))
+	}
+}
+
 func TestResolver_BuiltinLocalhost_NoUpstream(t *testing.T) {
 	store := &emptyStore{config: config.Config{}}
 	rec := &recordingUpstream{}

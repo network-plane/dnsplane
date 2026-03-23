@@ -78,6 +78,45 @@ func TestTryFastLocalOrCache_RRSetSyntheticHit(t *testing.T) {
 	}
 }
 
+func TestTryFastLocalOrCache_RRSetHTTPSSyntheticHit(t *testing.T) {
+	cname := &dns.CNAME{
+		Hdr:    dns.RR_Header{Name: "www.example.com.", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 300},
+		Target: "target.example.com.",
+	}
+	httpsRR, err := dns.NewRR("target.example.com. 3600 IN HTTPS 1 .")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &DNSResolverData{
+		Settings: config.Config{CacheRecords: true},
+		CacheRecords: []dnsrecordcache.CacheRecord{
+			{
+				DNSRecord: dnsrecords.DNSRecord{
+					Name:  "www.example.com.",
+					Type:  "HTTPS",
+					Value: BuildRRSetCacheValue([]dns.RR{cname, httpsRR}),
+					TTL:   300,
+				},
+				Expiry: time.Now().Add(time.Hour),
+			},
+		},
+	}
+	d.mu.Lock()
+	d.rebuildCacheIndexLocked()
+	d.mu.Unlock()
+
+	ok, loc, crr, crs, _ := d.TryFastLocalOrCache("www.example.com.", "HTTPS", false)
+	if !ok || len(loc) != 0 || crr != nil || len(crs) != 2 {
+		t.Fatalf("want HTTPS RRset cache hit (2 RRs), got ok=%v loc=%d crr=%v crs=%d", ok, len(loc), crr != nil, len(crs))
+	}
+	if _, ok := crs[0].(*dns.CNAME); !ok {
+		t.Fatalf("first RR want CNAME, got %T", crs[0])
+	}
+	if _, ok := crs[1].(*dns.HTTPS); !ok {
+		t.Fatalf("second RR want HTTPS, got %T", crs[1])
+	}
+}
+
 func TestUpstreamHealthTracker_Filter(t *testing.T) {
 	tr := NewUpstreamHealthTracker()
 	cfg := &config.Config{UpstreamHealthCheckEnabled: true}
