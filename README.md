@@ -49,8 +49,9 @@ flowchart TD
 | **[docs/upstream-health.md](docs/upstream-health.md)** | **Upstream health checks**: periodic probes, marking servers down, config keys, logs, and **curl** examples. |
 | **[docs/clustering.md](docs/clustering.md)** | **Multi-node record sync**: TCP peer protocol, `cluster_*` config keys, auth token, sequences, deployment notes. |
 | **[docs/dnsplane.example.json](docs/dnsplane.example.json)** | **Full example `dnsplane.json`** with every documented key and typical defaults (paths under `/etc/dnsplane/` — adjust for your install). |
+| **[examples/dnsplane-example.json](examples/dnsplane-example.json)** | **Minimal** starter in the repo; includes **inbound DoT** (`dot_*`), **DoH** (`doh_*`), and **DNSSEC** validation/signing keys (all off by default — set `*_enabled` and cert paths to turn on). |
 
-**Inbound:** DoT (`dot_*`), DoH (`doh_*`), DNSSEC validation (`dnssec_validate`, …), and optional **DNSSEC signing** for local zones (`dnssec_sign_*`) — see [docs/security-public-dns.md](docs/security-public-dns.md) and [TODO](TODO.md).
+**Inbound:** DoT (`dot_*`), DoH (`doh_*`), DNSSEC validation (`dnssec_validate`, …), and optional **DNSSEC signing** for local zones (`dnssec_sign_*`) — see [docs/security-public-dns.md](docs/security-public-dns.md) (detail) and the **DoT / DoH** / **DNSSEC** tables under [Main config options](#main-config-options-dnsplanejson) below. [TODO](TODO.md) for roadmap items.
 
 ## Usage/Examples
 
@@ -187,7 +188,7 @@ Blocked domains are stored in a single in-memory list. You can:
 
 ### Main config options (`dnsplane.json`)
 
-A **complete key listing with defaults** is in **[docs/dnsplane.example.json](docs/dnsplane.example.json)**. Below is a grouped reference; boolean defaults are noted where they matter.
+A **complete key listing with defaults** is in **[docs/dnsplane.example.json](docs/dnsplane.example.json)**. The shorter **[examples/dnsplane-example.json](examples/dnsplane-example.json)** includes the same **DoT / DoH / DNSSEC** toggles (disabled) for copy-paste. Below is a grouped reference; boolean defaults are noted where they matter.
 
 **DNS and fallback**
 
