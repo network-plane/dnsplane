@@ -14,6 +14,62 @@ import (
 	"dnsplane/dnsrecords"
 )
 
+// RRSetCachePrefix marks a cache Value that holds multiple RRs (e.g. CNAME chain + A/AAAA) for the query name+type.
+const RRSetCachePrefix = "__RRSET_v1__\n"
+
+// BuildRRSetCacheValue encodes answer RRs for synthetic (qname, A|AAAA) cache storage.
+func BuildRRSetCacheValue(rrs []dns.RR) string {
+	var b strings.Builder
+	b.WriteString(RRSetCachePrefix)
+	for _, rr := range rrs {
+		b.WriteString(rr.String())
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func parseRRSetCacheValue(v string) ([]dns.RR, bool) {
+	if !strings.HasPrefix(v, RRSetCachePrefix) {
+		return nil, false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(v, RRSetCachePrefix))
+	if rest == "" {
+		return nil, false
+	}
+	lines := strings.Split(rest, "\n")
+	var out []dns.RR
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		rr, err := dns.NewRR(line)
+		if err != nil {
+			return nil, false
+		}
+		out = append(out, rr)
+	}
+	return out, len(out) > 0
+}
+
+func clipRRSetTTLs(rrs []dns.RR, remainingSec uint32, stale bool) []dns.RR {
+	out := make([]dns.RR, len(rrs))
+	for i, rr := range rrs {
+		cp := dns.Copy(rr)
+		hdr := cp.Header()
+		if stale {
+			hdr.Ttl = 1
+		} else if remainingSec < hdr.Ttl {
+			hdr.Ttl = remainingSec
+		}
+		if hdr.Ttl == 0 {
+			hdr.Ttl = 1
+		}
+		out[i] = cp
+	}
+	return out
+}
+
 func dnsCacheIdxKey(name, recordType string) string {
 	return dnsrecords.NormalizeRecordNameKey(name) + "\x00" + dnsrecords.NormalizeRecordType(recordType)
 }
@@ -62,6 +118,9 @@ func (d *DNSResolverData) lookupCacheRRLocked(qname, recordType string, now time
 			continue
 		}
 		rec := &d.CacheRecords[i]
+		if strings.HasPrefix(rec.DNSRecord.Value, RRSetCachePrefix) {
+			continue
+		}
 		if now.Before(rec.Expiry) {
 			ttl := uint32(rec.Expiry.Sub(now).Seconds())
 			return dnsRecordToRRForLookup(&rec.DNSRecord, ttl, nil), false
@@ -78,6 +137,9 @@ func (d *DNSResolverData) lookupCacheRRLocked(qname, recordType string, now time
 		if dnsrecords.NormalizeRecordType(rec.DNSRecord.Type) != dnsrecords.NormalizeRecordType(recordType) {
 			continue
 		}
+		if strings.HasPrefix(rec.DNSRecord.Value, RRSetCachePrefix) {
+			continue
+		}
 		if now.Before(rec.Expiry) {
 			ttl := uint32(rec.Expiry.Sub(now).Seconds())
 			return dnsRecordToRRForLookup(&rec.DNSRecord, ttl, nil), false
@@ -88,6 +150,76 @@ func (d *DNSResolverData) lookupCacheRRLocked(qname, recordType string, now time
 	}
 	if bestStale != nil {
 		return dnsRecordToRRForLookup(bestStale, 1, nil), true
+	}
+	return nil, false
+}
+
+// lookupRRSetCacheLocked requires d.mu RLock held. Returns a synthetic multi-RR answer for (qname, A|AAAA).
+func (d *DNSResolverData) lookupRRSetCacheLocked(qname, recordType string, now time.Time, stale bool) ([]dns.RR, bool) {
+	rt := dnsrecords.NormalizeRecordType(recordType)
+	if rt != "A" && rt != "AAAA" {
+		return nil, false
+	}
+	if len(d.CacheRecords) == 0 {
+		return nil, false
+	}
+	k := dnsCacheIdxKey(qname, recordType)
+	var bestStale *dnsrecordcache.CacheRecord
+	for _, i := range d.cacheRecordIdx[k] {
+		if i < 0 || i >= len(d.CacheRecords) {
+			continue
+		}
+		cr := &d.CacheRecords[i]
+		if !strings.HasPrefix(cr.DNSRecord.Value, RRSetCachePrefix) {
+			continue
+		}
+		rrs, ok := parseRRSetCacheValue(cr.DNSRecord.Value)
+		if !ok {
+			continue
+		}
+		if now.Before(cr.Expiry) {
+			ttl := uint32(cr.Expiry.Sub(now).Seconds())
+			if ttl == 0 {
+				ttl = 1
+			}
+			return clipRRSetTTLs(rrs, ttl, false), false
+		}
+		if stale && bestStale == nil {
+			bestStale = cr
+		}
+	}
+	for i := range d.CacheRecords {
+		cr := &d.CacheRecords[i]
+		if dnsrecords.NormalizeRecordNameKey(cr.DNSRecord.Name) != dnsrecords.NormalizeRecordNameKey(qname) {
+			continue
+		}
+		if dnsrecords.NormalizeRecordType(cr.DNSRecord.Type) != rt {
+			continue
+		}
+		if !strings.HasPrefix(cr.DNSRecord.Value, RRSetCachePrefix) {
+			continue
+		}
+		rrs, ok := parseRRSetCacheValue(cr.DNSRecord.Value)
+		if !ok {
+			continue
+		}
+		if now.Before(cr.Expiry) {
+			ttl := uint32(cr.Expiry.Sub(now).Seconds())
+			if ttl == 0 {
+				ttl = 1
+			}
+			return clipRRSetTTLs(rrs, ttl, false), false
+		}
+		if stale && bestStale == nil {
+			bestStale = cr
+		}
+	}
+	if bestStale != nil {
+		rrs, ok := parseRRSetCacheValue(bestStale.DNSRecord.Value)
+		if !ok || len(rrs) == 0 {
+			return nil, false
+		}
+		return clipRRSetTTLs(rrs, 1, true), true
 	}
 	return nil, false
 }
@@ -128,27 +260,32 @@ func (d *DNSResolverData) lookupLocalNonPTRLocked(qname, recordType string) []dn
 // TryFastLocalOrCache does local-then-cache under a single RLock. For PTR queries returns handled=false.
 // When stale-while-revalidate is enabled, expired cache entries are returned (with isStale=true)
 // so the caller can serve them immediately and refresh in the background.
-func (d *DNSResolverData) TryFastLocalOrCache(qname, recordType string, qtypePTR bool) (handled bool, local []dns.RR, cache *dns.RR, isStale bool) {
+// cacheRRs is set when the answer is a synthetic RRset (e.g. CNAME chain + A/AAAA) keyed by (qname, A|AAAA).
+func (d *DNSResolverData) TryFastLocalOrCache(qname, recordType string, qtypePTR bool) (handled bool, local []dns.RR, cache *dns.RR, cacheRRs []dns.RR, isStale bool) {
 	if qtypePTR {
-		return false, nil, nil, false
+		return false, nil, nil, nil, false
 	}
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	if len(d.DNSRecords) > 0 {
 		local = d.lookupLocalNonPTRLocked(qname, recordType)
 		if len(local) > 0 {
-			return true, local, nil, false
+			return true, local, nil, nil, false
 		}
 	}
 	if !d.Settings.CacheRecords || len(d.CacheRecords) == 0 {
-		return false, nil, nil, false
+		return false, nil, nil, nil, false
 	}
 	allowStale := d.Settings.StaleWhileRevalidate
-	cache, isStale = d.lookupCacheRRLocked(qname, recordType, time.Now(), allowStale)
+	now := time.Now()
+	cache, isStale = d.lookupCacheRRLocked(qname, recordType, now, allowStale)
 	if cache != nil {
-		return true, nil, cache, isStale
+		return true, nil, cache, nil, isStale
 	}
-	return false, nil, nil, false
+	if rrset, st := d.lookupRRSetCacheLocked(qname, recordType, now, allowStale); len(rrset) > 0 {
+		return true, nil, nil, rrset, st
+	}
+	return false, nil, nil, nil, false
 }
 
 // LookupLocalRRs returns local RRs for name+type. PTR (and auto-build PTR) uses a full scan.

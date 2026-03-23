@@ -12,9 +12,9 @@ import (
 	"github.com/miekg/dns"
 )
 
-// runCacheWarmLoop sends a lightweight self-query periodically to keep the Go
-// process hot (CPU caches, memory pages, goroutine scheduling). This prevents
-// cold-start latency spikes after idle periods.
+// runCacheWarmLoop sends a periodic self-query (localhost A to 127.0.0.1) to keep the Go
+// process hot (CPU caches, memory pages, goroutine scheduling). localhost is answered
+// in-process (RFC 6761) and does not hit public upstreams — only the UDP receive path runs.
 func runCacheWarmLoop(dnsData *data.DNSResolverData, dnsPort string) {
 	for {
 		cfg := dnsData.GetResolverSettings()
