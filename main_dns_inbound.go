@@ -91,13 +91,6 @@ func handleRequestProto(w dns.ResponseWriter, request *dns.Msg, proto string) {
 	go func() {
 		dnsData := data.GetInstance()
 		dnsData.IncrementTotalQueries()
-		for _, question := range request.Question {
-			if fullStatsTracker != nil {
-				recordType := dns.TypeToString[question.Qtype]
-				key := fmt.Sprintf("%s:%s", question.Name, recordType)
-				_ = fullStatsTracker.RecordRequest(key, requesterIP, recordType)
-			}
-		}
 		if err != nil && asyncLogQueue != nil && dnsLogger != nil {
 			errCopy := err
 			asyncLogQueue.Enqueue(func() { dnsLogger.Error("Error writing response", "error", errCopy) })
@@ -275,12 +268,5 @@ func doHHandler(w http.ResponseWriter, r *http.Request, path string) {
 	go func() {
 		dnsData := data.GetInstance()
 		dnsData.IncrementTotalQueries()
-		for _, question := range req.Question {
-			if fullStatsTracker != nil {
-				recordType := dns.TypeToString[question.Qtype]
-				key := fmt.Sprintf("%s:%s", question.Name, recordType)
-				_ = fullStatsTracker.RecordRequest(key, requesterIP, recordType)
-			}
-		}
 	}()
 }

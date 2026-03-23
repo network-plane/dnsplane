@@ -61,7 +61,8 @@ type QueryLogger func(format string, args ...interface{})
 // QueryObserver receives structured fields after each fast-path resolve (optional; for slog/metrics).
 // outcome is one of: local, cache, upstream, none, blocked. upstream is address:port when outcome is upstream.
 // recordSummary is a short text for the first answer (or "no answer", blocked reply, etc.).
-type QueryObserver func(qname, qtype, outcome, upstream, recordSummary string, elapsed time.Duration)
+// clientIP is from ContextWithClientIP (empty if not set).
+type QueryObserver func(qname, qtype, outcome, upstream, recordSummary string, elapsed time.Duration, clientIP string)
 
 // Config defines the resolver dependencies.
 type Config struct {
@@ -170,7 +171,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 				r.processCachedRecords(ctx, question, loc, response)
 				prep := uint64(time.Since(t0))
 				data.RecordResolverAResolve(data.PerfOutcomeLocal, prep, prep, 0, 0, 0, qtypeKey)
-				r.observeQuery(question, "local", "", rrOneLine(loc[0]), t0)
+				r.observeQuery(ctx, question, "local", "", rrOneLine(loc[0]), t0)
 				return
 			}
 			if len(crs) > 0 {
@@ -178,7 +179,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 				r.processCachedUpstreamRRs(question, crs, response)
 				prep := uint64(time.Since(t0))
 				data.RecordResolverAResolve(data.PerfOutcomeCache, prep, prep, 0, 0, 0, qtypeKey)
-				r.observeQuery(question, "cache", "", rrOneLine(crs[0]), t0)
+				r.observeQuery(ctx, question, "cache", "", rrOneLine(crs[0]), t0)
 				if isStale {
 					go r.backgroundRefresh(question)
 				}
@@ -189,7 +190,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 				r.processCacheRecord(question, crr, response)
 				prep := uint64(time.Since(t0))
 				data.RecordResolverAResolve(data.PerfOutcomeCache, prep, prep, 0, 0, 0, qtypeKey)
-				r.observeQuery(question, "cache", "", rrOneLine(*crr), t0)
+				r.observeQuery(ctx, question, "cache", "", rrOneLine(*crr), t0)
 				if isStale {
 					go r.backgroundRefresh(question)
 				}
@@ -205,7 +206,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 			response.Rcode = dns.RcodeSuccess
 			prep := uint64(time.Since(t0))
 			data.RecordResolverAResolve(data.PerfOutcomeLocal, prep, prep, 0, 0, 0, qtypeKey)
-			r.observeQuery(question, "local", "", rrOneLine(loc[0]), t0)
+			r.observeQuery(ctx, question, "local", "", rrOneLine(loc[0]), t0)
 			return
 		}
 	}
@@ -213,7 +214,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 	if question.Qtype == dns.TypeA || question.Qtype == dns.TypeAAAA {
 		if r.checkBlocked(question) {
 			r.processBlockedDomain(question, response)
-			r.observeQuery(question, "blocked", "", msgAnswerSummary(response), t0)
+			r.observeQuery(ctx, question, "blocked", "", msgAnswerSummary(response), t0)
 			return
 		}
 	}
@@ -318,7 +319,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 					prep = cacheNs
 				}
 				recordPerf(data.PerfOutcomeLocal, uint64(time.Since(t0)), prep, 0, 0)
-				r.observeQuery(question, "local", "", rrOneLine(pr.local[0]), t0)
+				r.observeQuery(ctx, question, "local", "", rrOneLine(pr.local[0]), t0)
 				return
 			}
 		case parKindCache:
@@ -355,7 +356,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 			r.processCacheRecord(question, cacheHit, response)
 			p := prepNs()
 			recordPerf(data.PerfOutcomeCache, uint64(time.Since(t0)), p, maxUpNs, 0)
-			r.observeQuery(question, "cache", "", rrOneLine(*cacheHit), t0)
+			r.observeQuery(ctx, question, "cache", "", rrOneLine(*cacheHit), t0)
 			return
 		}
 		if localDone && cacheDone && cacheHit == nil && firstUp != nil {
@@ -368,14 +369,14 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 				w = maxUpNs - p
 			}
 			recordPerf(data.PerfOutcomeUpstream, uint64(time.Since(t0)), p, maxUpNs, w)
-			r.observeQuery(question, "upstream", firstUp.endpoint.HealthKey(), firstAnswerSummary(firstUp.msg), t0)
+			r.observeQuery(ctx, question, "upstream", firstUp.endpoint.HealthKey(), firstAnswerSummary(firstUp.msg), t0)
 			return
 		}
 		if localDone && cacheDone && cacheHit == nil && upstreamSeen == upstreamTotal && firstUp == nil {
 			cancel()
 			r.log("Query: %s, No response\n", question.Name)
 			recordPerf(data.PerfOutcomeNone, uint64(time.Since(t0)), prepNs(), maxUpNs, 0)
-			r.observeQuery(question, "none", "", "no answer", t0)
+			r.observeQuery(ctx, question, "none", "", "no answer", t0)
 			return
 		}
 	}
@@ -387,7 +388,7 @@ func (r *Resolver) handlePTRQuestion(ctx context.Context, question dns.Question,
 	ptrRecords := r.store.LookupLocalRRs(question.Name, "PTR", settings.DNSRecordSettings.AutoBuildPTRFromA)
 	if len(ptrRecords) > 0 {
 		r.processCachedRecords(ctx, question, ptrRecords, response)
-		r.observeQuery(question, "local", "", rrOneLine(ptrRecords[0]), t0)
+		r.observeQuery(ctx, question, "local", "", rrOneLine(ptrRecords[0]), t0)
 		return
 	}
 	r.log("PTR record not found in dnsrecords.json\n")
@@ -603,11 +604,12 @@ func (r *Resolver) log(format string, args ...interface{}) {
 	r.logger(format, args...)
 }
 
-func (r *Resolver) observeQuery(question dns.Question, outcome, upstream, recordSummary string, t0 time.Time) {
+func (r *Resolver) observeQuery(ctx context.Context, question dns.Question, outcome, upstream, recordSummary string, t0 time.Time) {
 	if r == nil || r.queryObserver == nil {
 		return
 	}
-	r.queryObserver(question.Name, perfQTypeString(question), outcome, upstream, recordSummary, time.Since(t0))
+	ip := ClientIPFromContext(ctx)
+	r.queryObserver(question.Name, perfQTypeString(question), outcome, upstream, recordSummary, time.Since(t0), ip)
 }
 
 func isLocalhostQNAME(name string) bool {

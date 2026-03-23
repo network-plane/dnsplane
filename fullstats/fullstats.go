@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,19 +26,22 @@ type recordReq struct {
 	key         string
 	requesterIP string
 	recordType  string
+	source      string // local, cache, upstream, blocked, none (reply path)
 }
 
 // RequestStats tracks statistics for a specific DNS request (domain + type).
 type RequestStats struct {
-	FirstSeen time.Time `json:"first_seen"`
-	LastSeen  time.Time `json:"last_seen"`
-	Count     uint64    `json:"count"`
+	FirstSeen   time.Time         `json:"first_seen"`
+	LastSeen    time.Time         `json:"last_seen"`
+	Count       uint64            `json:"count"`
+	SourceCount map[string]uint64 `json:"source_count,omitempty"` // Count per reply path (local, cache, upstream, …)
 }
 
 // RequesterStats tracks statistics for a requester (IP address).
 type RequesterStats struct {
-	FirstSeen time.Time         `json:"first_seen"`
-	TypeCount map[string]uint64 `json:"type_count"` // Map of record type -> count
+	FirstSeen   time.Time         `json:"first_seen"`
+	TypeCount   map[string]uint64 `json:"type_count"`             // Map of record type -> count
+	SourceCount map[string]uint64 `json:"source_count,omitempty"` // Count per reply path
 }
 
 // Tracker manages full statistics tracking using bbolt.
@@ -93,7 +97,7 @@ func New(statsDir string, enabled bool) (*Tracker, error) {
 func (t *Tracker) asyncWorker() {
 	defer t.asyncWg.Done()
 	for req := range t.asyncCh {
-		_ = t.recordRequestSync(req.key, req.requesterIP, req.recordType)
+		_ = t.recordRequestSync(req.key, req.requesterIP, req.recordType, req.source)
 	}
 }
 
@@ -112,21 +116,30 @@ func (t *Tracker) initBuckets() error {
 // RecordRequest records a DNS request asynchronously so the DNS reply is not delayed by disk I/O.
 // key should be in format "domain:type" (e.g., "example.com:A")
 // requesterIP is the IP address of the client making the request.
+// source is where the answer came from: local, cache, upstream, blocked, none (see resolver observeQuery).
 // If the async queue is full, the record is dropped (non-blocking).
-func (t *Tracker) RecordRequest(key string, requesterIP string, recordType string) error {
+func (t *Tracker) RecordRequest(key string, requesterIP string, recordType string, source string) error {
 	if t == nil || !t.enabled {
 		return nil
 	}
 	select {
-	case t.asyncCh <- recordReq{key: key, requesterIP: requesterIP, recordType: recordType}:
+	case t.asyncCh <- recordReq{key: key, requesterIP: requesterIP, recordType: recordType, source: normalizeSource(source)}:
 	default:
 		// Queue full; drop to avoid blocking the DNS path
 	}
 	return nil
 }
 
+func normalizeSource(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return "unknown"
+	}
+	return s
+}
+
 // recordRequestSync does the actual bbolt write (used by async worker).
-func (t *Tracker) recordRequestSync(key string, requesterIP string, recordType string) error {
+func (t *Tracker) recordRequestSync(key string, requesterIP string, recordType string, source string) error {
 	if t == nil || !t.enabled {
 		return nil
 	}
@@ -150,6 +163,10 @@ func (t *Tracker) recordRequestSync(key string, requesterIP string, recordType s
 
 		stats.LastSeen = now
 		stats.Count++
+		if stats.SourceCount == nil {
+			stats.SourceCount = make(map[string]uint64)
+		}
+		stats.SourceCount[source]++
 
 		statsData, err := json.Marshal(stats)
 		if err != nil {
@@ -180,6 +197,10 @@ func (t *Tracker) recordRequestSync(key string, requesterIP string, recordType s
 			reqrStats.TypeCount = make(map[string]uint64)
 		}
 		reqrStats.TypeCount[recordType]++
+		if reqrStats.SourceCount == nil {
+			reqrStats.SourceCount = make(map[string]uint64)
+		}
+		reqrStats.SourceCount[source]++
 
 		reqrData, err := json.Marshal(reqrStats)
 		if err != nil {
@@ -202,18 +223,30 @@ func (t *Tracker) recordRequestSync(key string, requesterIP string, recordType s
 	if st, ok := t.sessionRequests[key]; ok {
 		st.LastSeen = now
 		st.Count++
+		if st.SourceCount == nil {
+			st.SourceCount = make(map[string]uint64)
+		}
+		st.SourceCount[source]++
 	} else {
-		t.sessionRequests[key] = &RequestStats{FirstSeen: now, LastSeen: now, Count: 1}
+		t.sessionRequests[key] = &RequestStats{
+			FirstSeen: now, LastSeen: now, Count: 1,
+			SourceCount: map[string]uint64{source: 1},
+		}
 	}
 	if st, ok := t.sessionRequesters[requesterIP]; ok {
 		if st.TypeCount == nil {
 			st.TypeCount = make(map[string]uint64)
 		}
 		st.TypeCount[recordType]++
+		if st.SourceCount == nil {
+			st.SourceCount = make(map[string]uint64)
+		}
+		st.SourceCount[source]++
 	} else {
 		t.sessionRequesters[requesterIP] = &RequesterStats{
-			FirstSeen: now,
-			TypeCount: map[string]uint64{recordType: 1},
+			FirstSeen:   now,
+			TypeCount:   map[string]uint64{recordType: 1},
+			SourceCount: map[string]uint64{source: 1},
 		}
 	}
 	return nil
@@ -228,6 +261,12 @@ func (t *Tracker) getSessionRequestsLocked() map[string]*RequestStats {
 	out := make(map[string]*RequestStats, len(t.sessionRequests))
 	for k, v := range t.sessionRequests {
 		cp := *v
+		if v.SourceCount != nil {
+			cp.SourceCount = make(map[string]uint64, len(v.SourceCount))
+			for sk, sv := range v.SourceCount {
+				cp.SourceCount[sk] = sv
+			}
+		}
 		out[k] = &cp
 	}
 	return out
@@ -246,6 +285,12 @@ func (t *Tracker) getSessionRequestersLocked() map[string]*RequesterStats {
 			cp.TypeCount = make(map[string]uint64)
 			for kk, vv := range v.TypeCount {
 				cp.TypeCount[kk] = vv
+			}
+		}
+		if v.SourceCount != nil {
+			cp.SourceCount = make(map[string]uint64, len(v.SourceCount))
+			for sk, sv := range v.SourceCount {
+				cp.SourceCount[sk] = sv
 			}
 		}
 		out[k] = &cp

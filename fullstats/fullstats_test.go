@@ -44,7 +44,7 @@ func TestTracker_Clear(t *testing.T) {
 	}
 	defer func() { _ = tracker.Close() }()
 
-	if err := tracker.RecordRequest("example.com:A", "192.0.2.1", "A"); err != nil {
+	if err := tracker.RecordRequest("example.com:A", "192.0.2.1", "A", "local"); err != nil {
 		t.Fatalf("RecordRequest: %v", err)
 	}
 	time.Sleep(50 * time.Millisecond)
