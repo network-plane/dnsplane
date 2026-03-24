@@ -1,0 +1,19 @@
+{
+  "dnsservers": [
+    {
+      "address": "1.1.1.1",
+      "port": "53",
+      "active": true,
+      "local_resolver": true,
+      "adblocker": false
+    },
+    {
+      "address": "10.0.0.53",
+      "port": "53",
+      "active": true,
+      "local_resolver": true,
+      "adblocker": false,
+      "domain_whitelist": ["internal.example.com", "corp.other.net"]
+    }
+  ]
+}
