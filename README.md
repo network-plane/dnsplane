@@ -49,7 +49,8 @@ flowchart TD
 | **[docs/upstream-health.md](docs/upstream-health.md)** | **Upstream health checks**: periodic probes, marking servers down, config keys, logs, and **curl** examples. |
 | **[docs/clustering.md](docs/clustering.md)** | **Multi-node record sync**: TCP peer protocol, `cluster_*` config keys, auth token, sequences, deployment notes. |
 | **[docs/dnsplane.example.json](docs/dnsplane.example.json)** | **Full example `dnsplane.json`** with every documented key and typical defaults (paths under `/etc/dnsplane/` — adjust for your install). |
-| **[examples/dnsplane-example.json](examples/dnsplane-example.json)** | **Minimal** starter in the repo; includes **inbound DoT** (`dot_*`), **DoH** (`doh_*`), and **DNSSEC** validation/signing keys (all off by default — set `*_enabled` and cert paths to turn on). |
+| **[examples/dnsplane-example.json](examples/dnsplane-example.json)** | **Minimal** `dnsplane.json` starter; includes **DoT / DoH / DNSSEC** keys (off by default). |
+| **[examples/dnsservers-example.json](examples/dnsservers-example.json)** | Example **`dnsservers.json`**: global upstream + one server with **`domain_whitelist`** (split DNS / internal zones). |
 
 **Inbound:** DoT (`dot_*`), DoH (`doh_*`), DNSSEC validation (`dnssec_validate`, …), and optional **DNSSEC signing** for local zones (`dnssec_sign_*`) — see [docs/security-public-dns.md](docs/security-public-dns.md) (detail) and the **DoT / DoH** / **DNSSEC** tables under [Main config options](#main-config-options-dnsplanejson) below. [TODO](TODO.md) for roadmap items.
 
@@ -130,9 +131,11 @@ https://github.com/user-attachments/assets/f5ca52cb-3874-499c-a594-ba3bf64b3ba9
 | File | Usage |
 | --- | --- |
 | dnsrecords.json | holds dns records |
-| dnsservers.json | holds the dns servers used for queries |
+| dnsservers.json | holds the dns servers used for queries (see [Upstream servers and domain whitelist](#upstream-servers-dnsserversjson-and-domain-whitelist)) |
 | dnscache.json | holds queries already done if their ttl diff is still above 0 |
 | dnsplane.json | the app config |
+
+Starter copies in the repo: **[examples/dnsplane-example.json](examples/dnsplane-example.json)** and **[examples/dnsservers-example.json](examples/dnsservers-example.json)** (point `file_locations.dnsservers` at your real path, e.g. `./dnsservers.json`).
 
 ### Records source (file, URL, or Git)
 
@@ -179,6 +182,41 @@ Example – Git (read-only):
 
 For **url** and **git**, `refresh_interval_seconds` defaults to 60 if omitted.
 
+### Upstream servers (`dnsservers.json`) and domain whitelist
+
+The file is JSON: **`{ "dnsservers": [ ... ] }`**. Each entry has at least `address`, `port`, `active`, `local_resolver`, `adblocker`. Optional: `transport` (`udp` / `tcp` / `dot` / `doh`), `doh_url` for DoH.
+
+**`domain_whitelist`** (optional array of strings): if set, this upstream is used **only** for query names that match an entry (exact name or a subdomain under that suffix). Names that match **any** active whitelisted server are resolved **only** via those servers — **not** via global upstreams (no `domain_whitelist`) and **not** via the configured **`fallback_server_*`** for that query. You can list **multiple** suffixes on one server, or use **multiple** server rows each with its own whitelist and IP.
+
+Example (same structure as **[examples/dnsservers-example.json](examples/dnsservers-example.json)**):
+
+```json
+{
+  "dnsservers": [
+    {
+      "address": "1.1.1.1",
+      "port": "53",
+      "active": true,
+      "local_resolver": true,
+      "adblocker": false
+    },
+    {
+      "address": "10.0.0.53",
+      "port": "53",
+      "active": true,
+      "local_resolver": true,
+      "adblocker": false,
+      "domain_whitelist": ["internal.example.com", "corp.other.net"]
+    }
+  ]
+}
+```
+
+TUI equivalent for the internal row:
+`dns add 10.0.0.53 53 active:true localresolver:true adblocker:false whitelist:internal.example.com,corp.other.net`
+
+See also the [Resolution behavior](#resolution-behavior) bullets on **Domain whitelist** and **Server selection**.
+
 ### Adblock lists
 
 Blocked domains are stored in a single in-memory list. You can:
@@ -188,7 +226,7 @@ Blocked domains are stored in a single in-memory list. You can:
 
 ### Main config options (`dnsplane.json`)
 
-A **complete key listing with defaults** is in **[docs/dnsplane.example.json](docs/dnsplane.example.json)**. The shorter **[examples/dnsplane-example.json](examples/dnsplane-example.json)** includes the same **DoT / DoH / DNSSEC** toggles (disabled) for copy-paste. Below is a grouped reference; boolean defaults are noted where they matter.
+A **complete key listing with defaults** is in **[docs/dnsplane.example.json](docs/dnsplane.example.json)**. The shorter **[examples/dnsplane-example.json](examples/dnsplane-example.json)** includes **DoT / DoH / DNSSEC** toggles (disabled). Upstream layout and **`domain_whitelist`** are in **[examples/dnsservers-example.json](examples/dnsservers-example.json)** and [Upstream servers (`dnsservers.json`)](#upstream-servers-dnsserversjson-and-domain-whitelist). Below is a grouped reference; boolean defaults are noted where they matter.
 
 **DNS and fallback**
 
@@ -269,7 +307,7 @@ A **complete key listing with defaults** is in **[docs/dnsplane.example.json](do
 
 **Files and records**
 
-- `file_locations` — `dnsservers`, `cache`, `records_source` (`type` + `location` + optional `refresh_interval_seconds` for url/git). See [Records source](#records-source-file-url-or-git) above.
+- `file_locations` — `dnsservers`, `cache`, `records_source` (`type` + `location` + optional `refresh_interval_seconds` for url/git). See [Records source](#records-source-file-url-or-git) above. **`dnsservers.json`** format and per-server **`domain_whitelist`**: [Upstream servers (`dnsservers.json`)](#upstream-servers-dnsserversjson-and-domain-whitelist).
 - `adblock_list_files` — list of hosts-style list paths loaded at startup.
 
 **`DNSRecordSettings`** — `auto_build_ptr_from_a`, `forward_ptr_queries`, `add_updates_records`.
@@ -286,7 +324,7 @@ Enable the REST API with `"api": true` in `dnsplane.json` and set `apiport` (e.g
 
 **TLS, bind, and rate limits:** set `api_tls_cert` and `api_tls_key` to PEM file paths to serve the REST API over HTTPS. Use `dns_bind` and `api_bind` (e.g. `"127.0.0.1"`) to listen on a specific address instead of all interfaces. Per-IP limits: `api_rate_limit_rps` / `api_rate_limit_burst` (HTTP 429 when exceeded), `dns_rate_limit_rps` / `dns_rate_limit_burst` (DNS `REFUSED` when exceeded). Amplification hardening: `dns_amplification_max_ratio` caps packed response size vs packed request (0 disables).
 
-**Upstream transport:** in `dnsservers.json`, each server may set `transport` to `udp` (default), `tcp`, `dot` (TLS to port 853 by default), or `doh`. For DoH set `doh_url` to the full `https://…/dns-query` URL (or put a URL in `address` when using `doh`). Optional `fallback_server_transport` applies to the configured fallback resolver.
+**Upstream transport:** in `dnsservers.json`, each server may set `transport` to `udp` (default), `tcp`, `dot` (TLS to port 853 by default), or `doh`. For DoH set `doh_url` to the full `https://…/dns-query` URL (or put a URL in `address` when using `doh`). Optional `fallback_server_transport` applies to the configured fallback resolver. **`domain_whitelist`** (split DNS) is documented in [Upstream servers (`dnsservers.json`)](#upstream-servers-dnsserversjson-and-domain-whitelist).
 
 **Public / internet-facing DNS:** see [docs/security-public-dns.md](docs/security-public-dns.md) for DoT/DoH listeners (`dot_*`, `doh_*`), response limit modes (`dns_response_limit_mode` `sliding_window` vs `rrl`), DNSSEC validation flags, and metrics.
 
