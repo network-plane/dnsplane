@@ -49,7 +49,7 @@ const (
 	tuiClientKillCmd = "dnsplane-kill"
 )
 
-var appVersion = "1.4.153"
+var appVersion = "1.4.169"
 
 var (
 	appState         = daemon.NewState()
