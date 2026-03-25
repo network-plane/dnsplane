@@ -442,6 +442,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	go runUpstreamHealthProbeLoop(dnsData, dnsLogger)
 	go runCacheWarmLoop(dnsData, port)
+	go runCacheCompactLoop(dnsData, dnsLogger)
 
 	if s := dnsData.GetResolverSettings(); s.PprofEnabled {
 		addr := strings.TrimSpace(s.PprofListen)
