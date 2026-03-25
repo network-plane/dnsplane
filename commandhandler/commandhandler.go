@@ -524,6 +524,38 @@ func runCacheRemove() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResu
 	}
 }
 
+func runCacheCompact() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.IsHelpRequest(input.Raw) {
+			msgs := infoMessages(
+				"Usage: cache compact",
+				"Description: Remove expired cache rows from memory (zero expiry or expiry in the past). Rebuilds the cache index and queues a background persist to dnscache.json when anything is removed. Use cache save to flush immediately.",
+				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
+			)
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
+		}
+		if len(input.Raw) > 0 {
+			msgs := append(warnMessages("cache compact does not accept arguments."), infoMessages("Usage: cache compact")...)
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
+		}
+		dnsData := data.GetInstance()
+		now := time.Now()
+		removed := dnsData.CompactExpiredCacheRecords(now)
+		dnsData.NoteCacheCompactRun(removed)
+		remaining := dnsData.CacheRecordCount()
+		if removed > 0 {
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages(
+				fmt.Sprintf("Removed %d expired cache row(s); %d row(s) remain.", removed, remaining),
+				"A background persist to dnscache.json is queued; run cache save to write immediately.",
+			)}
+		}
+		if remaining == 0 {
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("No rows removed; cache is empty.")}
+		}
+		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages(fmt.Sprintf("No expired rows removed; %d row(s) still valid.", remaining))}
+	}
+}
+
 func runCacheClear() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
 		if cliutil.IsHelpRequest(input.Raw) {
@@ -1390,6 +1422,16 @@ func RegisterCommands() {
 			Tags:        []string{"cache", "delete"},
 			Args:        []tui.ArgSpec{{Name: "params", Description: "Name [Type] Value", Repeatable: true}},
 		}, runCacheRemove()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "cache",
+			Name:        "compact",
+			Summary:     "Compact expired cache rows",
+			Description: "Drops expired or zero-expiry rows from the in-memory resolver cache and queues persist; optional cache save flushes dnscache.json immediately.",
+			Usage:       "cache compact",
+			Category:    "Cache",
+			Tags:        []string{"cache", "compact", "expire"},
+			Examples:    []tui.Example{{Description: "Remove expired rows now", Command: "cache compact"}},
+		}, runCacheCompact()),
 		newLegacyFactory(tui.CommandSpec{
 			Context:     "cache",
 			Name:        "clear",
