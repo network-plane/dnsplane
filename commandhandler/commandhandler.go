@@ -649,13 +649,12 @@ func runDNSList() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 	}
 }
 
-// noDNSAddArgs reports whether there are no effective arguments for "dns add" (e.g. user typed "dns add" or "add" only).
-// When in dns context, input.Raw may be [] or ["add"]; treat both as "show usage".
+// noDNSAddArgs means "dns add" with no server args (show usage).
 func noDNSAddArgs(raw []string) bool {
 	return noDNSSubArgs(raw, "add")
 }
 
-// noDNSSubArgs reports whether there are no effective arguments for "dns <sub>" (e.g. "remove" or "update" only).
+// noDNSSubArgs means dns subcommand sub with no further args (show usage).
 func noDNSSubArgs(raw []string, sub string) bool {
 	if len(raw) == 0 {
 		return true
@@ -1720,7 +1719,6 @@ func RegisterCommands() {
 	}
 }
 
-// Server commands rely on function variables.
 func handleServerLoad(args []string) {
 	if cliutil.IsHelpRequest(args) {
 		printServerLoadUsage()

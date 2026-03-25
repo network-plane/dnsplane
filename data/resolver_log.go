@@ -11,10 +11,8 @@ import (
 
 var resolverLog atomic.Pointer[slog.Logger]
 
-// SetResolverLogger sets the slog.Logger used for resolver-side messages from this
-// package (adblock load, record refresh, persist errors, fatal misconfiguration).
-// The server should call this with the dnsserver.log handler before InitializeJSONFiles
-// and GetInstance. Pass nil to clear (falls back to slog.Default()).
+// SetResolverLogger sets the logger for resolver-side messages (adblock, record refresh, persist, fatals).
+// Wire before InitializeJSONFiles/GetInstance when using a dedicated dnsserver log. Nil uses slog.Default().
 func SetResolverLogger(lg *slog.Logger) {
 	resolverLog.Store(lg)
 }

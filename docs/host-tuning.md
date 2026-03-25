@@ -49,8 +49,6 @@ Usually leave `GOMAXPROCS` default. Pinning CPUs rarely helps unless you have me
 3. `GET /stats/perf` (JSON) or open the perf page: compare **`avg_prep_ms`**, **`avg_total_ms`**, and histograms; use **`by_query_type`** to see A vs AAAA vs other types.
 4. Repeat with the same workload after sysctl/governor changes so comparisons are fair.
 
-Optional follow-up (usually unnecessary once indexes + short-circuits are in place): reducing `dns.NewRR` allocations on cache hits via pooling—only worth it if profiling still shows allocation pressure.
-
 ## macOS / Windows
 
-Little to tune for a small DNS server; focus on code and network path.
+This guide targets Linux. On macOS or Windows, sysctl-style UDP buffer tuning differs or is not exposed the same way; typical small deployments rarely need host-level DNS tuning beyond a stable network path.

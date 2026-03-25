@@ -108,11 +108,9 @@ func ServerMatchesQuery(server DNSServer, queryName string) bool {
 	return false
 }
 
-// GetUpstreamEndpointsForQuery returns upstream endpoints to use for the given query name.
-// If any server has a non-empty whitelist and matches the query, only active matching servers are returned (whitelist-only; no fallback to global).
-// If the query matches a whitelist but no matching server is active, returns nil (strict: do not use global servers).
-// Otherwise returns global servers only (servers with no whitelist or empty whitelist).
-// activeOnly filters to Active servers in both cases.
+// GetUpstreamEndpointsForQuery picks endpoints for queryName. Matching whitelisted servers win exclusively
+// (no global fallback). If the name matches a whitelist suffix but no active server covers it, returns nil.
+// Otherwise returns global servers (no whitelist). activeOnly filters inactive rows out in both cases.
 func GetUpstreamEndpointsForQuery(dnsServerData []DNSServer, queryName string, activeOnly bool) []UpstreamEndpoint {
 	var whitelisted []UpstreamEndpoint
 	for _, s := range dnsServerData {

@@ -36,7 +36,7 @@ import (
 const (
 	defaultTCPTerminalAddr = ":8053"
 	defaultClientTCPPort   = "8053"
-	// tuiBannerPrefix is sent by the server on new TUI connections; client must see this or disconnect.
+	// TCP TUI handshake prefix; client rejects connections without it.
 	tuiBannerPrefix  = "dnsplane-tui"
 	tuiBannerBusy    = "dnsplane-tui-busy"
 	tuiClientKillCmd = "dnsplane-kill"
@@ -55,7 +55,7 @@ var (
 	asyncLogQueue    *logger.AsyncLogQueue
 	dnsQueryLimiter  *ratelimit.PerIP
 
-	// defaultSocketPath is the default UNIX socket for server and client (set in init from config).
+	// defaultSocketPath is set in init() from config.DefaultClientSocketPath().
 	defaultSocketPath string
 
 	tcpTUIListenerMu sync.Mutex

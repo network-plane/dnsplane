@@ -18,8 +18,7 @@ var (
 	pprofServer *http.Server
 )
 
-// startPprof starts an HTTP server on addr serving /debug/pprof/* (CPU, heap, mutex, goroutine, etc.).
-// addr must be non-empty (caller should set default e.g. 127.0.0.1:6060 when enabled).
+// startPprof serves net/http/pprof on addr (/debug/pprof/...). addr must be non-empty.
 func startPprof(addr string, logger *slog.Logger) {
 	pprofMu.Lock()
 	defer pprofMu.Unlock()

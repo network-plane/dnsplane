@@ -1,4 +1,5 @@
-// Package data provides functions to load and save data from JSON files
+// Package data loads and persists resolver JSON (servers, records, cache) and runs async cache saves.
+//
 // Copyright 2024-2026 George (earentir) Pantazis (https://earentir.dev)
 // SPDX-License-Identifier: GPL-2.0-only
 package data
@@ -19,22 +20,6 @@ import (
 	"sync/atomic"
 	"time"
 )
-
-//USAGE in FUNCTIONS:
-//Load data
-//dnsData := data.GetInstance()
-//settings := dnsData.GetSettings()
-//Use data here ...
-//
-//Stats
-//dnsData.IncrementCacheHits()
-//dnsData.IncrementTotalQueries()
-//
-//Update data
-//
-//dnsData.
-//newSettings := data.DNSResolverSettings{...}
-//dnsData.UpdateSettings(newSettings)
 
 // AdblockSource records a loaded adblock list source (file path or URL) and how many domains were added from it.
 type AdblockSource struct {
@@ -151,8 +136,6 @@ func updateStoredConfig(cfgPath string, cfg config.Config) {
 	configState.Config = cfg
 }
 
-// For Removal in the future
-
 // CacheRecord holds the data for the cache records
 type CacheRecord struct {
 	DNSRecord dnsrecords.DNSRecord `json:"dns_record"`
@@ -251,9 +234,8 @@ func (d *DNSResolverData) recordsRefreshLoop(interval time.Duration) {
 	}
 }
 
-// cachePersistWorker runs in the background and writes cache to disk when signaled.
-// This keeps the DNS reply path non-blocking; otherwise every cache update (including
-// answers from local records) would block on disk I/O and add ~85ms+ latency.
+// cachePersistWorker writes cache snapshots to disk when signaled. Handlers only update
+// memory and signal; disk I/O stays off the query path.
 func (d *DNSResolverData) cachePersistWorker() {
 	defer d.persistWg.Done()
 	for range d.persistCh {
@@ -685,8 +667,7 @@ func copyCacheRecords(src []dnsrecordcache.CacheRecord) []dnsrecordcache.CacheRe
 	return dst
 }
 
-// InitializeJSONFiles creates the JSON files if they don't exist.
-// When records_source is url or git, records are read-only so we do not create a local file.
+// InitializeJSONFiles creates JSON files if missing. URL/git record sources have no local records file.
 func InitializeJSONFiles() {
 	paths := currentConfig().Config.FileLocations
 	CreateFileIfNotExists(paths.DNSServerFile, `{"dnsservers":[{"address": "1.1.1.1","port": "53","active": false,"local_resolver": false,"adblocker": false }]}`)

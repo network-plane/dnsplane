@@ -10,8 +10,7 @@ import (
 	"dnsplane/data"
 )
 
-// runCacheCompactLoop periodically removes expired rows from dnscache (in-memory + async persist).
-// Interval and enable flag come from live config (server set + save). Default: on, every 30 minutes.
+// runCacheCompactLoop removes expired cache rows on a timer; interval/enable from current config.
 func runCacheCompactLoop(dnsData *data.DNSResolverData, lg *slog.Logger) {
 	for {
 		cfg := dnsData.GetResolverSettings()

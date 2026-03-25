@@ -83,7 +83,7 @@ func (s *State) StoppedChannel() <-chan struct{} {
 	return ch
 }
 
-// SignalStop closes the stop channel (once) and returns the channel that should be awaited for shutdown completion.
+// SignalStop starts DNS shutdown; the returned channel closes when DNS has finished stopping.
 func (s *State) SignalStop() <-chan struct{} {
 	s.stopMu.Lock()
 	if !s.stopClosed {
