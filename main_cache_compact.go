@@ -4,7 +4,6 @@
 package main
 
 import (
-	"log"
 	"log/slog"
 	"time"
 
@@ -59,10 +58,6 @@ func runCacheCompactLoop(dnsData *data.DNSResolverData, lg *slog.Logger) {
 					"remaining", remaining,
 					"interval_seconds", cfg.CacheCompactIntervalSeconds,
 				)
-			}
-		} else {
-			if removed > 0 {
-				log.Printf("cache compact: removed %d rows, %d remaining", removed, remaining)
 			}
 		}
 	}
