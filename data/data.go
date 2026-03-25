@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -125,7 +124,7 @@ var (
 // SetConfig stores the loaded configuration for subsequent data operations.
 func SetConfig(loaded *config.Loaded) {
 	if loaded == nil {
-		log.Fatalf("data: configuration not provided")
+		fatalResolver("data: configuration not provided")
 	}
 	configStateMu.Lock()
 	defer configStateMu.Unlock()
@@ -137,7 +136,7 @@ func currentConfig() config.Loaded {
 	configStateMu.RLock()
 	defer configStateMu.RUnlock()
 	if configState == nil {
-		log.Fatalf("data: configuration not initialised; call data.SetConfig before use")
+		fatalResolver("data: configuration not initialised; call data.SetConfig before use")
 	}
 	return *configState
 }
@@ -167,7 +166,7 @@ func GetInstance() *DNSResolverData {
 	if instance == nil {
 		instance = &DNSResolverData{}
 		if err := instance.Initialize(); err != nil {
-			log.Fatalf("data: failed to initialise resolver data: %v", err)
+			fatalResolver("data: failed to initialise resolver data", "error", err)
 		}
 	}
 	return instance
@@ -211,12 +210,12 @@ func (d *DNSResolverData) Initialize() error {
 		}
 		before := d.BlockList.Count()
 		if err := adblock.LoadFromFile(d.BlockList, path); err != nil {
-			log.Printf("adblock: failed to load %s: %v", path, err)
+			resolverSlog().Warn("adblock: failed to load list file", "path", path, "error", err)
 			continue
 		}
 		after := d.BlockList.Count()
 		d.AdblockSources = append(d.AdblockSources, AdblockSource{Source: path, Count: after - before})
-		log.Printf("adblock: added %d from %s (total %d)", after-before, path, after)
+		resolverSlog().Info("adblock: loaded list file", "added", after-before, "path", path, "total_domains", after)
 	}
 
 	d.Stats = DNSStats{ServerStartTime: time.Now()}
@@ -244,11 +243,11 @@ func (d *DNSResolverData) recordsRefreshLoop(interval time.Duration) {
 	for range ticker.C {
 		records, err := LoadDNSRecords()
 		if err != nil {
-			log.Printf("records refresh: %v", err)
+			resolverSlog().Warn("records refresh failed", "error", err)
 			continue
 		}
 		d.storeRecords(records, false)
-		log.Printf("records refresh: loaded %d records", len(records))
+		resolverSlog().Info("records refresh completed", "records", len(records))
 	}
 }
 
@@ -262,7 +261,7 @@ func (d *DNSResolverData) cachePersistWorker() {
 		snapshot := copyCacheRecords(d.CacheRecords)
 		d.mu.RUnlock()
 		if err := SaveCacheRecords(snapshot); err != nil {
-			fmt.Println("Failed to save cache records:", err)
+			resolverSlog().Error("failed to save cache records", "error", err)
 		}
 	}
 }
@@ -341,7 +340,7 @@ func (d *DNSResolverData) UpdateServers(servers []dnsservers.DNSServer) {
 	d.DNSServers = servers
 	d.mu.Unlock()
 	if err := SaveDNSServers(servers); err != nil {
-		fmt.Println("Failed to save DNS servers:", err)
+		resolverSlog().Error("failed to save DNS servers", "error", err)
 	}
 }
 
@@ -621,7 +620,7 @@ func (d *DNSResolverData) storeRecords(records []dnsrecords.DNSRecord, persist b
 	d.mu.Unlock()
 	if persist {
 		if err := SaveDNSRecords(records); err != nil {
-			fmt.Println("Failed to save DNS records:", err)
+			resolverSlog().Error("failed to save DNS records", "error", err)
 		} else if atomic.LoadInt32(&clusterSkipNotify) == 0 {
 			callClusterRecordsNotify()
 		}
@@ -702,13 +701,13 @@ func CreateFileIfNotExists(filename, content string) {
 	if _, err := os.Stat(filename); err == nil {
 		return
 	} else if !errors.Is(err, os.ErrNotExist) {
-		log.Fatalf("Error checking %s: %s", filename, err)
+		fatalResolver("failed to stat data file before create", "path", filename, "error", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(filename), 0o755); err != nil {
-		log.Fatalf("Error creating directory for %s: %s", filename, err)
+		fatalResolver("failed to create directory for data file", "path", filename, "error", err)
 	}
 	if err := os.WriteFile(filename, []byte(content), 0o644); err != nil {
-		log.Fatalf("Error creating %s: %s", filename, err)
+		fatalResolver("failed to create data file", "path", filename, "error", err)
 	}
 }
 
@@ -717,7 +716,7 @@ func LoadSettings() DNSResolverSettings {
 	info := currentConfig()
 	cfg, err := config.Read(info.Path)
 	if err != nil {
-		log.Fatalf("Failed to read settings: %v", err)
+		fatalResolver("failed to read settings", "error", err)
 	}
 	updateStoredConfig(info.Path, *cfg)
 	return *cfg
@@ -727,7 +726,7 @@ func LoadSettings() DNSResolverSettings {
 func SaveSettings(settings DNSResolverSettings) {
 	info := currentConfig()
 	if err := config.Save(info.Path, settings); err != nil {
-		log.Fatalf("Failed to save settings: %v", err)
+		fatalResolver("failed to save settings", "error", err)
 	}
 	updateStoredConfig(info.Path, settings)
 }
