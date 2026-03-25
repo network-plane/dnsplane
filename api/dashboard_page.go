@@ -40,6 +40,23 @@ func dashboardDataHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	st, healthChecksOn := dnsData.UpstreamHealthStatuses()
+
+	cfgLive := dnsData.GetResolverSettings()
+	nextCompact, lastCompact, lastCompactRemoved := dnsData.CacheCompactSnapshot()
+	cachePayload := map[string]any{
+		"entries_count":            dnsData.CacheRecordCount(),
+		"compact_enabled":          cfgLive.CacheCompactEnabled && cfgLive.CacheRecords,
+		"compact_interval_seconds": cfgLive.CacheCompactIntervalSeconds,
+		"next_compact_rfc3339":     nil,
+		"last_compact_rfc3339":     nil,
+		"last_compact_removed":     lastCompactRemoved,
+	}
+	if !nextCompact.IsZero() {
+		cachePayload["next_compact_rfc3339"] = nextCompact.UTC().Format(time.RFC3339)
+	}
+	if !lastCompact.IsZero() {
+		cachePayload["last_compact_rfc3339"] = lastCompact.UTC().Format(time.RFC3339)
+	}
 	upstreamHealth := map[string]any{
 		"checks_enabled":  healthChecksOn,
 		"active":          activeUpstreams,
@@ -84,9 +101,10 @@ func dashboardDataHandler(w http.ResponseWriter, r *http.Request) {
 			"avg_total_ms":     perf.AResolve.AvgTotalMs,
 			"max_total_ms":     perf.AResolve.MaxTotalMs,
 		},
-		"summary": summary,
-		"series":  data.GetDashboardSeries(),
-		"log":     data.GetDashboardLogNewestFirst(200),
+		"summary":    summary,
+		"cache_info": cachePayload,
+		"series":     data.GetDashboardSeries(),
+		"log":        data.GetDashboardLogNewestFirst(200),
 	}
 	if tot, sess, ok := getFullStatsCounts(); ok {
 		payload["fullstats"] = map[string]any{
@@ -543,6 +561,10 @@ const dashboardHTML = `<!DOCTYPE html>
           <div class="card"><h3>Avg resolve (fast path)</h3><div class="value" id="m-avg">—</div><div class="sub">ms · A/AAAA perf</div></div>
           <div class="card"><h3>Upstream wins</h3><div class="value" id="m-up">—</div><div class="sub">outcome_upstream</div></div>
         </div>
+        <div class="metric-row metric-row--pair">
+          <div class="card"><h3>Cache entries</h3><div class="value" id="m-cache-entries">—</div><div class="sub">rows in dnscache</div></div>
+          <div class="card"><h3>Next cache compact</h3><div class="value" id="m-cache-compact-next" style="font-size:1.05rem">—</div><div class="sub" id="m-cache-compact-sub">—</div></div>
+        </div>
         <div class="metric-row">
           <div class="card">
             <h3>Cache hit ratio</h3>
@@ -657,6 +679,21 @@ const dashboardHTML = `<!DOCTYPE html>
     function fmtPctRatio(x) {
       if (x == null || isNaN(x)) return '—';
       return (Number(x) * 100).toFixed(1) + '%';
+    }
+    function fmtCacheCompactNext(iso, enabled) {
+      if (!enabled) return { main: 'Off', sub: 'cache_compact_enabled or cache_records is off' };
+      if (!iso) return { main: '—', sub: 'scheduler starting…' };
+      var t = new Date(iso).getTime();
+      if (isNaN(t)) return { main: '—', sub: iso };
+      var now = Date.now();
+      var secLeft = Math.floor((t - now) / 1000);
+      var loc = new Date(iso).toLocaleString();
+      if (secLeft < 0) return { main: 'due', sub: loc };
+      if (secLeft < 90) return { main: 'in ' + secLeft + 's', sub: loc };
+      var m = Math.floor(secLeft / 60);
+      if (m < 180) return { main: 'in ' + m + 'm', sub: loc };
+      var h = Math.floor(m / 60);
+      return { main: 'in ' + h + 'h ' + (m % 60) + 'm', sub: loc };
     }
     function fmtUptimeSec(sec) {
       if (sec == null || isNaN(sec) || sec < 0) return '—';
@@ -989,6 +1026,23 @@ const dashboardHTML = `<!DOCTYPE html>
         const c = j.counters || {};
         document.getElementById('m-queries').textContent = c.total_queries != null ? c.total_queries : '—';
         document.getElementById('m-cache').textContent = c.total_cache_hits != null ? c.total_cache_hits : '—';
+        const ci = j.cache_info || {};
+        document.getElementById('m-cache-entries').textContent = ci.entries_count != null ? ci.entries_count : '—';
+        var compactOn = !!ci.compact_enabled;
+        var nx = fmtCacheCompactNext(ci.next_compact_rfc3339, compactOn);
+        document.getElementById('m-cache-compact-next').textContent = nx.main;
+        var subBits = [];
+        if (compactOn && ci.compact_interval_seconds != null) {
+          var iv = Number(ci.compact_interval_seconds);
+          if (iv >= 3600) subBits.push('every ' + (iv / 3600) + 'h');
+          else subBits.push('every ' + Math.round(iv / 60) + 'm');
+        }
+        if (ci.last_compact_rfc3339) {
+          var lr = 'last ' + new Date(ci.last_compact_rfc3339).toLocaleString();
+          if (ci.last_compact_removed != null) lr += ' (−' + ci.last_compact_removed + ')';
+          subBits.push(lr);
+        }
+        document.getElementById('m-cache-compact-sub').textContent = subBits.length ? subBits.join(' · ') : nx.sub;
         const p = j.perf || {};
         document.getElementById('m-avg').textContent = p.avg_total_ms != null ? fmtMs(p.avg_total_ms) : '—';
         document.getElementById('m-up').textContent = p.outcome_upstream != null ? p.outcome_upstream : '—';
