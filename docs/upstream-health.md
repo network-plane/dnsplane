@@ -13,7 +13,7 @@ If **every** upstream would be excluded, dnsplane **falls back** to using the fu
 | `upstream_health_check_interval_seconds` | Seconds between probe **rounds** (minimum effective **5**; default **30** if unset or too low). |
 | `upstream_health_check_query_name` | QNAME for probes (default **`google.com.`** if empty). |
 
-Restart the server after changing these, or reload config if your workflow updates settings in memory.
+After you change these values in `dnsplane.json`, restart the dnsplane process so the new settings take effect.
 
 ## Logs
 

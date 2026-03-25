@@ -1,6 +1,6 @@
 # Operating dnsplane as a public DNS resolver
 
-This document summarizes safety-related configuration for running dnsplane exposed to untrusted clients on the internet.
+Use this checklist when dnsplane answers DNS from the open internet. Combine it with your firewall, monitoring, and incident response practices.
 
 ## Network
 
@@ -13,7 +13,7 @@ This document summarizes safety-related configuration for running dnsplane expos
 - **Per-query rate limit:** `dns_rate_limit_rps` / `dns_rate_limit_burst` (token bucket per client IP).
 - **Response-side limits** (`dns_response_limit_mode`):
   - **`sliding_window`** (default mode): caps **responses per client IP** per time window (`dns_sliding_window_seconds`, `dns_max_responses_per_ip_window`). Disabled when max responses is 0.
-  - **`rrl`**: approximate per-(client IP, QNAME) limiting (`dns_rrl_max_per_bucket`, `dns_rrl_window_seconds`, `dns_rrl_slip`). Use when you need BIND-style behavior; tuning is more involved.
+  - **`rrl`**: approximate per-(client IP, QNAME) limiting (`dns_rrl_max_per_bucket`, `dns_rrl_window_seconds`, `dns_rrl_slip`). Similar to BIND’s response rate limiting; expect more tuning than sliding-window mode.
 
 Metrics: `dnsplane_dns_limiter_drops_total{reason=...}` on `/metrics`.
 
@@ -24,12 +24,12 @@ Metrics: `dnsplane_dns_limiter_drops_total{reason=...}` on `/metrics`.
 
 Rotate TLS certificates before expiry; use short-lived certs (e.g. ACME) where possible.
 
-## DNSSEC validation (best effort)
+## DNSSEC validation (partial chain)
 
 - `dnssec_validate`: when enabled, dnsplane verifies **RRSIG** records **when DNSKEY material is present in the upstream response**. It does **not** perform full chain validation from the DNS root (no iterative DS/DNSKEY chase in this version).
 - `dnssec_validate_strict`: if verification fails (bogus signatures), return **SERVFAIL** instead of passing the answer.
 - The **AD** bit is set on responses only when validation succeeded **and** the client sent **DNSSEC OK (DO)** in EDNS0.
-- `dnssec_trust_anchor_file` is reserved for future root/anchor handling.
+- `dnssec_trust_anchor_file` is not used yet; intended for custom trust anchors when implemented.
 
 Metrics: `dnsplane_dnssec_outcomes_total{outcome=...}`.
 

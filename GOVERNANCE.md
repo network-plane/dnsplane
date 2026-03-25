@@ -6,10 +6,10 @@ This document defines how the dnsplane project is governed: who makes decisions,
 
 - **Maintainer(s)**  
   Have write access to the repository and are responsible for reviewing and merging pull requests, cutting releases, and steering the project. They make final decisions on code, documentation, and process within this repo.  
-  Current maintainer(s) are listed in the [README](../README.md#authors).
+  Current maintainer(s) are listed in the [README](README.md#authors).
 
 - **Contributors**  
-  Anyone who submits patches, pull requests, issues, or documentation improvements. Contributors do not have write access; they participate by opening issues and pull requests and by following the [Contributing](../CONTRIBUTING.md) and [Code of Conduct](../CODE_OF_CONDUCT.md) guidelines.
+  Anyone who submits patches, pull requests, issues, or documentation improvements. Contributors do not have write access; they participate by opening issues and pull requests and by following [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Decision-making
 
