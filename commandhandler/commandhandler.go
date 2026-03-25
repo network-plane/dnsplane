@@ -524,6 +524,38 @@ func runCacheRemove() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResu
 	}
 }
 
+func runCacheCompact() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
+	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
+		if cliutil.IsHelpRequest(input.Raw) {
+			msgs := infoMessages(
+				"Usage: cache compact",
+				"Description: Remove expired cache rows from memory (zero expiry or expiry in the past). Rebuilds the cache index and queues a background persist to dnscache.json when anything is removed. Use cache save to flush immediately.",
+				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
+			)
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
+		}
+		if len(input.Raw) > 0 {
+			msgs := append(warnMessages("cache compact does not accept arguments."), infoMessages("Usage: cache compact")...)
+			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
+		}
+		dnsData := data.GetInstance()
+		now := time.Now()
+		removed := dnsData.CompactExpiredCacheRecords(now)
+		dnsData.NoteCacheCompactRun(removed)
+		remaining := dnsData.CacheRecordCount()
+		if removed > 0 {
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages(
+				fmt.Sprintf("Removed %d expired cache row(s); %d row(s) remain.", removed, remaining),
+				"A background persist to dnscache.json is queued; run cache save to write immediately.",
+			)}
+		}
+		if remaining == 0 {
+			return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages("No rows removed; cache is empty.")}
+		}
+		return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages(fmt.Sprintf("No expired rows removed; %d row(s) still valid.", remaining))}
+	}
+}
+
 func runCacheClear() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult {
 	return func(rt tui.CommandRuntime, input tui.CommandInput) tui.CommandResult {
 		if cliutil.IsHelpRequest(input.Raw) {
@@ -1392,6 +1424,16 @@ func RegisterCommands() {
 		}, runCacheRemove()),
 		newLegacyFactory(tui.CommandSpec{
 			Context:     "cache",
+			Name:        "compact",
+			Summary:     "Compact expired cache rows",
+			Description: "Drops expired or zero-expiry rows from the in-memory resolver cache and queues persist; optional cache save flushes dnscache.json immediately.",
+			Usage:       "cache compact",
+			Category:    "Cache",
+			Tags:        []string{"cache", "compact", "expire"},
+			Examples:    []tui.Example{{Description: "Remove expired rows now", Command: "cache compact"}},
+		}, runCacheCompact()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "cache",
 			Name:        "clear",
 			Summary:     "Clear cache",
 			Description: "Empties all cached DNS entries in memory; use cache save to persist an empty dnscache.json.",
@@ -1958,6 +2000,8 @@ func printAllServerConfig(settings config.Config) {
 	fmt.Printf("    local_records_enabled: %v\n", settings.LocalRecordsEnabled)
 	fmt.Printf("    cache_warm_enabled:          %v\n", settings.CacheWarmEnabled)
 	fmt.Printf("    cache_warm_interval_seconds: %d\n", settings.CacheWarmIntervalSeconds)
+	fmt.Printf("    cache_compact_enabled:          %v\n", settings.CacheCompactEnabled)
+	fmt.Printf("    cache_compact_interval_seconds: %d\n", settings.CacheCompactIntervalSeconds)
 	fmt.Printf("    pprof_enabled:               %v\n", settings.PprofEnabled)
 	fmt.Printf("    pprof_listen:                %s\n", settings.PprofListen)
 	fmt.Printf("    pretty_json:                 %v\n", settings.PrettyJSON)
@@ -2262,6 +2306,20 @@ func applyConfigSetting(cfg *config.Config, setting, value string) (successMsg s
 		}
 		cfg.CacheWarmIntervalSeconds = n
 		return fmt.Sprintf("Cache warm interval set to %d seconds", n), nil
+	case "cache_compact_enabled":
+		b, e := strconv.ParseBool(value)
+		if e != nil {
+			return "", fmt.Errorf("invalid value for cache_compact_enabled: %s (use true/false)", value)
+		}
+		cfg.CacheCompactEnabled = b
+		return fmt.Sprintf("Cache compact (expired-row cleanup) enabled set to %v", b), nil
+	case "cache_compact_interval_seconds":
+		n, e := strconv.Atoi(value)
+		if e != nil || n < 60 {
+			return "", fmt.Errorf("invalid cache_compact_interval_seconds: %s (must be integer >= 60)", value)
+		}
+		cfg.CacheCompactIntervalSeconds = n
+		return fmt.Sprintf("Cache compact interval set to %d seconds", n), nil
 	case "stats_page_enabled":
 		b, e := strconv.ParseBool(value)
 		if e != nil {
@@ -2698,7 +2756,7 @@ func printServerSetUsage() {
 	fmt.Println("Usage: server set <setting> <value>")
 	fmt.Println("Description: Set a config setting in memory. Run 'server save' to write to the config file.")
 	fmt.Println("Example: server set apiport 8080")
-	fmt.Println("Settings: dns_port, api_port, fallback_ip, fallback_port, timeout, api, cache_records, local_records_enabled, cache_warm_enabled, cache_warm_interval_seconds, stats_page_enabled, stats_perf_page_enabled, stats_dashboard_enabled, full_stats, full_stats_dir, pprof_enabled, pprof_listen, pretty_json, server_socket, server_tcp, dnsservers_file, cache_file, records_source_location (or dnsrecords), records_source_type (file|url|git), auto_build_ptr_from_a, forward_ptr_queries, add_updates_records, log_dir, log_severity, log_rotation, log_rotation_size_mb, log_rotation_time_days; see README and docs/dnsplane.example.json for the full list.")
+	fmt.Println("Settings: dns_port, api_port, fallback_ip, fallback_port, timeout, api, cache_records, local_records_enabled, cache_warm_enabled, cache_warm_interval_seconds, cache_compact_enabled, cache_compact_interval_seconds, stats_page_enabled, stats_perf_page_enabled, stats_dashboard_enabled, full_stats, full_stats_dir, pprof_enabled, pprof_listen, pretty_json, server_socket, server_tcp, dnsservers_file, cache_file, records_source_location (or dnsrecords), records_source_type (file|url|git), auto_build_ptr_from_a, forward_ptr_queries, add_updates_records, log_dir, log_severity, log_rotation, log_rotation_size_mb, log_rotation_time_days; see README and docs/dnsplane.example.json for the full list.")
 	printHelpAliasesHint()
 }
 
