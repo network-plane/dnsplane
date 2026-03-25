@@ -113,11 +113,8 @@ func (t *Tracker) initBuckets() error {
 	})
 }
 
-// RecordRequest records a DNS request asynchronously so the DNS reply is not delayed by disk I/O.
-// key should be in format "domain:type" (e.g., "example.com:A")
-// requesterIP is the IP address of the client making the request.
-// source is where the answer came from: local, cache, upstream, blocked, none (see resolver observeQuery).
-// If the async queue is full, the record is dropped (non-blocking).
+// RecordRequest enqueues a stats row (key "fqdn:type"). source is local|cache|upstream|blocked|none.
+// Non-blocking: drops if the async queue is full.
 func (t *Tracker) RecordRequest(key string, requesterIP string, recordType string, source string) error {
 	if t == nil || !t.enabled {
 		return nil
@@ -410,9 +407,8 @@ func (t *Tracker) GetAllRequesters() (map[string]*RequesterStats, error) {
 	return result, err
 }
 
-// Clear removes all persisted request/requester statistics and resets in-memory session counters.
-// In-flight async records may still be written immediately after this returns.
-// Call Sync afterward if you want an explicit fsync (e.g. statistics save in the TUI).
+// Clear wipes persisted stats and session counters. Async writers may still enqueue right after return.
+// Use Sync for an explicit fsync (e.g. TUI statistics save).
 func (t *Tracker) Clear() error {
 	if t == nil || !t.enabled {
 		return nil
@@ -438,8 +434,7 @@ func (t *Tracker) Clear() error {
 	return nil
 }
 
-// Sync flushes the full_stats database file to stable storage (fsync). Run after statistics clear
-// if you want the cleared state committed to disk the same way as cache save after cache clear.
+// Sync fsyncs the full_stats DB (e.g. after Clear when you need the empty state on disk immediately).
 func (t *Tracker) Sync() error {
 	if t == nil || !t.enabled {
 		return nil

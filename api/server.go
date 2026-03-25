@@ -35,7 +35,7 @@ var (
 	apiFullStatsTracker *fullstats.Tracker
 )
 
-// appVersion is set from package main via SetAppVersion (main.appVersion; CI may use -ldflags "-X main.appVersion=...").
+// appVersion is injected from main via SetAppVersion.
 var appVersion string
 
 // SetAppVersion registers the application release string for /ready, /version, and /stats JSON.
@@ -97,11 +97,8 @@ func getFullStatsCounts() (total, session fullStatsCounts, ok bool) {
 // RouteRegistrar registers HTTP routes on the supplied Chi router.
 type RouteRegistrar func(chi.Router)
 
-// Start launches the REST API server asynchronously. If registrar is nil, the
-// package's default DNS routes are registered. The server listens on the
-// provided port and updates the daemon state when it stops.
-// opts may be nil (defaults: all interfaces, no TLS, no rate limit).
-// If logger is nil, no file logging is done for API messages.
+// Start runs the REST API in the background. registrar nil uses RegisterDNSRoutes; opts nil uses zero defaults;
+// logger nil skips structured API file logging.
 func Start(state *daemon.State, port string, opts *ListenOptions, registrar RouteRegistrar, logger *slog.Logger) {
 	if state == nil {
 		logAPIWarn(logger, "missing daemon state; cannot start API")
@@ -344,7 +341,7 @@ func upstreamHealthHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// resolverStatsMap returns the resolver stats as a map for session/total (both same until persistence exists).
+// resolverStatsMap builds resolver counters for /stats JSON (same map used for session and total scopes).
 func resolverStatsMap(stats data.DNSStats) map[string]any {
 	return map[string]any{
 		"total_queries":           stats.TotalQueries,
@@ -356,8 +353,7 @@ func resolverStatsMap(stats data.DNSStats) map[string]any {
 	}
 }
 
-// statsHandler returns resolver and full_stats as JSON with session and total scope.
-// Resolver stats are in-memory only (since server start), so session and total are the same for now.
+// statsHandler returns session/total scopes and build info. Resolver counters are in-memory only, so both scopes match.
 func statsHandler(w http.ResponseWriter, r *http.Request) {
 	dnsData := data.GetInstance()
 	stats := dnsData.GetStats()
