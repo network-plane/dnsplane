@@ -10,7 +10,7 @@ var (
 	globalManager *Manager
 )
 
-// SetGlobalManager registers the cluster manager for TUI and diagnostics (call from main after NewManager).
+// SetGlobalManager registers the cluster manager for TUI and diagnostics.
 func SetGlobalManager(m *Manager) {
 	globalMu.Lock()
 	defer globalMu.Unlock()

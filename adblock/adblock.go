@@ -32,8 +32,7 @@ func NewBlockList() *BlockList {
 	}
 }
 
-// IsBlocked checks if a domain is blocked. The domain should be normalized
-// (lowercase, trailing dot removed if present).
+// IsBlocked reports whether domain matches the blocklist (normalized internally).
 func (bl *BlockList) IsBlocked(domain string) bool {
 	if bl == nil {
 		return false
@@ -48,7 +47,7 @@ func (bl *BlockList) IsBlocked(domain string) bool {
 		return true
 	}
 
-	// Check subdomain matches (e.g., if "example.com" is blocked, "ads.example.com" should also be blocked)
+	// Subdomain match: blocked parent covers children.
 	parts := strings.Split(normalized, ".")
 	for i := 0; i < len(parts); i++ {
 		subdomain := strings.Join(parts[i:], ".")

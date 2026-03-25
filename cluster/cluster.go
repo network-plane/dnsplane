@@ -353,7 +353,7 @@ func (m *Manager) probeOnce(peerAddr, token string) {
 	m.peers.recordProbe(peerAddr, true, rttMs, "")
 }
 
-// NotifyLocalRecordsChanged should be called after local dnsrecords are persisted (non-blocking).
+// NotifyLocalRecordsChanged triggers a non-blocking push to peers after local dnsrecords are saved.
 func (m *Manager) NotifyLocalRecordsChanged() {
 	cfg := m.dns.GetResolverSettings()
 	if !cfg.ClusterEnabled || len(cfg.ClusterPeers) == 0 {

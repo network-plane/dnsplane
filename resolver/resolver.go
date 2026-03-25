@@ -148,11 +148,10 @@ func perfQTypeString(q dns.Question) string {
 	return "T" + strconv.Itoa(int(q.Qtype))
 }
 
-// resolveFastPath runs local, cache, and all upstreams at once for any QTYPE. Priority: local > cache > first upstream success.
+// resolveFastPath runs local, cache, and upstreams in parallel. Priority: local > cache > first upstream success.
 //
-// A/AAAA: local/cache is consulted before adblock so a warm cache path does not pay GetBlockList+IsBlocked
-// (two extra locks and work) on every query. If a name is on the blocklist but still has a positive cache
-// entry, the cached answer is served until TTL expires.
+// A/AAAA: local/cache before adblock so cache hits skip blocklist work. A positive cache entry for a blocked
+// name is still served until TTL expires.
 func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, response *dns.Msg) {
 	t0 := time.Now()
 	recordType := dns.TypeToString[question.Qtype]

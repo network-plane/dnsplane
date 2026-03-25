@@ -60,7 +60,7 @@ func loadRecordsFromURL(url string) ([]dnsrecords.DNSRecord, error) {
 }
 
 // loadRecordsFromGit clones or opens repo at repoURL, reads recordsFileName from worktree, returns records.
-// Uses a cache dir under os.TempDir() keyed by a hash/sanitized repo URL so we can pull on refresh.
+// Cache dir under os.TempDir() is stable per repo URL (clone/pull).
 func loadRecordsFromGit(repoURL string) ([]dnsrecords.DNSRecord, error) {
 	cacheDir := filepath.Join(os.TempDir(), "dnsplane-records-git", sanitizeForDir(repoURL))
 	_, err := os.Stat(filepath.Join(cacheDir, ".git"))
