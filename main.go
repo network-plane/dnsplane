@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"net"
 	"os"
@@ -50,7 +49,7 @@ const (
 	tuiClientKillCmd = "dnsplane-kill"
 )
 
-var appVersion = "1.4.153"
+var appVersion = "1.4.169"
 
 var (
 	appState         = daemon.NewState()
@@ -125,7 +124,8 @@ func main() {
 	rootCmd.Version = fmt.Sprintf("DNS Resolver %s", appVersion)
 	rootCmd.SetVersionTemplate("{{.Version}}\n")
 	if err := rootCmd.Execute(); err != nil {
-		log.Fatal(err)
+		slog.Default().Error("command failed", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -212,6 +212,20 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 	loadedCfg.Config.FileLocations.CacheFile = resolveDataPath(cache, "dnscache.json", cwd)
 	data.SetConfig(loadedCfg)
+
+	logCfg := loadedCfg.Config.Log
+	dnsLogger = logger.NewServerLogger(logger.DNSServerLog, logCfg.Dir, logCfg)
+	apiLogger = logger.NewServerLogger(logger.APIServerLog, logCfg.Dir, logCfg)
+	tuiLogger = logger.NewServerLogger(logger.TUIServerLog, logCfg.Dir, logCfg)
+	asyncLogQueue = logger.NewAsyncLogQueue(0)
+	data.SetResolverLogger(dnsLogger)
+
+	if loadedCfg.Created {
+		dnsLogger.Info("Created default config", "path", loadedCfg.Path)
+	} else {
+		dnsLogger.Debug("Config loaded", "path", loadedCfg.Path)
+	}
+
 	data.InitializeJSONFiles()
 	dnsData := data.GetInstance()
 	settings := dnsData.GetResolverSettings()
@@ -255,18 +269,6 @@ func runServer(cmd *cobra.Command, args []string) error {
 	serverSocket = strings.TrimSpace(serverSocket)
 	serverTCP = strings.TrimSpace(serverTCP)
 	apiport = strings.TrimSpace(apiport)
-
-	logCfg := settings.Log
-	dnsLogger = logger.NewServerLogger(logger.DNSServerLog, logCfg.Dir, logCfg)
-	apiLogger = logger.NewServerLogger(logger.APIServerLog, logCfg.Dir, logCfg)
-	tuiLogger = logger.NewServerLogger(logger.TUIServerLog, logCfg.Dir, logCfg)
-	asyncLogQueue = logger.NewAsyncLogQueue(0)
-
-	if loadedCfg.Created {
-		dnsLogger.Info("Created default config", "path", loadedCfg.Path)
-	} else {
-		dnsLogger.Debug("Config loaded", "path", loadedCfg.Path)
-	}
 
 	normalisedTCP := normalizeTCPAddress(serverTCP)
 	appState.UpdateListener(func(info *daemon.ListenerSettings) {
@@ -442,6 +444,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	go runUpstreamHealthProbeLoop(dnsData, dnsLogger)
 	go runCacheWarmLoop(dnsData, port)
+	go runCacheCompactLoop(dnsData, dnsLogger)
 
 	if s := dnsData.GetResolverSettings(); s.PprofEnabled {
 		addr := strings.TrimSpace(s.PprofListen)

@@ -172,6 +172,10 @@ type Config struct {
 	CacheWarmEnabled bool `json:"cache_warm_enabled,omitempty"`
 	// CacheWarmIntervalSeconds is seconds between keep-alive self-queries. Default 10.
 	CacheWarmIntervalSeconds int `json:"cache_warm_interval_seconds,omitempty"`
+	// CacheCompactEnabled runs a periodic pass that drops expired cache rows and shrinks dnscache.json. Default true.
+	CacheCompactEnabled bool `json:"cache_compact_enabled,omitempty"`
+	// CacheCompactIntervalSeconds is seconds between compaction passes. Default 1800 (30 minutes). Minimum 60 when enabled.
+	CacheCompactIntervalSeconds int `json:"cache_compact_interval_seconds,omitempty"`
 	// StatsPageEnabled serves GET /stats/page (HTML). Default true.
 	StatsPageEnabled bool `json:"stats_page_enabled,omitempty"`
 	// StatsPerfPageEnabled serves GET /stats/perf/page (HTML). Default true.
@@ -415,16 +419,18 @@ func defaultConfig(baseDir string) *Config {
 			AutoBuildPTRFromA: true,
 			ForwardPTRQueries: false,
 		},
-		MinCacheTTLSeconds:       600,
-		StaleWhileRevalidate:     true,
-		CacheWarmEnabled:         true,
-		CacheWarmIntervalSeconds: 10,
-		StatsPageEnabled:         true,
-		StatsPerfPageEnabled:     true,
-		StatsDashboardEnabled:    true,
-		PrettyJSON:               false,
-		PprofEnabled:             false,
-		PprofListen:              "",
+		MinCacheTTLSeconds:          600,
+		StaleWhileRevalidate:        true,
+		CacheWarmEnabled:            true,
+		CacheWarmIntervalSeconds:    10,
+		CacheCompactEnabled:         true,
+		CacheCompactIntervalSeconds: 1800,
+		StatsPageEnabled:            true,
+		StatsPerfPageEnabled:        true,
+		StatsDashboardEnabled:       true,
+		PrettyJSON:                  false,
+		PprofEnabled:                false,
+		PprofListen:                 "",
 		Log: LogConfig{
 			Dir:            logDir,
 			Severity:       "none",
@@ -471,6 +477,11 @@ func (c *Config) applyDefaults(configDir string) {
 	}
 	if c.CacheWarmIntervalSeconds < 1 {
 		c.CacheWarmIntervalSeconds = 10
+	}
+	if c.CacheCompactIntervalSeconds <= 0 {
+		c.CacheCompactIntervalSeconds = 1800
+	} else if c.CacheCompactIntervalSeconds < 60 {
+		c.CacheCompactIntervalSeconds = 60
 	}
 	if c.ClusterSyncIntervalSeconds < 0 {
 		c.ClusterSyncIntervalSeconds = 0
@@ -751,6 +762,12 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	if r, ok := raw["cache_warm_interval_seconds"]; ok {
 		_ = json.Unmarshal(r, &c.CacheWarmIntervalSeconds)
 	}
+	if r, ok := raw["cache_compact_enabled"]; ok {
+		_ = json.Unmarshal(r, &c.CacheCompactEnabled)
+	}
+	if r, ok := raw["cache_compact_interval_seconds"]; ok {
+		_ = json.Unmarshal(r, &c.CacheCompactIntervalSeconds)
+	}
 	if r, ok := raw["stats_page_enabled"]; ok {
 		_ = json.Unmarshal(r, &c.StatsPageEnabled)
 	}
@@ -779,6 +796,12 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	}
 	if _, ok := raw["cache_warm_interval_seconds"]; !ok {
 		c.CacheWarmIntervalSeconds = 10
+	}
+	if _, ok := raw["cache_compact_enabled"]; !ok {
+		c.CacheCompactEnabled = true
+	}
+	if _, ok := raw["cache_compact_interval_seconds"]; !ok {
+		c.CacheCompactIntervalSeconds = 1800
 	}
 	// Opt-out HTML stats UIs: default true when keys are absent (legacy configs).
 	if _, ok := raw["stats_page_enabled"]; !ok {
