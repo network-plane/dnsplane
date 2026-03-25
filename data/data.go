@@ -64,6 +64,12 @@ type DNSResolverData struct {
 	statsTotalQueries     atomic.Int64
 	statsTotalBlocks      atomic.Int64
 	statsQueriesForwarded atomic.Int64
+
+	// Cache compaction schedule (background loop in main updates these for /stats/dashboard).
+	cacheCompactScheduleMu  sync.RWMutex
+	nextCacheCompactAt      time.Time
+	lastCacheCompactAt      time.Time
+	lastCacheCompactRemoved int
 }
 
 // clusterSkipNotify: when non-zero, storeRecords skips notifying cluster after a successful save (avoids push loops).
