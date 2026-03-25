@@ -1,6 +1,8 @@
 # Plan: Resolver cache — JSON (`dnscache.json`) → SQLite
 
-This document is a phased plan to move durable cache storage from a single JSON file to SQLite while preserving behavior (lookup semantics, TUI/API, compaction, async persist, config).
+**Audience:** Contributors planning cache storage work. End-user behavior is unchanged until this ships; see the main README for current cache behavior.
+
+This document phases migration of durable cache storage from a single JSON file to SQLite while preserving lookup semantics, TUI/API behavior, compaction, background persist, and configuration.
 
 ## Goals
 
@@ -20,7 +22,7 @@ Keep **`[]dnsrecordcache.CacheRecord` + `cacheRecordIdx`** as today. Only change
 | `SaveCacheRecords()` writes full JSON | Transaction: replace table contents or `DELETE` + batch `INSERT` from in-memory snapshot |
 | `cachePersistWorker` snapshots slice → JSON | Same worker; snapshot → SQLite write |
 
-**Why first:** Resolver (`GetCacheRecords` / `UpdateCacheRecords`), `lookup_index.go`, compaction, and TUI/API stay structurally the same. Risk is confined to I/O, schema, and migration tooling.
+**Rationale:** Resolver cache access, the lookup index, compaction, and TUI/API stay structurally the same. Risk stays in I/O, schema, and migration tooling.
 
 ### Phase B (optional) — Incremental SQL writes
 
@@ -120,7 +122,7 @@ Adjust columns after auditing `dnsrecords.DNSRecord` JSON tags and what `dnsreco
 6. **Tests (1–2 d):** Unit tests for DB layer; integration test server start with DB; regression on resolver cache tests.
 7. **Review (0.5 d):** Locking, shutdown, corruption handling (log + fail safe).
 
-**Total Phase A estimate:** ~1–2 weeks calendar time for one developer (includes review and fixes), depending on test depth and migration UX.
+**Phase A (rough scale):** On the order of a couple of weeks calendar time including review and fixes, depending on test depth and migration UX.
 
 ---
 
@@ -128,7 +130,7 @@ Adjust columns after auditing `dnsrecords.DNSRecord` JSON tags and what `dnsreco
 
 | Risk | Mitigation |
 |------|------------|
-| SQLite locked / writer contention | WAL + busy timeout; single writer via existing persist goroutine; avoid writes on DNS thread |
+| SQLite locked / writer contention | WAL + busy timeout; single writer via existing background persist worker; avoid writes on the DNS request path |
 | Corrupt DB | Backup before replace; `ReplaceAll` in transaction; document `sqlite3` recovery for operators |
 | Large DB memory | Phase A still loads full cache into RAM — same as JSON today; Phase B/C if that’s the real problem |
 | Cluster | Cache is local; no cluster sync change expected — confirm no hidden JSON assumptions |
@@ -163,7 +165,7 @@ Adjust columns after auditing `dnsrecords.DNSRecord` JSON tags and what `dnsreco
 
 ---
 
-## References in codebase (for implementers)
+## Related code locations
 
 - `data/data.go` — `LoadCacheRecords`, `SaveCacheRecords`, `cachePersistWorker`, `storeCacheRecords`, `InitializeJSONFiles`
 - `data/lookup_index.go` — cache index over slice

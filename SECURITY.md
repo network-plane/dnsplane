@@ -2,24 +2,21 @@
 
 ## Assurance case
 
-An assurance case that describes the threat model, trust boundaries, application of secure design principles, and mitigation of common implementation weaknesses is maintained in [docs/ASSURANCE_CASE.md](docs/ASSURANCE_CASE.md).
+How dnsplane handles threats, trust boundaries, and common risks is summarized in [docs/ASSURANCE_CASE.md](docs/ASSURANCE_CASE.md).
 
-## Supported Versions
+## Supported versions
 
-The current main is supported with fixes until an LTS version is released
+The current `main` branch receives fixes until an LTS release is published.
 
 | Version | Supported          |
 | ------- | ------------------ |
 | 0.1.x   | :x:                |
 | 0.2.x   | :white_check_mark: |
 
-## Reporting a Vulnerability
+## Reporting a vulnerability
 
-Open an issue with any security related issues you find.
+**Sensitive reports:** Email **earentir@gmail.com** with enough detail to reproduce or assess the issue (version, affected component, impact). Follow [coordinated vulnerability disclosure](https://en.wikipedia.org/wiki/Coordinated_vulnerability_disclosure) practices.
 
-### Private Disclosure Processes
-We ask that all suspected vulnerabilities be handled in accordance with [Responsible Disclosure Model](https://en.wikipedia.org/wiki/Coordinated_vulnerability_disclosure).
+**Already public:** If a vulnerability is already discussed in public (CVE, blog, issue elsewhere), email the same address so the project can track fixes, releases, and release notes.
 
-### Public Disclosure Processes
-If anyone knows of a publicly disclosed security vulnerability please IMMEDIATELY email earentir@gmail.com to inform me about the vulnerability so I may start the patch, release, and communication process.
-
+**Non-sensitive bugs:** For ordinary defects that are not security-sensitive, open a [GitHub issue](https://github.com/network-plane/dnsplane/issues).

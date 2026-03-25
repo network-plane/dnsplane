@@ -1,8 +1,8 @@
-## Contributing
+# Contributing
 
-Contributions are always welcome!
+Thank you for helping improve dnsplane. This document covers the **Developer Certificate of Origin (DCO)** and practical checks before you open a PR.
 
-### Developer Certificate of Origin (DCO)
+## Developer Certificate of Origin (DCO)
 
 This project uses the [Developer Certificate of Origin (DCO)](https://developercertificate.org/) to confirm that contributors are legally authorized to make their contributions. You must sign off on each commit by adding a `Signed-off-by` line.
 
@@ -16,6 +16,8 @@ This project uses the [Developer Certificate of Origin (DCO)](https://developerc
 
 By signing off, you certify that you have the right to submit the work under the project’s license (see [LICENSE](LICENSE)).
 
+## Before you open a pull request
+
 - **Code style:** Follow the [Google Go Style Guide](https://google.github.io/styleguide/go/).
 - **Tests:** New code should include tests. Run `make test` and `make fuzz` (where applicable) before submitting.
-- **Before submitting:** Run `make test` and `make vet` (or `make lint`) and fix any issues.
+- **Checks:** Run `make test` and `make vet` (or `make lint`) and fix any issues.

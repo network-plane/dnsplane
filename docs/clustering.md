@@ -10,11 +10,11 @@ dnsplane can replicate **local DNS records** (`dnsrecords`) between instances ov
 
 ## Configuration
 
-Set these keys in `dnsplane.json` (see [README](../README.md) for general config layout):
+Set these keys in `dnsplane.json` (general layout: [README](../README.md#config-files)):
 
 | Key | Meaning |
 |-----|---------|
-| `cluster_enabled` | `true` to enable the cluster listener and sync behaviour. |
+| `cluster_enabled` | `true` to enable the cluster listener and sync behavior. |
 | `cluster_listen_addr` | TCP listen address (e.g. `:7946`). If empty, defaults to `:7946`. |
 | `cluster_advertise_addr` | Optional `host:port` shown in `cluster join` when listen is `:7946` (otherwise guessed IPv4 + port). |
 | `cluster_peers` | JSON array of `host:port` strings to **push** to after local record changes, and to **pull** from when periodic sync is enabled. |
@@ -78,7 +78,7 @@ Traffic is **not TLS** by default. Run the cluster port only on a **trusted netw
 
 - **Split-brain:** If two nodes edit records independently, **last writer wins** by sequence; there is no CRDT or Raft election in this release.
 - **Load balancer:** Point DNS clients at the VIP; **cluster sync** is a separate TCP port between nodes—do not expose it to the public Internet without protection.
-- **Single writer:** For predictable behaviour, prefer **one** admin path (e.g. TUI on one node) or accept occasional overwrites.
+- **Single writer:** For predictable behavior, prefer **one** admin path (e.g. TUI on one node) or accept occasional overwrites.
 
 ## Example (two nodes)
 

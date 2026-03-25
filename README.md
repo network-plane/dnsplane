@@ -1,19 +1,19 @@
 # dnsplane
 ![dnsplane](https://github.com/user-attachments/assets/38214dcd-ca33-41ce-a88f-7edad7d85822)
 
-A non-standard DNS server with multiple management interfaces (TUI, API). For most QTYPEs (**A**, **AAAA**, **MX**, etc.) it runs **local lookup**, **cache lookup**, and **all selected upstreams** in parallel; reply priority is **local > cache > first successful upstream**. **PTR** tries local (including auto-built from **A**) first, then uses the same fast path on miss. See [Host tuning (optional)](docs/host-tuning.md) for Linux UDP buffers and related knobs.
+A DNS server with a TUI and REST API. For common record types (**A**, **AAAA**, **MX**, …) answers come from **local records**, then **cache** (if enabled), then **upstreams** queried in parallel; the first successful upstream wins. **PTR** uses local data (including PTR synthesized from **A**) first, then the same path on miss. Optional Linux host tuning: [docs/host-tuning.md](docs/host-tuning.md).
 
 ## Resolution behavior
 
-- **Fast path (A, AAAA, MX, …):** Local, cache (if enabled), and **all upstreams start at once**. Priority: (1) local, (2) cache, (3) **first successful** upstream. Wins cancel remaining work; upstreams still run on every query (wasted traffic on hit is accepted for latency).
+- **Fast path (A, AAAA, MX, …):** Try **local records**, then **cache** (if enabled). If neither applies, query **all upstreams in parallel** and use the **first successful** answer; slower or duplicate upstream work is cancelled once a winner returns.
 - **PTR:** Local first (full scan + optional **A**→PTR synthesis), then the same fast path if no local answer.
 - **Priority:** Local > cache > first upstream success.
-- **Recursive resolvers:** Answers from resolvers like 1.1.1.1 (which are not authoritative for the domain) are accepted as “first success”; the server no longer waits for an authoritative reply and then re-querying fallback, so latency stays low (e.g. ~5–7 ms when the upstream is fast).
-- **Reply path:** The DNS reply is sent as soon as it is ready. Logging, stats, and cache persistence run asynchronously so they do not block the response.
-- **Cache tail latency:** Non-PTR queries resolve **local-then-cache under one read lock**, then return immediately on hit (no upstream fan-out). On miss, only upstreams run (local/cache already known empty). **Cache hits** and **queries answered** use atomics so they do not contend with lookups under load. Settings/server JSON writes do not hold the data lock during disk I/O. **`min_cache_ttl_seconds`** (default 600) ensures short upstream TTLs don't cause frequent cache misses. **`stale_while_revalidate`** serves expired entries instantly (TTL=1) while refreshing from upstream in the background — no client-visible latency spike on cache expiry.
-- **Cache warm (keep-alive):** When **`cache_warm_enabled`** is true (default), a background goroutine sends a lightweight self-query every **`cache_warm_interval_seconds`** (default 10). This keeps the Go process scheduled, CPU caches hot, and memory pages resident — preventing cold-start latency spikes (30 ms+) after idle periods.
-- **Cache compaction:** When **`cache_compact_enabled`** is true (default) and **`cache_records`** is on, a background loop removes **expired** (or zero-expiry) rows from the in-memory cache and queues a persist, on **`cache_compact_interval_seconds`** (default `1800`, i.e. every 30 minutes; minimum `60`). The dashboard shows **Cache entries** and **Next cache compact** when enabled.
-- **A/AAAA vs adblock:** Local and cache are checked **before** the blocklist so a warm cache does not pay blocklist work on every query. After a cache miss, blocked names still get the block reply. If a name is blocked but already has a **positive** cache entry, that answer is served until TTL (flush cache if you need blocklist to win immediately).
+- **Recursive resolvers:** Public resolvers (e.g. 1.1.1.1) return a usable answer quickly; dnsplane uses the first successful upstream response rather than waiting for a different resolution path, which keeps typical latency low.
+- **Reply path:** The client gets an answer as soon as it is ready. Logging, stats, and saving the cache file happen in the background and do not delay the reply.
+- **Cache behavior:** On a hit, local and cache are checked before any upstream work. **`min_cache_ttl_seconds`** (default 600) avoids caching answers with very short TTLs as-is. **`stale_while_revalidate`** can serve a stale answer immediately (TTL=1) while refreshing from upstream in the background.
+- **Cache warm:** With **`cache_warm_enabled`** on (default), the server sends a periodic lightweight query to itself so idle systems stay responsive (**`cache_warm_interval_seconds`**, default 10).
+- **Cache compaction:** With **`cache_compact_enabled`** on (default) and **`cache_records`** on, expired rows are removed from the cache on a schedule (**`cache_compact_interval_seconds`**, default 1800s; minimum 60). The dashboard can show cache size and the next compaction when this is enabled.
+- **A/AAAA vs adblock:** Local and cache are checked **before** the blocklist so a cache hit does not run the blocklist. After a cache miss, blocked names still get the block reply. If a name is blocked but already has a **positive** cache entry, that answer is served until TTL (flush cache if you need the blocklist to take effect immediately).
 - **Domain whitelist (per-server):** An upstream can have an optional **domain whitelist**. If set, that server is used **only** for query names that match one of the listed suffixes (exact or subdomain). For example, a server with whitelist `example.com,example.org` receives only queries for those domains and their subdomains; all other queries use only “global” upstreams (servers with no whitelist). Whitelisted domains are resolved **only** via those servers (no fallback to global upstreams). In the TUI: `dns add 192.168.5.5 53 active:true localresolver:true adblocker:false whitelist:example.com,example.org`.
 
 ## Diagram
@@ -37,9 +37,9 @@ flowchart TD
 
 - **Adblock (A/AAAA):** After local/cache miss, the name is checked against the block list; if blocked, no upstream is used.
 - **Local records:** Loaded from `records_source` (file, URL, or Git). If a record matches, that reply is used and upstreams are not queried.
-- **Cache:** If caching is enabled and the answer is still valid, it is returned without querying upstreams. When `stale_while_revalidate` is enabled, expired entries are served immediately (TTL=1) while a background goroutine refreshes from upstream.
+- **Cache:** If caching is enabled and the answer is still valid, it is returned without querying upstreams. When `stale_while_revalidate` is enabled, expired entries are served immediately (TTL=1) while a background refresh runs against upstream.
 - **Min TTL:** Upstream answers are cached with `max(original TTL, min_cache_ttl_seconds)` so short-TTL domains don't cause frequent cache misses.
-- **Server selection:** `GetServersForQuery` picks upstreams for this name: servers with a matching domain whitelist, or (if none match) only global servers. Whitelisted domains are resolved only via their servers.
+- **Server selection:** For each query name, dnsplane chooses upstreams with a matching **domain whitelist** if any; otherwise it uses only “global” upstreams (no whitelist). Names that match a whitelist are sent only to those servers.
 - **Upstreams:** First successful reply wins for the fast path (all QTYPEs above).
 
 ## Additional documentation
@@ -49,23 +49,23 @@ flowchart TD
 | **[docs/host-tuning.md](docs/host-tuning.md)** | Optional **Linux OS / host tuning** for DNS latency: UDP buffer sizes, open-file limits, CPU governor, containers, and how to measure. |
 | **[docs/upstream-health.md](docs/upstream-health.md)** | **Upstream health checks**: periodic probes, marking servers down, config keys, logs, and **curl** examples. |
 | **[docs/clustering.md](docs/clustering.md)** | **Multi-node record sync**: TCP peer protocol, `cluster_*` config keys, auth token, sequences, deployment notes. |
-| **[docs/dnsplane.example.json](docs/dnsplane.example.json)** | **Full example `dnsplane.json`** with every documented key and typical defaults (paths under `/etc/dnsplane/` — adjust for your install). |
-| **[examples/dnsplane-example.json](examples/dnsplane-example.json)** | **Minimal** `dnsplane.json` starter; includes **DoT / DoH / DNSSEC** keys (off by default). |
-| **[examples/dnsservers-example.json](examples/dnsservers-example.json)** | Example **`dnsservers.json`**: global upstream + one server with **`domain_whitelist`** (split DNS / internal zones). |
+| **[docs/dnsplane.example.json](docs/dnsplane.example.json)** | Full example `dnsplane.json` with documented keys and defaults (adjust paths for your install). |
+| **[examples/dnsplane-example.json](examples/dnsplane-example.json)** | Small starter `dnsplane.json` (DoT / DoH / DNSSEC present, off by default). |
+| **[examples/dnsservers-example.json](examples/dnsservers-example.json)** | Example `dnsservers.json` with a global upstream and split DNS via **`domain_whitelist`**. |
 
-**Inbound:** DoT (`dot_*`), DoH (`doh_*`), DNSSEC validation (`dnssec_validate`, …), and optional **DNSSEC signing** for local zones (`dnssec_sign_*`) — see [docs/security-public-dns.md](docs/security-public-dns.md) (detail) and the **DoT / DoH** / **DNSSEC** tables under [Main config options](#main-config-options-dnsplanejson) below. [TODO](TODO.md) for roadmap items.
+DoT, DoH, and DNSSEC options are summarized in [docs/security-public-dns.md](docs/security-public-dns.md) and in the config tables under [Main config options](#main-config-options-dnsplanejson). Upcoming work is listed in [TODO.md](TODO.md).
 
 ## Usage/Examples
 
 dnsplane has two commands: **server** (run the DNS server and TUI/API listeners) and **client** (connect to a running server). The `--config` flag applies only to the **server** command.
 
-**Release version** is the `appVersion` variable in `main.go` (default string). CI/build pipelines should set it with `-ldflags`, e.g. `go build -ldflags "-X main.appVersion=v1.2.3"` so `/version`, `/ready`, and the TUI banner match your release tag.
+**Version:** `/version`, `/ready`, and the TUI banner report the version string baked into the binary you are running.
 
 ### start as daemon (server)
 ```bash
 ./dnsplane server
 ```
-The daemon keeps the resolver running, exposes the UNIX control socket at `/tmp/dnsplane.socket`, and listens for remote TUI clients on TCP port `8053` by default.
+The daemon keeps the resolver running, exposes a UNIX control socket for the TUI (path depends on OS and user—see **Defaults and non-root** under [config and data file paths](#config-and-data-file-paths)), and listens for remote TUI clients on TCP port `8053` by default.
 
 ### start in client mode (connects to the default unix socket unless overridden)
 ```bash
@@ -106,7 +106,9 @@ When you do not pass any path flags, dnsplane looks for an existing `dnsplane.js
 
 If a data file does not exist, dnsplane creates it with default contents at the configured (or overridden) path. When the records source is URL or Git, no local records file is created (records are read-only from the remote source).
 
-**Defaults and non-root:** When the config directory is not under `/etc` (e.g. you run from your home or current directory), the default log directory is `log` next to your config (e.g. `./log` or `~/.config/dnsplane/log`), so you can run without root. The default control socket is user-specific when not running as root: `$XDG_RUNTIME_DIR/dnsplane.socket` if set, otherwise `~/.config/dnsplane/dnsplane.socket`, so each user can run their own server. When running as root or when using a system config under `/etc`, defaults use `/var/log/dnsplane` and a shared socket path.
+**Log directory (defaults):** If your config directory is **not** under `/etc`, the default log folder is `log` next to that directory (e.g. `./log` or `~/.config/dnsplane/log`). If the config directory **is** under `/etc`, the default log directory is `/var/log/dnsplane`.
+
+**UNIX socket (defaults):** The server and client use the same path unless you set `--server-socket`. **Running as root:** the socket is under the OS temp directory (on Linux this is often `/tmp/dnsplane.socket`). **Not root:** `$XDG_RUNTIME_DIR/dnsplane.socket` if set; otherwise `dnsplane/dnsplane.socket` under the user config directory (Linux: typically `~/.config/dnsplane/`; macOS: `~/Library/Application Support/dnsplane/`). That way each unprivileged user gets their own socket by default.
 
 ### TUI (interactive client)
 
@@ -123,9 +125,9 @@ When you run `dnsplane client` (or connect over TCP), you get an interactive TUI
 
 Use `?` or `help` after a command in the TUI for usage.
 
-### Recording of clearing and adding dns records
-https://github.com/user-attachments/assets/f5ca52cb-3874-499c-a594-ba3bf64b3ba9
+### Demo (TUI: records)
 
+https://github.com/user-attachments/assets/f5ca52cb-3874-499c-a594-ba3bf64b3ba9
 
 ## Config Files
 
@@ -133,7 +135,7 @@ https://github.com/user-attachments/assets/f5ca52cb-3874-499c-a594-ba3bf64b3ba9
 | --- | --- |
 | dnsrecords.json | holds dns records |
 | dnsservers.json | holds the dns servers used for queries (see [Upstream servers and domain whitelist](#upstream-servers-dnsserversjson-and-domain-whitelist)) |
-| dnscache.json | holds queries already done if their ttl diff is still above 0 |
+| dnscache.json | Cached answers while still valid (TTL not expired), when caching is enabled |
 | dnsplane.json | the app config |
 
 Starter copies in the repo: **[examples/dnsplane-example.json](examples/dnsplane-example.json)** and **[examples/dnsservers-example.json](examples/dnsservers-example.json)** (point `file_locations.dnsservers` at your real path, e.g. `./dnsservers.json`).
@@ -227,7 +229,7 @@ Blocked domains are stored in a single in-memory list. You can:
 
 ### Main config options (`dnsplane.json`)
 
-A **complete key listing with defaults** is in **[docs/dnsplane.example.json](docs/dnsplane.example.json)**. The shorter **[examples/dnsplane-example.json](examples/dnsplane-example.json)** includes **DoT / DoH / DNSSEC** toggles (disabled). Upstream layout and **`domain_whitelist`** are in **[examples/dnsservers-example.json](examples/dnsservers-example.json)** and [Upstream servers (`dnsservers.json`)](#upstream-servers-dnsserversjson-and-domain-whitelist). Below is a grouped reference; boolean defaults are noted where they matter.
+See **[docs/dnsplane.example.json](docs/dnsplane.example.json)** for every key and defaults. **[examples/dnsplane-example.json](examples/dnsplane-example.json)** is a shorter starter. Upstreams and **`domain_whitelist`** are covered in **[examples/dnsservers-example.json](examples/dnsservers-example.json)** and [Upstream servers (`dnsservers.json`)](#upstream-servers-dnsserversjson-and-domain-whitelist). The tables below group the same options for quick lookup.
 
 **DNS and fallback**
 
@@ -276,7 +278,7 @@ A **complete key listing with defaults** is in **[docs/dnsplane.example.json](do
 | Key | Meaning |
 | --- | --- |
 | `dnssec_validate`, `dnssec_validate_strict`, `dnssec_trust_anchor_file` | Validation when upstream returns DNSSEC material. |
-| `dnssec_sign_enabled`, `dnssec_sign_zone`, `dnssec_sign_key_file`, `dnssec_sign_private_key_file` | Sign local authoritative answers (see docs). |
+| `dnssec_sign_enabled`, `dnssec_sign_zone`, `dnssec_sign_key_file`, `dnssec_sign_private_key_file` | Sign answers from local records (see [docs/security-public-dns.md](docs/security-public-dns.md)). |
 
 **Cache and performance**
 
@@ -298,10 +300,10 @@ A **complete key listing with defaults** is in **[docs/dnsplane.example.json](do
 | `stats_perf_page_enabled` | HTML `/stats/perf/page` (default on). |
 | `stats_dashboard_enabled` | `/stats/dashboard` and `/stats/dashboard/data` (default on). |
 | `full_stats`, `full_stats_dir` | Optional aggregated stats DB + TUI `statistics` commands. |
-| `pprof_enabled` | **Default `false`.** If `true`, starts an HTTP server for Go **`net/http/pprof`** (CPU, heap, goroutines, etc.). |
-| `pprof_listen` | Listen address when `pprof_enabled` is true (empty → **`127.0.0.1:6060`** after defaults). **Bind to loopback** in production unless you protect the port. |
+| `pprof_enabled` | **Default `false`.** If `true`, exposes runtime profiling over HTTP (Go pprof: CPU, heap, etc.). |
+| `pprof_listen` | Listen address when `pprof_enabled` is true; if empty, **`127.0.0.1:6060`**. In production, keep profiling on loopback or behind a protected interface. |
 
-**pprof usage:** With `pprof_enabled` true, the process serves `net/http/pprof` on `pprof_listen` (default `127.0.0.1:6060` when enabled). Examples: `go tool pprof http://127.0.0.1:6060/debug/pprof/profile?seconds=30` (CPU), or browse `/debug/pprof/heap`, `/debug/pprof/goroutine`, etc. Changing **`pprof_enabled`** or **`pprof_listen`** requires a **process restart** so the listener starts or stops. **`pretty_json`** applies to the next write of data JSON files; set it with `server set` + `server save` (no restart needed for that flag alone).
+**Profiling:** When `pprof_enabled` is true, profiling is available on `pprof_listen` (default `127.0.0.1:6060`). Changing `pprof_enabled` or `pprof_listen` takes effect after a restart. **`pretty_json`** affects the next write of data JSON files and can be changed with `server set` + `server save` without restarting.
 
 **Upstream health** — `upstream_health_check_enabled`, `upstream_health_check_failures`, `upstream_health_check_interval_seconds`, `upstream_health_check_query_name`. See [docs/upstream-health.md](docs/upstream-health.md).
 
@@ -316,13 +318,13 @@ A **complete key listing with defaults** is in **[docs/dnsplane.example.json](do
 
 **`log`** — `log_dir`, `log_severity`, `log_rotation`, `log_rotation_size_mb`, `log_rotation_time_days`.
 
-Use **`server config`** in the TUI to print current settings, and **`server set <setting> <value>`** then **`server save`** to persist. Many keys (including `pretty_json`, `pprof_enabled`, `pprof_listen`) are listed in `server set` help; see **[docs/dnsplane.example.json](docs/dnsplane.example.json)** for names that match the JSON file exactly.
+In the TUI, **`server config`** shows current settings; **`server set <setting> <value>`** then **`server save`** writes them to `dnsplane.json`. For the exact key names as in JSON, see **[docs/dnsplane.example.json](docs/dnsplane.example.json)** (TUI `server set` lists the same keys in its help).
 
 ### REST API
 
 Enable the REST API with `"api": true` in `dnsplane.json` and set `apiport` (e.g. `8080`). You can start or stop the API listener from the TUI with `server start api` / `server stop api`.
 
-**Optional API authentication:** set `"api_auth_token": "<secret>"` in `dnsplane.json` (or `server set api_auth_token '<secret>'` then `server save`). When set, every request must send either `Authorization: Bearer <secret>` or `X-API-Token: <secret>`, except **GET/HEAD `/health`** and **GET/HEAD `/ready`** (so load balancers and Kubernetes probes work without the token). All other paths—including `/version`, `/metrics`, and HTML stats pages—require the token when configured.
+**Optional API authentication:** set `"api_auth_token": "<secret>"` in `dnsplane.json` (or `server set api_auth_token '<secret>'` then `server save`). When set, clients must send either `Authorization: Bearer <secret>` or `X-API-Token: <secret>`, except **GET/HEAD `/health`** and **GET/HEAD `/ready`** (so automated health checks work without the token). All other paths—including `/version`, `/metrics`, and HTML stats pages—require the token when configured.
 
 **TLS, bind, and rate limits:** set `api_tls_cert` and `api_tls_key` to PEM file paths to serve the REST API over HTTPS. Use `dns_bind` and `api_bind` (e.g. `"127.0.0.1"`) to listen on a specific address instead of all interfaces. Per-IP limits: `api_rate_limit_rps` / `api_rate_limit_burst` (HTTP 429 when exceeded), `dns_rate_limit_rps` / `dns_rate_limit_burst` (DNS `REFUSED` when exceeded). Amplification hardening: `dns_amplification_max_ratio` caps packed response size vs packed request (0 disables).
 
@@ -333,20 +335,20 @@ Enable the REST API with `"api": true` in `dnsplane.json` and set `apiport` (e.g
 | Method | Path | Description |
 | --- | --- | --- |
 | GET | `/health` | Liveness: returns 200 when the API process is up. No dependency on DNS or other listeners. |
-| GET | `/ready` | Readiness: returns 200 when the API and DNS listener are both up, 503 otherwise. Response is JSON with `ready`, `api`, `dns`, `tui_client` (connected, addr, since), `listeners` (dns_port, api_port, api_enabled, client_socket_path, client_tcp_address), and **`build`** (`version`, `go_version`, `os`, `arch`). Useful for Kubernetes readiness probes and load balancers. |
+| GET | `/ready` | Readiness: returns 200 when the API and DNS listener are both up, 503 otherwise. Response is JSON with `ready`, `api`, `dns`, `tui_client` (connected, addr, since), `listeners` (dns_port, api_port, api_enabled, client_socket_path, client_tcp_address), and **`build`** (`version`, `go_version`, `os`, `arch`). Use this for load balancers and orchestrator readiness checks (e.g. Kubernetes). |
 | GET | `/version` | Build metadata as JSON: `version`, `go_version`, `os`, `arch` (same as `build` in `/stats` and `/ready`). |
 | GET | `/dns/records` | List DNS records (same data as the TUI). Returns JSON with `records` and optional `filter`, `messages`. |
 | POST | `/dns/records` | Add a DNS record. Body: `{"name":"...","type":"A","value":"...","ttl":3600}`. |
 | GET | `/dns/servers` | List upstreams plus health: `servers`, `upstream_health_check_enabled`, interval/failures hints, and `upstream_health` per `address_port` (unhealthy, consecutive_failures, last_probe_*, last_success_at). |
 | GET | `/dns/upstreams/health` | Same health slice and check settings without full server config. See [docs/upstream-health.md](docs/upstream-health.md). |
 | GET | `/stats` | Resolver stats as JSON: `session` / `total` scopes with resolver counters; top-level **`build`** (`version`, `go_version`, `os`, `arch`). When `full_stats` is enabled in config, includes `full_stats.enabled`, `full_stats.requesters_count`, `full_stats.domains_count`. |
-| GET | `/metrics` | Prometheus text format: counters (e.g. `dnsplane_queries_total`, `dnsplane_cache_hits_total`, `dnsplane_blocks_total`) and gauges (`dnsplane_server_start_time_seconds`). When full_stats is enabled, adds full_stats gauges. **`dnsplane_dns_resolve_duration_seconds`** histogram (`_bucket` with `le`, `_sum`, `_count`) reflects fast-path resolve latency; labeled **`dnsplane_dns_resolve_duration_seconds_bucket{qtype="A",le="..."}`** (and other QTYPEs) mirrors `/stats/perf` by query type. |
-| GET | `/stats/page` | Read-only stats dashboard (HTML): dark-themed page with panels for resolver stats, data counts, status (API/DNS/TUI client, listeners), and when `full_stats` is enabled a Full stats panel with requesters/domains counts and top N lists. **Gated by** `stats_page_enabled` (default true); when false → **404**. |
-| GET | `/stats/dashboard` | Live **dashboard** (HTML): light-themed layout with metric cards, replies-per-minute and average resolution time charts (last 60 minutes), and a rolling resolution log. **Gated by** `stats_dashboard_enabled` (default true); when false → **404**. |
-| GET | `/stats/dashboard/data` | JSON for the dashboard (`counters`, `perf`, `series`, `log`). **Gated by** `stats_dashboard_enabled`; when false → **404**. |
-| GET | `/stats/perf` | Resolver perf: **outcome_local** / **outcome_cache** / **outcome_upstream** / **outcome_none**; **histogram_cache_only_ms** + **avg_total_ms_cache_only** (cache hits only); **histogram_upstream_ms** (upstream path only). Mixed **histogram_total_ms** is misleading for diagnosis — compare cache vs upstream histograms. Reset with `POST /stats/perf/reset`. |
-| GET | `/stats/perf/page` | HTML dashboard for `/stats/perf` (auto-refresh every 2s, reset button). **Gated by** `stats_perf_page_enabled` (default true); when false → **404**. |
-| POST | `/stats/perf/reset` | Clears A-resolve perf counters (use before a benchmark run). |
+| GET | `/metrics` | Prometheus text format: counters and gauges (queries, cache hits, blocks, process uptime, etc.). With `full_stats` enabled, adds full-stats gauges. Histogram **`dnsplane_dns_resolve_duration_seconds`** reports resolve latency by QTYPE (same breakdown as `/stats/perf`). |
+| GET | `/stats/page` | Read-only HTML stats page (resolver counts, data file status, listeners; optional full-stats panel when enabled). **404** if `stats_page_enabled` is false (default is on). |
+| GET | `/stats/dashboard` | Live HTML dashboard (charts and rolling log). **404** if `stats_dashboard_enabled` is false (default is on). |
+| GET | `/stats/dashboard/data` | JSON backing the dashboard (`counters`, `perf`, `series`, `log`). **404** if `stats_dashboard_enabled` is false. |
+| GET | `/stats/perf` | JSON performance breakdown: outcomes (local/cache/upstream/none) and histograms for cache-only vs upstream paths. Prefer cache-only vs upstream histograms for tuning; the combined total histogram mixes both. Reset with `POST /stats/perf/reset`. |
+| GET | `/stats/perf/page` | HTML view of `/stats/perf` (auto-refresh, reset button). **404** if `stats_perf_page_enabled` is false (default is on). |
+| POST | `/stats/perf/reset` | Clears A-record performance counters (use before measuring latency). |
 
 ### curl examples (upstream health)
 
@@ -387,7 +389,7 @@ Rotation is checked at most every 5 minutes to avoid repeated stat calls. If wri
 
 ## Running as a systemd service
 
-A systemd unit file is provided under `systemd/dnsplane.service`. It runs the binary from `/usr/local/dnsplane/` with the **server** command and **explicitly** passes config and data paths under `/etc/dnsplane/` (via `--config` and server flags `--dnsservers`, `--dnsrecords`, `--cache`). dnsplane does not use or create files in `/etc` by default; that only happens when you use this service file or pass those paths yourself.
+A systemd unit file is provided under `systemd/dnsplane.service`. It runs the binary from `/usr/local/dnsplane/` with the **server** command and passes config and data paths under `/etc/dnsplane/` (`--config` plus `--dnsservers`, `--dnsrecords`, `--cache`). dnsplane does not use `/etc` unless you use this unit or pass those paths yourself.
 
 1. Install the binary: place the `dnsplane` executable at `/usr/local/dnsplane/dnsplane`.
 2. Copy the unit file: `cp systemd/dnsplane.service /etc/systemd/system/`.
@@ -396,15 +398,15 @@ A systemd unit file is provided under `systemd/dnsplane.service`. It runs the bi
 
 When the service runs, it will create default `dnsplane.json` and JSON data files in `/etc/dnsplane/` if they are missing, because the unit file passes those paths. Ensure the service user (e.g. root) can write to that directory for the first start. To run as an unprivileged user, see the comments in `systemd/dnsplane.service`: create a `dnsplane` user, set `User=`/`Group=`, add `StateDirectory=dnsplane`, and use data paths under `/var/lib/dnsplane`.
 
-## Roadmap
+## Features (summary)
 
-- Ad-blocking (implemented; load from file or URL, merge multiple lists, config `adblock_list_files`)
-- Full stats tracking (implemented; optional, see config)
-- Per-server domain whitelist (implemented; `dns add/update` with `whitelist:example.com,example.org`)
-- Records from URL or Git (implemented; read-only, with refresh interval)
-- Server config/set/save and start/stop (dns, api, client) in TUI (implemented)
+- **Adblock:** Load lists from file or URL; merge multiple sources; optional `adblock_list_files` in config.
+- **Full stats:** Optional persistent stats DB and TUI `statistics` commands (`full_stats`, `full_stats_dir`).
+- **Split DNS:** Per-upstream **`domain_whitelist`** in `dnsservers.json` / TUI.
+- **Records from URL or Git:** Read-only remote sources with a refresh interval.
+- **TUI server control:** `server config` / `set` / `save`, and start/stop for DNS, API, and client listeners.
 
-0.2.x adds shutdown timeouts for systemd, the **statistics** TUI (requesters/domains from full_stats), and build info (Go version, OS, arch) in `stats`.
+Recent releases add graceful shutdown timeouts for systemd, **statistics** in the TUI when `full_stats` is enabled, and build metadata (version, Go, OS, arch) on stats and health endpoints.
 
 ## Dependencies & Documentation
 [![Known Vulnerabilities](https://snyk.io/test/github/network-plane/dnsplane/badge.svg)](https://snyk.io/test/github/network-plane/dnsplane)
@@ -422,14 +424,14 @@ When the service runs, it will create default `dnsplane.json` and JSON data file
 
 [![Go Mod](https://img.shields.io/github/go-mod/go-version/network-plane/dnsplane?style=for-the-badge)]()
 [![Go Reference](https://pkg.go.dev/badge/github.com/network-plane/dnsplane.svg)](https://pkg.go.dev/github.com/network-plane/dnsplane)
-[![Dependancies](https://img.shields.io/librariesio/github/network-plane/dnsplane?style=for-the-badge)](https://libraries.io/github/network-plane/dnsplane)
+[![Dependencies](https://img.shields.io/librariesio/github/network-plane/dnsplane?style=for-the-badge)](https://libraries.io/github/network-plane/dnsplane)
 
 ![SBOM](https://github.com/network-plane/dnsplane/actions/workflows/sbom.yml/badge.svg?branch=master)
 
 
 ## Contributing
 
-Contributions are always welcome! All contributions must follow the [Google Go Style Guide](https://google.github.io/styleguide/go/). The project uses the [Developer Certificate of Origin (DCO)](https://developercertificate.org/)—see [CONTRIBUTING.md](CONTRIBUTING.md) for how to sign off your commits. Project governance (roles and decision-making) is described in [GOVERNANCE.md](GOVERNANCE.md).
+Contributions are welcome. Please follow the [Google Go Style Guide](https://google.github.io/styleguide/go/). Commits use the [Developer Certificate of Origin (DCO)](https://developercertificate.org/)—see [CONTRIBUTING.md](CONTRIBUTING.md) for sign-off. Roles and decisions are described in [GOVERNANCE.md](GOVERNANCE.md).
 
 ## Commit Activity
 ![GitHub last commit](https://img.shields.io/github/last-commit/network-plane/dnsplane)
@@ -445,6 +447,6 @@ Contributions are always welcome! All contributions must follow the [Google Go S
 
 ## License
 
-I will always follow the Linux Kernel License as primary, if you require any other OPEN license please let me know and I will try to accomodate it.
+Licensed under [GPL-2.0-only](https://opensource.org/license/gpl-2-0).
 
 [![License](https://img.shields.io/github/license/network-plane/dnsplane)](https://opensource.org/license/gpl-2-0)

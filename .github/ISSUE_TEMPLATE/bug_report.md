@@ -1,38 +1,27 @@
 ---
 name: Bug report
-about: Create a report to help us improve
+about: Report something that broke or behaves incorrectly
 title: ''
 labels: ''
 assignees: ''
 
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+**What went wrong**  
+Short description of the symptom (wrong answer, crash, hang, error message).
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+**How to reproduce**  
+1. `dnsplane` version (from `dnsplane server` or `GET /version`).
+2. OS and architecture (e.g. Linux x86_64, macOS arm64).
+3. How you run it (e.g. `./dnsplane server`, systemd, container).
+4. Minimal config or flags: `dnsplane.json` snippets, or `--config` / `--port` / `--dnsrecords` as relevant.
+5. Query or command that triggers the issue (e.g. `dig @127.0.0.1 example.com A`).
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+**What you expected**  
+What should have happened instead.
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+**Logs / output**  
+Relevant lines from `dnsserver.log`, `apiserver.log`, or terminal output (redact tokens and private IPs).
 
-**Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
-
-**Smartphone (please complete the following information):**
- - Device: [e.g. iPhone6]
- - OS: [e.g. iOS8.1]
- - Browser [e.g. stock browser, safari]
- - Version [e.g. 22]
-
-**Additional context**
-Add any other context about the problem here.
+**Extra context**  
+Anything else that helps (upstream provider, DNSSEC on/off, DoT/DoH, etc.).

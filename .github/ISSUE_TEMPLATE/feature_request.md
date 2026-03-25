@@ -1,20 +1,20 @@
 ---
 name: Feature request
-about: Suggest an idea for this project
+about: Suggest an improvement or new capability
 title: ''
 labels: ''
 assignees: ''
 
 ---
 
-**Is your feature request related to a problem? Please describe.**
-A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
+**Problem or use case**  
+What are you trying to do today that dnsplane does not support well?
 
-**Describe the solution you'd like**
-A clear and concise description of what you want to happen.
+**What you’d like**  
+Describe the behavior or interface you want (CLI, TUI, API, config). Examples help.
 
-**Describe alternatives you've considered**
-A clear and concise description of any alternative solutions or features you've considered.
+**Alternatives**  
+Other tools, workflows, or workarounds you considered.
 
-**Additional context**
-Add any other context or screenshots about the feature request here.
+**Context**  
+Deployment type (home lab, VPS, LAN resolver), approximate query volume, or constraints (no TLS, air-gapped, etc.).

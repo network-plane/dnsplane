@@ -1,42 +1,44 @@
-# dnsplane TODO
+# Roadmap and backlog
+
+Work tracked for future releases and packaging. For **using** dnsplane, see the [README](README.md).
 
 ---
 
-## 1. Package building (RPM, DEB)
+## 1. OS packages (RPM, DEB)
 
-- [ ] Add spec file (e.g. packaging/dnsplane.spec): build binary, install to /usr/bin or /usr/local/dnsplane, install systemd unit, optional conffiles and dnsplane user. Version/Release from tag or VERSION file.
-- [ ] Add debian/: control, rules, changelog, compat, optional dnsplane.install; rules builds binary, installs binary and systemd unit.
-- [ ] Document in README or docs/packaging.md: build and sign with **pbuild** only; no GitHub Actions/cloud CI for building/signing (private keys must not be in GitHub).
-- [ ] Optional: APK (Alpine), Homebrew formula (macOS), Windows MSI/zip.
+- [ ] RPM spec (e.g. `packaging/dnsplane.spec`): install binary, systemd unit, optional dedicated user and config file handling. Version/release from git tag or `VERSION` file.
+- [ ] Debian packaging (`debian/`): control, rules, changelog, install paths for binary and unit.
+- [ ] Packaging notes: how to build and sign packages locally; keep signing keys off shared CI unless you use project-specific secret storage.
+- [ ] Optional: Alpine APK, Homebrew formula, Windows MSI or zip.
 
 ---
 
-## 2. Various
+## 2. API and resolver enhancements
 
-- [ ] `GET /dns/records`: optional query params `?name=`, `?type=` for filtering; mirror `dnsrecords.List`.
-- [ ] Per-server fallback: optional second address when whitelist server fails (resolver + dnsservers).
-- [ ] Record PATCH: use identifier (e.g. name+type+value) for update/delete to avoid overwrites.
-- [ ] Extra micro-opts if profiling shows a clear target.
+- [ ] `GET /dns/records`: optional `?name=` / `?type=` filters aligned with the TUI list behavior.
+- [ ] Per-server fallback: optional second upstream when a whitelist-only server fails.
+- [ ] Record updates by stable id (name + type + value) to avoid accidental overwrites.
+- [ ] Performance work driven by profiling results if a clear bottleneck appears.
 
 ---
 
 ## 3. Clustered DNS (multi-node sync)
 
-- [ ] Topology beyond current LWW: explicit primary–replica mode, Raft/leader election, or stronger conflict policies (configurable).
-- [ ] Discovery: optional **DNS SRV** (or similar) for dynamic peer discovery (today: static `cluster_peers` only).
+- [ ] Stronger topology options than last-writer-wins: primary/replica, Raft, or configurable conflict rules.
+- [ ] Optional peer discovery (e.g. DNS SRV) instead of only static `cluster_peers`.
 
 ---
 
 ## 4. ISPConfig and cPanel compatibility
 
-Goal: replace BIND/PowerDNS behind ISPConfig or cPanel; panels keep managing zones (DB → zone files → reload), dnsplane serves from those files.
+**Goal:** Run dnsplane where panels already manage zones (BIND/PowerDNS), reading zone files the panel maintains.
 
-- [ ] BIND zone file parser: parse $ORIGIN, $TTL, SOA, NS, A, AAAA, CNAME, MX, TXT, PTR and other common RR types; relative names and multi-line records; output loadable into dnsplane record store.
-- [ ] Multi-zone / zone-aware loading: merge all zones into one store with FQDN keys, or per-zone store with longest-match lookup; correct NS/SOA per zone.
-- [ ] Zone file source config: records_source type "bind_zones" with location (directory + optional named.conf for zone→file mapping); on startup and reload, scan, parse, load into resolver.
-- [ ] Reload trigger: file watch (inotify/fsnotify) on zone directory; and/or API (e.g. POST /reload) for panel script to call instead of rndc; optionally rndc-compatible daemon (port 953) so rndc reload works unchanged.
-- [ ] Zone transfer: if secondaries pull from this server, add AXFR (and optionally IXFR) so dnsplane can act as primary.
-- [ ] ISPConfig docs: path where ISPConfig writes zones and named.conf.local (e.g. /etc/bind); records_source + file watch or reload-API script.
-- [ ] cPanel docs: zone path (e.g. /var/named/), reload flow (rndc or script); point dnsplane at path + watch or wrapper script; note WHM Nameserver selection and PowerDNS variant.
-- [ ] Optional: RFC 2136 dynamic updates (nsupdate) for panels/users that use them.
-- [ ] README: add "Using dnsplane with ISPConfig" and "Using dnsplane with cPanel" (config example, reload method, wrapper scripts).
+- [ ] BIND zone parser: `$ORIGIN`, `$TTL`, SOA, NS, A, AAAA, CNAME, MX, TXT, PTR, and common types; relative names and multi-line RRs; load into dnsplane’s record store.
+- [ ] Multi-zone storage: merged FQDN store or per-zone store with correct NS/SOA and longest-match lookup.
+- [ ] `records_source` variant for zone directories (optional `named.conf` mapping); load on startup and reload.
+- [ ] Reload: `inotify`/fsnotify on zone directory, or `POST /reload`, or optional `rndc`-style control if required by hosting workflows.
+- [ ] Zone transfer: AXFR (and optionally IXFR) if this server must act as a primary for secondaries.
+- [ ] ISPConfig-oriented notes: typical zone paths and reload flow.
+- [ ] cPanel-oriented notes: `/var/named/` (or equivalent), reload via `rndc` or scripts, WHM nameserver options.
+- [ ] Optional RFC 2136 dynamic updates where panels expect them.
+- [ ] README sections: “Using dnsplane with ISPConfig” and “Using dnsplane with cPanel” (examples and reload scripts).
