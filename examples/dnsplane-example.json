@@ -29,6 +29,8 @@
   "stale_while_revalidate": true,
   "cache_warm_enabled": true,
   "cache_warm_interval_seconds": 10,
+  "cache_compact_enabled": true,
+  "cache_compact_interval_seconds": 1800,
   "stats_page_enabled": true,
   "stats_perf_page_enabled": true,
   "stats_dashboard_enabled": true,
