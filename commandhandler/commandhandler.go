@@ -543,6 +543,7 @@ func runCacheCompact() func(tui.CommandRuntime, tui.CommandInput) tui.CommandRes
 		now := time.Now()
 		removed := dnsData.CompactExpiredCacheRecords(now)
 		dnsData.NoteCacheCompactRun(removed)
+		dnsData.BumpCacheCompactScheduleAfterManual()
 		remaining := dnsData.CacheRecordCount()
 		if removed > 0 {
 			return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages(

@@ -9,6 +9,15 @@ import (
 	"dnsplane/dnsrecordcache"
 )
 
+// CacheCompactInterval returns the effective periodic compaction duration (seconds from config; if < 60, 1800).
+func CacheCompactInterval(intervalSeconds int) time.Duration {
+	sec := intervalSeconds
+	if sec < 60 {
+		sec = 1800
+	}
+	return time.Duration(sec) * time.Second
+}
+
 // CompactExpiredCacheRecords removes cache rows whose Expiry is before now (or Expiry is zero).
 // It rebuilds the cache index and queues a persist to dnscache.json. Returns how many rows were removed.
 func (d *DNSResolverData) CompactExpiredCacheRecords(now time.Time) int {
@@ -82,4 +91,30 @@ func (d *DNSResolverData) CacheCompactSnapshot() (next, last time.Time, lastRemo
 	d.cacheCompactScheduleMu.RLock()
 	defer d.cacheCompactScheduleMu.RUnlock()
 	return d.nextCacheCompactAt, d.lastCacheCompactAt, d.lastCacheCompactRemoved
+}
+
+// CacheCompactBumpReceiver returns the channel the cache compact loop selects on to reschedule after a manual compact.
+func (d *DNSResolverData) CacheCompactBumpReceiver() <-chan struct{} {
+	if d == nil || d.cacheCompactBump == nil {
+		return nil
+	}
+	return d.cacheCompactBump
+}
+
+// BumpCacheCompactScheduleAfterManual updates the next scheduled compact time to now+interval and wakes the
+// background compact loop so it sleeps a full interval again (only when cache + scheduled compact are enabled).
+func (d *DNSResolverData) BumpCacheCompactScheduleAfterManual() {
+	if d == nil || d.cacheCompactBump == nil {
+		return
+	}
+	cfg := d.GetResolverSettings()
+	if !cfg.CacheRecords || !cfg.CacheCompactEnabled {
+		return
+	}
+	deadline := time.Now().Add(CacheCompactInterval(cfg.CacheCompactIntervalSeconds)).UTC()
+	d.SetNextCacheCompactAt(deadline)
+	select {
+	case d.cacheCompactBump <- struct{}{}:
+	default:
+	}
 }
