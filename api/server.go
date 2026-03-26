@@ -226,6 +226,7 @@ func RegisterDNSRoutes(router chi.Router) {
 	router.Get("/metrics", metricsHandler)
 	router.Get("/stats/page", statsPageHandler)
 	router.Get("/stats/dashboard", dashboardPageHandler)
+	router.Get("/stats/dashboard/icon", dashboardIconSVGHandler)
 	router.Get("/stats/dashboard/data", dashboardDataHandler)
 	router.Get("/stats/dashboard/fullstats/data", fullstatsBrowseHandler)
 	router.Get("/stats/perf", perfStatsHandler)

@@ -314,6 +314,7 @@ func registerContexts() {
 		{name: "server", description: "- Server Management", tags: []string{"server"}},
 		{name: "tools", description: "- Diagnostic Tools", tags: []string{"tools", "diagnostics"}},
 		{name: "adblock", description: "- Adblock Management", tags: []string{"adblock", "blocking"}},
+		{name: "cluster", description: "- Cluster (sync, peers, admin)", tags: []string{"cluster", "sync", "ha"}},
 	}
 	for _, ctx := range contexts {
 		var opts []tui.ContextOption
@@ -542,6 +543,7 @@ func runCacheCompact() func(tui.CommandRuntime, tui.CommandInput) tui.CommandRes
 		now := time.Now()
 		removed := dnsData.CompactExpiredCacheRecords(now)
 		dnsData.NoteCacheCompactRun(removed)
+		dnsData.BumpCacheCompactScheduleAfterManual()
 		remaining := dnsData.CacheRecordCount()
 		if removed > 0 {
 			return tui.CommandResult{Status: tui.StatusSuccess, Messages: infoMessages(
@@ -1699,19 +1701,86 @@ func RegisterCommands() {
 			Tags:        []string{"adblock", "clear"},
 			Examples:    []tui.Example{{Description: "Clear block list", Command: "adblock clear"}},
 		}, runAdblockClear()),
+
+		// Cluster: context "cluster" (enter with `cluster`, then status | pull | join | peer | push).
 		newLegacyFactory(tui.CommandSpec{
-			Name:        "cluster",
-			Summary:     "Multi-node cluster (sync, peers, admin)",
-			Description: "Cluster status, pull, join info, peer add/remove/set-role, push records and config.",
-			Usage:       "cluster status | pull | join | peer ... | push ...",
+			Context:     "cluster",
+			Name:        "status",
+			Summary:     "Cluster runtime status (JSON)",
+			Description: "Shows JSON cluster runtime status (peers, probe RTT, errors).",
+			Usage:       "cluster status",
 			Category:    "Cluster",
-			Tags:        []string{"cluster", "sync", "ha"},
-			Args:        []tui.ArgSpec{{Name: "subcommand", Description: "status, pull, join, peer, push", Required: false}},
+			Tags:        []string{"cluster", "status", "sync"},
+			Examples:    []tui.Example{{Description: "Show status", Command: "cluster status"}},
+		}, runClusterStatus()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "cluster",
+			Name:        "pull",
+			Summary:     "Force pull snapshots from peers",
+			Description: "Triggers an immediate pull of snapshots from all configured peers.",
+			Usage:       "cluster pull",
+			Category:    "Cluster",
+			Tags:        []string{"cluster", "pull", "sync"},
+			Examples:    []tui.Example{{Description: "Force pull", Command: "cluster pull"}},
+		}, clusterPullRunner),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "cluster",
+			Name:        "sync",
+			Summary:     "Alias for cluster pull",
+			Description: "Same as cluster pull.",
+			Usage:       "cluster sync",
+			Category:    "Cluster",
+			Tags:        []string{"cluster", "sync"},
+			Hidden:      true,
+		}, clusterPullRunner),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "cluster",
+			Name:        "join",
+			Summary:     "Show join identity (dial address, token fingerprint)",
+			Description: "Prints node_id, listen/dial address, and SHA-256 hex of cluster_auth_token for verification.",
+			Usage:       "cluster join",
+			Category:    "Cluster",
+			Tags:        []string{"cluster", "join"},
+			Examples:    []tui.Example{{Description: "Show dial address and token fingerprint", Command: "cluster join"}},
+		}, clusterJoinRunner),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "cluster",
+			Name:        "info",
+			Summary:     "Alias for cluster join",
+			Description: "Same as cluster join.",
+			Usage:       "cluster info",
+			Category:    "Cluster",
+			Tags:        []string{"cluster", "join"},
+			Hidden:      true,
+		}, clusterJoinRunner),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "cluster",
+			Name:        "peer",
+			Summary:     "Add/remove peers or set remote replica role",
+			Description: "Manage cluster_peers locally; optional remote admin for role.",
+			Usage:       "cluster peer add|remove|set-role ...",
+			Category:    "Cluster",
+			Tags:        []string{"cluster", "peer", "admin"},
+			Args:        []tui.ArgSpec{{Name: "subcommand", Description: "add, remove, set-role", Repeatable: true}},
 			Examples: []tui.Example{
-				{Description: "Show cluster status JSON", Command: "cluster status"},
 				{Description: "Add peer and mark readonly on remote", Command: "cluster peer add 192.168.1.5:7946 readonly"},
+				{Description: "Remove peer", Command: "cluster peer remove 192.168.1.5:7946"},
 			},
-		}, runCluster()),
+		}, runClusterPeer()),
+		newLegacyFactory(tui.CommandSpec{
+			Context:     "cluster",
+			Name:        "push",
+			Summary:     "Push records snapshot or cluster config to a peer",
+			Description: "push records sends a full snapshot; push config sends auth token and peers (bootstrap).",
+			Usage:       "cluster push records|config <host:port>",
+			Category:    "Cluster",
+			Tags:        []string{"cluster", "push", "admin"},
+			Args:        []tui.ArgSpec{{Name: "kind_and_target", Description: "records|config and host:port", Repeatable: true}},
+			Examples: []tui.Example{
+				{Description: "Push records to peer", Command: "cluster push records 192.168.1.5:7946"},
+				{Description: "Push config to peer", Command: "cluster push config 192.168.1.5:7946"},
+			},
+		}, runClusterPush()),
 	}
 
 	for _, cmd := range commands {

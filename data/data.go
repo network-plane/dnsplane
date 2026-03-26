@@ -54,6 +54,7 @@ type DNSResolverData struct {
 	nextCacheCompactAt      time.Time
 	lastCacheCompactAt      time.Time
 	lastCacheCompactRemoved int
+	cacheCompactBump        chan struct{} // size 1; manual compact wakes loop to reset deadline
 }
 
 // clusterSkipNotify: when non-zero, storeRecords skips notifying cluster after a successful save (avoids push loops).
@@ -204,6 +205,7 @@ func (d *DNSResolverData) Initialize() error {
 	d.Stats = DNSStats{ServerStartTime: time.Now()}
 
 	d.persistCh = make(chan struct{}, 1)
+	d.cacheCompactBump = make(chan struct{}, 1)
 	d.persistWg.Add(1)
 	go d.cachePersistWorker()
 

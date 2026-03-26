@@ -30,18 +30,20 @@ State file **`cluster_state.json`** is created next to `dnsplane.json`. It holds
 
 ## TUI commands
 
-Run `cluster ?` in the server TUI. Common flows:
+**Cluster** is a TUI **context**: type `cluster` to enter it, then run subcommands without repeating `cluster` (same pattern as `dns`, `server`, etc.). You can also run a one-liner from the root prompt, e.g. `cluster status`.
 
-| Command | Purpose |
-|--------|---------|
-| `cluster status` | JSON runtime status (peers, probe RTT, errors). |
-| `cluster pull` | Force pull from all configured peers. |
-| `cluster join` | Show **node_id**, listen address, **dial address**, and **SHA-256 hex** of `cluster_auth_token` for operator verification. |
-| `cluster peer add <host:port> [full\|readonly]` | Add peer to local config; optional **remote** role via `admin_config_apply` (requires `cluster_admin` + `cluster_admin_token`). |
-| `cluster peer remove <host:port>` | Remove peer from local `cluster_peers`. |
-| `cluster peer set-role <host:port> full|readonly` | Push `cluster_replica_only` to the **remote** node. |
-| `cluster push records <host:port>` | Send one full `records_full` snapshot to that peer. |
-| `cluster push config <host:port>` | Push `cluster_auth_token` and `cluster_peers` from this node to the peer (for bootstrap). |
+Inside the **cluster** context, `?` / `help` on a command shows usage. Typical commands:
+
+| In context | One-liner from root | Purpose |
+|------------|---------------------|---------|
+| `status` | `cluster status` | JSON runtime status (peers, probe RTT, errors). |
+| `pull` or `sync` | `cluster pull` | Force pull from all configured peers. |
+| `join` or `info` | `cluster join` | **node_id**, listen address, **dial address**, **SHA-256 hex** of `cluster_auth_token`. |
+| `peer add …` | `cluster peer add …` | Add peer locally; optional **remote** role via `admin_config_apply` (requires `cluster_admin` + `cluster_admin_token`). |
+| `peer remove …` | `cluster peer remove …` | Remove peer from local `cluster_peers`. |
+| `peer set-role …` | `cluster peer set-role …` | Push `cluster_replica_only` to the **remote** node. |
+| `push records …` | `cluster push records …` | Send one full `records_full` snapshot to that peer. |
+| `push config …` | `cluster push config …` | Push `cluster_auth_token` and `cluster_peers` (bootstrap). |
 
 `server set` also supports the `cluster_*` keys (then `server save`).
 
@@ -61,8 +63,8 @@ The target persists via `data.UpdateSettings`. **REST API does not** expose conf
 ## Bootstrapping a new node
 
 1. On the **new** server: enable cluster, set `cluster_auth_token` to the same value as the cluster, `cluster_listen_addr`, and optionally `cluster_admin_token` (same as other admins if you want remote role/config pushes).
-2. Run **`cluster join`** and copy **dial_address** (and verify **token_sha256_hex** matches the shared secret).
-3. On a **full** admin node: **`cluster peer add <dial_address> [readonly]`** to add the peer and optionally set replica mode remotely; then **`cluster push config <dial_address>`** and **`cluster push records <dial_address>`** to align token, peers, and records.
+2. Run **`join`** (in cluster context) or **`cluster join`** from root; copy **dial_address** (and verify **token_sha256_hex** matches the shared secret).
+3. On a **full** admin node: **`peer add <dial_address> [readonly]`** (or **`cluster peer add …`** from root) to add the peer and optionally set replica mode remotely; then **`push config <dial_address>`** and **`push records <dial_address>`** to align token, peers, and records.
 4. On the **new** node: add the full server(s) to `cluster_peers` (or receive them via `push config`) so pulls/pushes are symmetric.
 
 ## Protocol (summary)
