@@ -258,6 +258,7 @@ const dashboardHTML = `<!DOCTYPE html>
       padding: 0.4rem 0.55rem;
       font-size: 0.88rem;
     }
+    .res-purge-wrap { margin-left: auto; display: flex; align-items: flex-end; }
     .res-chips {
       display: flex;
       flex-wrap: wrap;
@@ -319,6 +320,24 @@ const dashboardHTML = `<!DOCTYPE html>
       letter-spacing: 0.03em;
       white-space: nowrap;
     }
+    button.res-th-sort {
+      background: none;
+      border: none;
+      color: inherit;
+      font: inherit;
+      text-transform: inherit;
+      letter-spacing: inherit;
+      cursor: pointer;
+      padding: 0;
+      margin: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.28rem;
+      white-space: nowrap;
+      text-align: inherit;
+    }
+    button.res-th-sort:hover { color: var(--accent); }
+    .res-sort-ind { font-size: 0.85em; opacity: 0.85; min-width: 0.65em; display: inline-block; }
     .res-table tbody tr:hover { background: var(--surface-hover); }
     .res-cell-filter {
       cursor: pointer;
@@ -332,6 +351,7 @@ const dashboardHTML = `<!DOCTYPE html>
     }
     .res-table td.res-time { white-space: nowrap; color: var(--muted); font-size: 0.78rem; }
     .res-table th.num, .res-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .res-table th.num button.res-th-sort { width: 100%; justify-content: flex-end; }
     iframe.view-embed {
       flex: 1;
       width: 100%;
@@ -821,23 +841,15 @@ const dashboardHTML = `<!DOCTYPE html>
           <label>Source IP <input type="search" id="res-in-ip" placeholder="Partial match" autocomplete="off" spellcheck="false" aria-label="Filter by source IP"></label>
           <label>Type <input type="search" id="res-in-qtype" placeholder="e.g. A, AAAA" autocomplete="off" spellcheck="false" aria-label="Filter by query type"></label>
           <label>Request <input type="search" id="res-in-qname" placeholder="Domain / name partial" autocomplete="off" spellcheck="false" aria-label="Filter by QNAME"></label>
+          <div class="res-purge-wrap">
+            <button type="button" class="fs-btn" id="res-purge" title="Remove all entries from the in-memory resolution log">Purge log</button>
+          </div>
         </div>
         <div class="res-chips" id="res-chips-wrap"><span class="res-chips-label">Quick filters (click a row cell to add):</span><span id="res-chips"></span></div>
         <div class="res-count" id="res-count">—</div>
         <div class="res-table-wrap">
           <table class="res-table">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Client IP</th>
-                <th>Request</th>
-                <th>Type</th>
-                <th>Outcome</th>
-                <th>Upstream</th>
-                <th class="num">ms</th>
-                <th>Reply</th>
-              </tr>
-            </thead>
+            <thead id="res-thead"></thead>
             <tbody id="res-tbody"></tbody>
           </table>
         </div>
@@ -932,7 +944,7 @@ const dashboardHTML = `<!DOCTYPE html>
     let chartReplies, chartLatency;
     let dashboardTimer = null;
     let resolutionsTimer = null;
-    var resState = { raw: [], chips: [] };
+    var resState = { raw: [], chips: [], sortCol: 'at', sortDir: 'desc' };
     function chartCommon() {
       const grid = '#30363d';
       const tick = '#8b949e';
@@ -1035,12 +1047,93 @@ const dashboardHTML = `<!DOCTYPE html>
       resRenderChips();
       renderResolutionsGrid();
     }
+    function resDefaultSortDir(col) {
+      if (col === 'at' || col === 'duration_ms') return 'desc';
+      return 'asc';
+    }
+    function resStrCmp(a, b) {
+      const sa = String(a == null ? '' : a).toLowerCase();
+      const sb = String(b == null ? '' : b).toLowerCase();
+      if (sa < sb) return -1;
+      if (sa > sb) return 1;
+      return 0;
+    }
+    function resAtMs(e) {
+      return e && e.at ? new Date(e.at).getTime() : 0;
+    }
+    function resCompareRows(a, b, col) {
+      var c = 0;
+      if (col === 'at') {
+        c = resAtMs(a) - resAtMs(b);
+      } else if (col === 'duration_ms') {
+        var na = (a.duration_ms == null || isNaN(a.duration_ms)) ? NaN : Number(a.duration_ms);
+        var nb = (b.duration_ms == null || isNaN(b.duration_ms)) ? NaN : Number(b.duration_ms);
+        if (isNaN(na) && isNaN(nb)) c = 0;
+        else if (isNaN(na)) c = -1;
+        else if (isNaN(nb)) c = 1;
+        else c = na - nb;
+      } else if (col === 'client_ip') {
+        c = resStrCmp(a.client_ip, b.client_ip);
+      } else if (col === 'qname') {
+        c = resStrCmp(a.qname, b.qname);
+      } else if (col === 'qtype') {
+        c = resStrCmp(a.qtype, b.qtype);
+      } else if (col === 'outcome') {
+        c = resStrCmp(a.outcome, b.outcome);
+      } else if (col === 'upstream') {
+        c = resStrCmp(a.upstream, b.upstream);
+      } else if (col === 'record') {
+        c = resStrCmp(a.record, b.record);
+      } else {
+        c = resAtMs(a) - resAtMs(b);
+      }
+      if (c !== 0) return c;
+      return resAtMs(b) - resAtMs(a);
+    }
+    function resSortFiltered(out) {
+      var col = resState.sortCol || 'at';
+      var dir = (resState.sortDir === 'asc') ? 1 : -1;
+      out.sort(function(a, b) {
+        return resCompareRows(a, b, col) * dir;
+      });
+    }
+    function renderResolutionsHead() {
+      var cols = [
+        { key: 'at', label: 'Time' },
+        { key: 'client_ip', label: 'Client IP' },
+        { key: 'qname', label: 'Request' },
+        { key: 'qtype', label: 'Type' },
+        { key: 'outcome', label: 'Outcome' },
+        { key: 'upstream', label: 'Upstream' },
+        { key: 'duration_ms', label: 'ms', num: true },
+        { key: 'record', label: 'Reply' }
+      ];
+      var sc = resState.sortCol || 'at';
+      var sd = resState.sortDir || 'desc';
+      var h = '<tr>';
+      for (var i = 0; i < cols.length; i++) {
+        var c = cols[i];
+        var active = sc === c.key;
+        var ind = active ? (sd === 'asc' ? '\u2191' : '\u2193') : '';
+        var as = active ? (sd === 'asc' ? 'ascending' : 'descending') : 'none';
+        var label = 'Sort by ' + c.label + (active ? (' (' + (sd === 'asc' ? 'ascending' : 'descending') + ')') : '');
+        var thOpen = '<th';
+        if (c.num) thOpen += ' class="num"';
+        thOpen += ' aria-sort="' + as + '">';
+        h += thOpen + '<button type="button" class="res-th-sort" data-res-col="' + escAttr(c.key) + '" title="' + escAttr(label) + '" aria-label="' + escAttr(label) + '">' + esc(c.label) + ' <span class="res-sort-ind">' + ind + '</span></button></th>';
+      }
+      h += '</tr>';
+      var thead = document.getElementById('res-thead');
+      if (thead) thead.innerHTML = h;
+    }
     function renderResolutionsGrid() {
+      renderResolutionsHead();
       const rows = resState.raw || [];
       const out = [];
       for (let i = 0; i < rows.length; i++) {
         if (resRowMatches(rows[i])) out.push(rows[i]);
       }
+      resSortFiltered(out);
       document.getElementById('res-count').textContent = 'Showing ' + out.length + ' of ' + rows.length + ' loaded';
       let h = '';
       for (let j = 0; j < out.length; j++) {
@@ -1079,6 +1172,32 @@ const dashboardHTML = `<!DOCTYPE html>
       }
     }
     function wireResolutions() {
+      const purgeBtn = document.getElementById('res-purge');
+      if (purgeBtn) purgeBtn.addEventListener('click', async function() {
+        if (!confirm('Clear the in-memory resolution log? The activity list on the main dashboard uses the same data. Per-minute charts are not reset.')) return;
+        try {
+          const r = await fetch('/stats/dashboard/resolutions/purge', { method: 'POST' });
+          const j = await r.json().catch(function() { return {}; });
+          if (!r.ok) throw new Error(j.error || j.message || ('HTTP ' + r.status));
+          await loadResolutionsData();
+        } catch (err) {
+          document.getElementById('res-count').textContent = 'Purge failed: ' + err.message;
+        }
+      });
+      document.getElementById('res-thead').addEventListener('click', function(e) {
+        const btn = e.target.closest('button[data-res-col]');
+        if (!btn) return;
+        e.preventDefault();
+        const col = btn.getAttribute('data-res-col');
+        if (!col) return;
+        if (resState.sortCol === col) {
+          resState.sortDir = resState.sortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          resState.sortCol = col;
+          resState.sortDir = resDefaultSortDir(col);
+        }
+        renderResolutionsGrid();
+      });
       ['res-in-ip','res-in-qtype','res-in-qname'].forEach(function(id) {
         const el = document.getElementById(id);
         if (el) el.addEventListener('input', function() { renderResolutionsGrid(); });

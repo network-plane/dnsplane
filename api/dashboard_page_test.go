@@ -30,6 +30,9 @@ func TestDashboardPageHandler(t *testing.T) {
 	if !strings.Contains(body, "view-resolutions") {
 		t.Fatal("expected resolutions log view in dashboard markup")
 	}
+	if !strings.Contains(body, `id="res-purge"`) {
+		t.Fatal("expected purge button on resolutions log view")
+	}
 }
 
 func TestDashboardResolutionsHandler(t *testing.T) {
