@@ -119,6 +119,7 @@ func dashboardDataHandler(w http.ResponseWriter, r *http.Request) {
 		payload["cluster"] = snap
 	}
 	payload["build"] = BuildInfo()
+	payload["per_sec_rates"] = data.GetDashboardPerSecRates(5)
 	writeJSON(w, http.StatusOK, payload)
 }
 
@@ -746,6 +747,20 @@ const dashboardHTML = `<!DOCTYPE html>
         <div id="err" class="err"></div>
 
         <div class="dashboard-section">
+          <h2 class="section-kicker">§Ic:sec_rates§Live rates</h2>
+          <div class="metric-row">
+            <div class="card"><h3>§Ic:queries§Resolutions/s</h3><div class="value" id="m-rate-rps">—</div><div class="sub" id="m-rate-window">avg · last 5s</div></div>
+            <div class="card"><h3>§Ic:cache_hits§Cache/s</h3><div class="value" id="m-rate-cache">—</div><div class="sub">outcome cache</div></div>
+            <div class="card"><h3>§Ic:out_local§Local/s</h3><div class="value" id="m-rate-local">—</div><div class="sub">dnsrecords</div></div>
+            <div class="card"><h3>§Ic:out_upstream§Upstream/s</h3><div class="value" id="m-rate-up">—</div><div class="sub">forwarded</div></div>
+          </div>
+          <div class="metric-row metric-row--fluid">
+            <div class="card"><h3>§Ic:blocks§Blocked/s</h3><div class="value" id="m-rate-blocked">—</div><div class="sub">adblock</div></div>
+            <div class="card"><h3>§Ic:out_none§None/s</h3><div class="value" id="m-rate-none">—</div><div class="sub">no answer</div></div>
+          </div>
+        </div>
+
+        <div class="dashboard-section">
           <h2 class="section-kicker">§Ic:sec_traffic§Server &amp; traffic</h2>
           <div class="metric-row">
             <div class="card"><h3>§Ic:uptime§Uptime</h3><div class="value" id="m-uptime">—</div><div class="sub">since start</div></div>
@@ -893,6 +908,13 @@ const dashboardHTML = `<!DOCTYPE html>
   </div>
   <script>
     const fmtMs = (x) => (x == null || isNaN(x)) ? '—' : (Number(x) < 10 ? x.toFixed(3) : x.toFixed(2));
+    function fmtRate(x) {
+      if (x == null || isNaN(x)) return '—';
+      const n = Number(x);
+      if (n >= 100) return n.toFixed(1);
+      if (n >= 10) return n.toFixed(2);
+      return n.toFixed(3);
+    }
     function dotClass(o) {
       const m = { local: 'local', cache: 'cache', upstream: 'upstream', blocked: 'blocked', none: 'none' };
       return m[o] || 'none';
@@ -1514,6 +1536,16 @@ const dashboardHTML = `<!DOCTYPE html>
         const j = await r.json();
         document.getElementById('err').textContent = '';
         const c = j.counters || {};
+        const ps = j.per_sec_rates || {};
+        var wsec = ps.window_seconds != null ? Number(ps.window_seconds) : 5;
+        if (wsec < 1 || isNaN(wsec)) wsec = 5;
+        document.getElementById('m-rate-window').textContent = 'avg · last ' + wsec + 's';
+        document.getElementById('m-rate-rps').textContent = fmtRate(ps.resolutions_per_sec);
+        document.getElementById('m-rate-cache').textContent = fmtRate(ps.cache_per_sec);
+        document.getElementById('m-rate-local').textContent = fmtRate(ps.local_per_sec);
+        document.getElementById('m-rate-up').textContent = fmtRate(ps.upstream_per_sec);
+        document.getElementById('m-rate-blocked').textContent = fmtRate(ps.blocked_per_sec);
+        document.getElementById('m-rate-none').textContent = fmtRate(ps.none_per_sec);
         document.getElementById('m-queries').textContent = c.total_queries != null ? c.total_queries : '—';
         document.getElementById('m-cache').textContent = c.total_cache_hits != null ? c.total_cache_hits : '—';
         const ci = j.cache_info || {};
