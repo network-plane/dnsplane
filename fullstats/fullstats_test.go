@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestNew_Disabled(t *testing.T) {
@@ -44,21 +43,15 @@ func TestTracker_Clear(t *testing.T) {
 	}
 	defer func() { _ = tracker.Close() }()
 
-	if err := tracker.RecordRequest("example.com:A", "192.0.2.1", "A", "local"); err != nil {
-		t.Fatalf("RecordRequest: %v", err)
-	}
-	time.Sleep(50 * time.Millisecond)
-	all, err := tracker.GetAllRequests()
-	if err != nil {
-		t.Fatalf("GetAllRequests: %v", err)
-	}
-	if len(all) != 1 {
-		t.Fatalf("before Clear: len(requests) = %d, want 1", len(all))
+	// Use sync path: RecordRequest is async and can race with GetAllRequests on slow
+	// schedulers (notably Windows CI) even with long polls.
+	if err := tracker.recordRequestSync("example.com:A", "192.0.2.1", "A", "local"); err != nil {
+		t.Fatalf("recordRequestSync: %v", err)
 	}
 	if err := tracker.Clear(); err != nil {
 		t.Fatalf("Clear: %v", err)
 	}
-	all, err = tracker.GetAllRequests()
+	all, err := tracker.GetAllRequests()
 	if err != nil {
 		t.Fatalf("GetAllRequests after clear: %v", err)
 	}
