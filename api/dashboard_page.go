@@ -132,7 +132,7 @@ func dashboardPageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(dashboardHTML))
+	_, _ = w.Write([]byte(dashboardHTMLRendered))
 }
 
 // dashboardHTML is a self-contained dashboard (dark theme aligned with /stats/page; Chart.js from CDN).
@@ -244,6 +244,9 @@ const dashboardHTML = `<!DOCTYPE html>
       letter-spacing: 0.05em;
       color: var(--muted);
       margin: 0 0 0.65rem 0;
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
     }
     .dashboard-section:first-of-type .section-kicker {
       margin-top: 0;
@@ -287,6 +290,22 @@ const dashboardHTML = `<!DOCTYPE html>
       text-transform: uppercase;
       letter-spacing: 0.04em;
       color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+    .dash-icon-wrap {
+      display: inline-flex;
+      flex-shrink: 0;
+      width: 1rem;
+      height: 1rem;
+      color: var(--muted);
+    }
+    .dash-icon-wrap .dash-icon,
+    .dash-icon-wrap svg.dash-icon {
+      width: 100%;
+      height: 100%;
+      display: block;
     }
     .card .value {
       font-size: 1.75rem;
@@ -330,6 +349,13 @@ const dashboardHTML = `<!DOCTYPE html>
       margin: 0 0 0.75rem 0;
       font-size: 0.95rem;
       font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+    .chart-card h2 .dash-icon-wrap {
+      width: 1.1rem;
+      height: 1.1rem;
     }
     .chart-wrap {
       position: relative;
@@ -355,6 +381,13 @@ const dashboardHTML = `<!DOCTYPE html>
       margin: 0;
       font-size: 1rem;
       font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+    .activity-head h2 .dash-icon-wrap {
+      width: 1.1rem;
+      height: 1.1rem;
     }
     .activity-head .muted { font-size: 0.8rem; color: var(--muted); }
     .activity-body {
@@ -560,6 +593,7 @@ const dashboardHTML = `<!DOCTYPE html>
   </style>
 </head>
 <body>
+  <!-- Dashboard metric icons: Tabler Icons (MIT) — https://github.com/tabler/tabler-icons -->
   <div class="app">
     <aside>
       <div class="brand">dnsplane</div>
@@ -579,86 +613,86 @@ const dashboardHTML = `<!DOCTYPE html>
         <div id="err" class="err"></div>
 
         <div class="dashboard-section">
-          <h2 class="section-kicker">Server &amp; traffic</h2>
+          <h2 class="section-kicker">§Ic:sec_traffic§Server &amp; traffic</h2>
           <div class="metric-row">
-            <div class="card"><h3>Uptime</h3><div class="value" id="m-uptime">—</div><div class="sub">since start</div></div>
-            <div class="card"><h3>Version</h3><div class="value" id="m-version" style="font-size:1.1rem">—</div><div class="sub">build</div></div>
-            <div class="card"><h3>Total queries</h3><div class="value" id="m-queries">—</div><div class="sub">since start</div></div>
-            <div class="card"><h3>Answered</h3><div class="value" id="m-answered">—</div><div class="sub">queries answered</div></div>
+            <div class="card"><h3>§Ic:uptime§Uptime</h3><div class="value" id="m-uptime">—</div><div class="sub">since start</div></div>
+            <div class="card"><h3>§Ic:version§Version</h3><div class="value" id="m-version" style="font-size:1.1rem">—</div><div class="sub">build</div></div>
+            <div class="card"><h3>§Ic:queries§Total queries</h3><div class="value" id="m-queries">—</div><div class="sub">since start</div></div>
+            <div class="card"><h3>§Ic:answered§Answered</h3><div class="value" id="m-answered">—</div><div class="sub">queries answered</div></div>
           </div>
           <div class="metric-row metric-row--fluid">
-            <div class="card"><h3>Forwarded</h3><div class="value" id="m-forwarded">—</div><div class="sub">upstream forwards</div></div>
-            <div class="card"><h3>Upstreams</h3><div class="value" id="m-up-health">—</div><div class="sub">healthy / configured</div></div>
+            <div class="card"><h3>§Ic:forwarded§Forwarded</h3><div class="value" id="m-forwarded">—</div><div class="sub">upstream forwards</div></div>
+            <div class="card"><h3>§Ic:upstreams§Upstreams</h3><div class="value" id="m-up-health">—</div><div class="sub">healthy / configured</div></div>
             <div class="card" id="cluster-wrap" style="display:none">
-              <h3>Cluster</h3>
+              <h3>§Ic:cluster§Cluster</h3>
               <div id="cluster-root" class="cluster-panel-inner"></div>
             </div>
           </div>
         </div>
 
         <div class="dashboard-section">
-          <h2 class="section-kicker">Resolver cache</h2>
+          <h2 class="section-kicker">§Ic:sec_cache§Resolver cache</h2>
           <div class="metric-row">
-            <div class="card"><h3>Cache hits</h3><div class="value" id="m-cache">—</div><div class="sub">counter</div></div>
-            <div class="card"><h3>Cache hit ratio</h3><div class="value" id="m-cache-pct">—</div><div class="sub">hits ÷ queries</div></div>
-            <div class="card"><h3>Cache entries</h3><div class="value" id="m-cache-entries">—</div><div class="sub">rows in dnscache</div></div>
-            <div class="card"><h3>Next cache compact</h3><div class="value" id="m-cache-compact-next" style="font-size:1.05rem">—</div><div class="sub" id="m-cache-compact-sub">—</div></div>
+            <div class="card"><h3>§Ic:cache_hits§Cache hits</h3><div class="value" id="m-cache">—</div><div class="sub">counter</div></div>
+            <div class="card"><h3>§Ic:cache_ratio§Cache hit ratio</h3><div class="value" id="m-cache-pct">—</div><div class="sub">hits ÷ queries</div></div>
+            <div class="card"><h3>§Ic:cache_entries§Cache entries</h3><div class="value" id="m-cache-entries">—</div><div class="sub">rows in dnscache</div></div>
+            <div class="card"><h3>§Ic:cache_compact§Next cache compact</h3><div class="value" id="m-cache-compact-next" style="font-size:1.05rem">—</div><div class="sub" id="m-cache-compact-sub">—</div></div>
           </div>
         </div>
 
         <div class="dashboard-section">
-          <h2 class="section-kicker">Fast path (A/AAAA perf)</h2>
+          <h2 class="section-kicker">§Ic:sec_fast§Fast path (A/AAAA perf)</h2>
           <div class="metric-row metric-row--fluid">
-            <div class="card"><h3>Avg resolve</h3><div class="value" id="m-avg">—</div><div class="sub">ms · fast path</div></div>
-            <div class="card"><h3>Upstream wins</h3><div class="value" id="m-up">—</div><div class="sub">outcome_upstream</div></div>
-            <div class="card"><h3>A/AAAA samples</h3><div class="value" id="m-perf-total">—</div><div class="sub">perf sample count</div></div>
+            <div class="card"><h3>§Ic:avg_resolve§Avg resolve</h3><div class="value" id="m-avg">—</div><div class="sub">ms · fast path</div></div>
+            <div class="card"><h3>§Ic:upstream_wins§Upstream wins</h3><div class="value" id="m-up">—</div><div class="sub">outcome_upstream</div></div>
+            <div class="card"><h3>§Ic:perf_samples§A/AAAA samples</h3><div class="value" id="m-perf-total">—</div><div class="sub">perf sample count</div></div>
           </div>
         </div>
 
         <div class="dashboard-section">
-          <h2 class="section-kicker">A/AAAA outcomes</h2>
+          <h2 class="section-kicker">§Ic:sec_outcomes§A/AAAA outcomes</h2>
           <div class="metric-row">
-            <div class="card"><h3>Local</h3><div class="value" id="m-oc-local">—</div><div class="sub">outcome_local</div></div>
-            <div class="card"><h3>Cache</h3><div class="value" id="m-oc-cache">—</div><div class="sub">outcome_cache</div></div>
-            <div class="card"><h3>Upstream</h3><div class="value" id="m-oc-up">—</div><div class="sub">outcome_upstream</div></div>
-            <div class="card"><h3>None</h3><div class="value" id="m-oc-none">—</div><div class="sub">no answer</div></div>
+            <div class="card"><h3>§Ic:out_local§Local</h3><div class="value" id="m-oc-local">—</div><div class="sub">outcome_local</div></div>
+            <div class="card"><h3>§Ic:out_cache§Cache</h3><div class="value" id="m-oc-cache">—</div><div class="sub">outcome_cache</div></div>
+            <div class="card"><h3>§Ic:out_upstream§Upstream</h3><div class="value" id="m-oc-up">—</div><div class="sub">outcome_upstream</div></div>
+            <div class="card"><h3>§Ic:out_none§None</h3><div class="value" id="m-oc-none">—</div><div class="sub">no answer</div></div>
           </div>
         </div>
 
         <div class="dashboard-section">
-          <h2 class="section-kicker">Adblock</h2>
+          <h2 class="section-kicker">§Ic:sec_adblock§Adblock</h2>
           <div class="metric-row metric-row--pair">
-            <div class="card"><h3>Block rate</h3><div class="value" id="m-block-rate">—</div><div class="sub">blocks ÷ queries</div></div>
-            <div class="card"><h3>Total blocks</h3><div class="value" id="m-blocks">—</div><div class="sub">adblock</div></div>
+            <div class="card"><h3>§Ic:block_rate§Block rate</h3><div class="value" id="m-block-rate">—</div><div class="sub">blocks ÷ queries</div></div>
+            <div class="card"><h3>§Ic:blocks§Total blocks</h3><div class="value" id="m-blocks">—</div><div class="sub">adblock</div></div>
           </div>
         </div>
 
         <div class="dashboard-section" id="fullstats-kpi-section" style="display:none">
-          <h2 class="section-kicker">Stored statistics (full_stats)</h2>
+          <h2 class="section-kicker">§Ic:sec_fullstats§Stored statistics (full_stats)</h2>
           <div class="metric-row" id="fullstats-kpi-row">
-            <div class="card"><h3>Stored domains</h3><div class="value" id="m-fs-dom">—</div><div class="sub">persisted total</div></div>
-            <div class="card"><h3>Stored requesters</h3><div class="value" id="m-fs-req">—</div><div class="sub">persisted total</div></div>
-            <div class="card"><h3>Domains (session)</h3><div class="value" id="m-fs-dom-s">—</div><div class="sub">since process start</div></div>
-            <div class="card"><h3>Requesters (session)</h3><div class="value" id="m-fs-req-s">—</div><div class="sub">since process start</div></div>
+            <div class="card"><h3>§Ic:fs_domains§Stored domains</h3><div class="value" id="m-fs-dom">—</div><div class="sub">persisted total</div></div>
+            <div class="card"><h3>§Ic:fs_requesters§Stored requesters</h3><div class="value" id="m-fs-req">—</div><div class="sub">persisted total</div></div>
+            <div class="card"><h3>§Ic:fs_dom_session§Domains (session)</h3><div class="value" id="m-fs-dom-s">—</div><div class="sub">since process start</div></div>
+            <div class="card"><h3>§Ic:fs_req_session§Requesters (session)</h3><div class="value" id="m-fs-req-s">—</div><div class="sub">since process start</div></div>
           </div>
         </div>
 
         <div class="dashboard-section">
-          <h2 class="section-kicker">Trends</h2>
+          <h2 class="section-kicker">§Ic:sec_trends§Trends</h2>
           <div class="charts-row">
           <div class="charts-stack">
             <div class="chart-card">
-              <h2>Replies per minute</h2>
+              <h2>§Ic:chart_replies§Replies per minute</h2>
               <div class="chart-wrap"><canvas id="chartReplies"></canvas></div>
             </div>
             <div class="chart-card">
-              <h2>Average resolution time</h2>
+              <h2>§Ic:chart_latency§Average resolution time</h2>
               <div class="chart-wrap"><canvas id="chartLatency"></canvas></div>
             </div>
           </div>
           <div class="activity-panel">
             <div class="activity-head">
-              <h2>Resolutions</h2>
+              <h2>§Ic:log_resolutions§Resolutions</h2>
               <span class="muted">newest first</span>
             </div>
             <div class="activity-body" id="log-root"></div>
