@@ -24,6 +24,25 @@ func TestDashboardPageHandler(t *testing.T) {
 	if !strings.Contains(body, "dash-icon-wrap") {
 		t.Fatal("expected Tabler inline icons in dashboard markup")
 	}
+	if !strings.Contains(body, "view-resolutions") {
+		t.Fatal("expected resolutions log view in dashboard markup")
+	}
+}
+
+func TestDashboardResolutionsHandler(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/stats/dashboard/resolutions", nil)
+	rec := httptest.NewRecorder()
+	dashboardResolutionsHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("Content-Type = %q", ct)
+	}
+	b := rec.Body.String()
+	if !strings.Contains(b, `"resolutions"`) {
+		t.Fatal("expected resolutions key in JSON body")
+	}
 }
 
 func TestDashboardIconSVGHandler(t *testing.T) {

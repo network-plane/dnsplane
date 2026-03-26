@@ -220,6 +220,118 @@ const dashboardHTML = `<!DOCTYPE html>
       overflow: auto;
     }
     #view-dashboard.hidden { display: none; }
+    #view-resolutions {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+    #view-resolutions.hidden { display: none; }
+    .res-note {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin: -0.5rem 0 1rem 0;
+      max-width: 48rem;
+      line-height: 1.45;
+    }
+    .res-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.25rem;
+      align-items: flex-end;
+      margin-bottom: 0.65rem;
+    }
+    .res-toolbar label {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .res-toolbar input {
+      min-width: 11rem;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.4rem 0.55rem;
+      font-size: 0.88rem;
+    }
+    .res-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-bottom: 0.65rem;
+      min-height: 1.4rem;
+      align-items: center;
+    }
+    .res-chips-label { font-size: 0.78rem; color: var(--muted); margin-right: 0.25rem; }
+    .res-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.28rem 0.55rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface-hover);
+      font-size: 0.8rem;
+      color: var(--text);
+    }
+    .res-chip button {
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+      padding: 0 0.15rem;
+    }
+    .res-chip button:hover { color: var(--danger); }
+    .res-count { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.45rem; }
+    .res-table-wrap {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+    }
+    .res-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    .res-table th, .res-table td {
+      padding: 0.5rem 0.65rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    .res-table th {
+      position: sticky;
+      top: 0;
+      background: var(--surface);
+      z-index: 1;
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+    }
+    .res-table tbody tr:hover { background: var(--surface-hover); }
+    .res-cell-filter {
+      cursor: pointer;
+      text-decoration: underline dotted;
+      text-underline-offset: 0.12em;
+    }
+    .res-cell-filter:hover { color: var(--accent); }
+    .res-table td.mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.78rem;
+    }
+    .res-table td.res-time { white-space: nowrap; color: var(--muted); font-size: 0.78rem; }
+    .res-table th.num, .res-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
     iframe.view-embed {
       flex: 1;
       width: 100%;
@@ -599,6 +711,7 @@ const dashboardHTML = `<!DOCTYPE html>
       <div class="brand">dnsplane</div>
       <nav>
         <a class="active" href="/stats/dashboard" data-view="dashboard">Dashboard</a>
+        <a href="/stats/dashboard" data-view="resolutions">Resolutions log</a>
         <a href="/stats/dashboard" data-view="fullstats">Stored stats</a>
         <a href="/stats/page" data-embed="1">Stats</a>
         <a href="/stats/perf/page" data-embed="1">Perf</a>
@@ -700,6 +813,35 @@ const dashboardHTML = `<!DOCTYPE html>
         </div>
         </div>
       </div>
+      <div id="view-resolutions" class="hidden">
+        <h1>Resolutions log</h1>
+        <p class="res-note">This list is <strong>in memory only</strong> (last <span id="res-cap-note">1000</span> queries, newest first). It is lost on process restart and is not written to disk.</p>
+        <p class="muted-link" style="margin:-0.5rem 0 1rem 0"><a href="/stats/dashboard/resolutions" target="_blank" rel="noopener">JSON</a> · refreshes every 2s while this view is open</p>
+        <div class="res-toolbar">
+          <label>Source IP <input type="search" id="res-in-ip" placeholder="Partial match" autocomplete="off" spellcheck="false" aria-label="Filter by source IP"></label>
+          <label>Type <input type="search" id="res-in-qtype" placeholder="e.g. A, AAAA" autocomplete="off" spellcheck="false" aria-label="Filter by query type"></label>
+          <label>Request <input type="search" id="res-in-qname" placeholder="Domain / name partial" autocomplete="off" spellcheck="false" aria-label="Filter by QNAME"></label>
+        </div>
+        <div class="res-chips" id="res-chips-wrap"><span class="res-chips-label">Quick filters (click a row cell to add):</span><span id="res-chips"></span></div>
+        <div class="res-count" id="res-count">—</div>
+        <div class="res-table-wrap">
+          <table class="res-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Client IP</th>
+                <th>Request</th>
+                <th>Type</th>
+                <th>Outcome</th>
+                <th>Upstream</th>
+                <th class="num">ms</th>
+                <th>Reply</th>
+              </tr>
+            </thead>
+            <tbody id="res-tbody"></tbody>
+          </table>
+        </div>
+      </div>
       <div id="view-fullstats" class="hidden">
         <h1>Stored statistics</h1>
         <p class="muted-link" style="margin:-0.5rem 0 1rem 0">Full_stats database (<code>stats.db</code>) and session counters · <a id="fs-json-link" href="/stats/dashboard/fullstats/data" target="_blank" rel="noopener">JSON API</a></p>
@@ -789,6 +931,8 @@ const dashboardHTML = `<!DOCTYPE html>
     }
     let chartReplies, chartLatency;
     let dashboardTimer = null;
+    let resolutionsTimer = null;
+    var resState = { raw: [], chips: [] };
     function chartCommon() {
       const grid = '#30363d';
       const tick = '#8b949e';
@@ -834,6 +978,130 @@ const dashboardHTML = `<!DOCTYPE html>
         clearInterval(dashboardTimer);
         dashboardTimer = null;
       }
+    }
+    function stopResolutionsRefresh() {
+      if (resolutionsTimer) {
+        clearInterval(resolutionsTimer);
+        resolutionsTimer = null;
+      }
+    }
+    function startResolutionsRefresh() {
+      stopResolutionsRefresh();
+      loadResolutionsData();
+      resolutionsTimer = setInterval(loadResolutionsData, 2000);
+    }
+    function resSubMatch(hay, needle) {
+      if (!needle || !String(needle).trim()) return true;
+      return String(hay || '').toLowerCase().indexOf(String(needle).trim().toLowerCase()) >= 0;
+    }
+    function resChipKey(ch) { return ch.kind + '\x00' + ch.val; }
+    function resRowMatches(e) {
+      if (!resSubMatch(e.client_ip, document.getElementById('res-in-ip').value)) return false;
+      if (!resSubMatch(e.qtype, document.getElementById('res-in-qtype').value)) return false;
+      if (!resSubMatch(e.qname, document.getElementById('res-in-qname').value)) return false;
+      if (!resState.chips || !resState.chips.length) return true;
+      for (let i = 0; i < resState.chips.length; i++) {
+        const ch = resState.chips[i];
+        const k = ch.kind;
+        if (k === 'ip' && !resSubMatch(e.client_ip, ch.val)) return false;
+        if (k === 'qtype' && !resSubMatch(e.qtype, ch.val)) return false;
+        if (k === 'qname' && !resSubMatch(e.qname, ch.val)) return false;
+        if (k === 'outcome' && !resSubMatch(e.outcome, ch.val)) return false;
+        if (k === 'upstream' && !resSubMatch(e.upstream, ch.val)) return false;
+        if (k === 'record' && !resSubMatch(e.record, ch.val)) return false;
+      }
+      return true;
+    }
+    function resRenderChips() {
+      const host = document.getElementById('res-chips');
+      if (!host) return;
+      let h = '';
+      for (let i = 0; i < resState.chips.length; i++) {
+        const ch = resState.chips[i];
+        const lab = ch.kind + ': ' + ch.val;
+        h += '<span class="res-chip">' + esc(lab) + '<button type="button" data-res-chip-idx="' + i + '" title="Remove filter" aria-label="Remove filter">×</button></span>';
+      }
+      host.innerHTML = h;
+    }
+    function resAddChip(kind, val) {
+      const v = String(val == null ? '' : val).trim();
+      if (!v) return;
+      const ch = { kind: kind, val: v };
+      const k = resChipKey(ch);
+      for (let i = 0; i < resState.chips.length; i++) {
+        if (resChipKey(resState.chips[i]) === k) return;
+      }
+      resState.chips.push(ch);
+      resRenderChips();
+      renderResolutionsGrid();
+    }
+    function renderResolutionsGrid() {
+      const rows = resState.raw || [];
+      const out = [];
+      for (let i = 0; i < rows.length; i++) {
+        if (resRowMatches(rows[i])) out.push(rows[i]);
+      }
+      document.getElementById('res-count').textContent = 'Showing ' + out.length + ' of ' + rows.length + ' loaded';
+      let h = '';
+      for (let j = 0; j < out.length; j++) {
+        const e = out[j];
+        const ip = e.client_ip || '';
+        const at = e.at ? new Date(e.at).toLocaleString() : '—';
+        const up = e.upstream ? String(e.upstream) : '';
+        const enc = function(s) { return encodeURIComponent(String(s)); };
+        h += '<tr>';
+        h += '<td class="res-time">' + esc(at) + '</td>';
+        h += '<td class="mono res-cell-filter" data-res-kind="ip" data-res-val="' + escAttr(enc(ip)) + '">' + esc(ip) + '</td>';
+        h += '<td class="mono res-cell-filter" data-res-kind="qname" data-res-val="' + escAttr(enc(e.qname || '')) + '">' + esc(e.qname || '') + '</td>';
+        h += '<td class="res-cell-filter" data-res-kind="qtype" data-res-val="' + escAttr(enc(e.qtype || '')) + '">' + esc(e.qtype || '') + '</td>';
+        h += '<td class="res-cell-filter" data-res-kind="outcome" data-res-val="' + escAttr(enc(e.outcome || '')) + '">' + esc(e.outcome || '') + '</td>';
+        h += '<td class="mono res-cell-filter" data-res-kind="upstream" data-res-val="' + escAttr(enc(up)) + '">' + esc(up) + '</td>';
+        h += '<td class="num">' + fmtMs(e.duration_ms) + '</td>';
+        h += '<td class="mono res-cell-filter" data-res-kind="record" data-res-val="' + escAttr(enc(e.record || '')) + '">' + esc(e.record || '') + '</td>';
+        h += '</tr>';
+      }
+      if (!h) h = '<tr><td colspan="8" style="color:var(--muted)">No rows match filters.</td></tr>';
+      document.getElementById('res-tbody').innerHTML = h;
+    }
+    function escAttr(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+    }
+    async function loadResolutionsData() {
+      try {
+        const r = await fetch('/stats/dashboard/resolutions');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const j = await r.json();
+        document.getElementById('res-cap-note').textContent = j.cap != null ? j.cap : '1000';
+        resState.raw = j.resolutions || [];
+        renderResolutionsGrid();
+      } catch (err) {
+        document.getElementById('res-count').textContent = 'Failed to load: ' + err.message;
+      }
+    }
+    function wireResolutions() {
+      ['res-in-ip','res-in-qtype','res-in-qname'].forEach(function(id) {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', function() { renderResolutionsGrid(); });
+      });
+      document.getElementById('res-chips').addEventListener('click', function(e) {
+        const b = e.target.closest('button[data-res-chip-idx]');
+        if (!b) return;
+        const idx = parseInt(b.getAttribute('data-res-chip-idx'), 10);
+        if (isNaN(idx)) return;
+        resState.chips.splice(idx, 1);
+        resRenderChips();
+        renderResolutionsGrid();
+      });
+      document.getElementById('res-tbody').addEventListener('click', function(e) {
+        const cell = e.target.closest('.res-cell-filter');
+        if (!cell || !document.getElementById('res-tbody').contains(cell)) return;
+        const kind = cell.getAttribute('data-res-kind');
+        const enc = cell.getAttribute('data-res-val');
+        if (!kind || enc == null) return;
+        let val;
+        try { val = decodeURIComponent(enc); } catch (x) { val = ''; }
+        resAddChip(kind, val);
+      });
     }
     function startDashboardRefresh() {
       stopDashboardRefresh();
@@ -1049,18 +1317,33 @@ const dashboardHTML = `<!DOCTYPE html>
     }
     function showDashboard(anchor) {
       if (anchor) setActiveNav(anchor);
+      stopResolutionsRefresh();
       document.getElementById('view-dashboard').classList.remove('hidden');
       document.getElementById('view-fullstats').classList.add('hidden');
+      document.getElementById('view-resolutions').classList.add('hidden');
       const iframe = document.getElementById('view-embed');
       iframe.classList.add('hidden');
       iframe.src = 'about:blank';
       startDashboardRefresh();
     }
-    function showFullStats(anchor) {
+    function showResolutions(anchor) {
       if (anchor) setActiveNav(anchor);
       stopDashboardRefresh();
       document.getElementById('view-dashboard').classList.add('hidden');
+      document.getElementById('view-fullstats').classList.add('hidden');
+      document.getElementById('view-resolutions').classList.remove('hidden');
+      const iframe = document.getElementById('view-embed');
+      iframe.classList.add('hidden');
+      iframe.src = 'about:blank';
+      startResolutionsRefresh();
+    }
+    function showFullStats(anchor) {
+      if (anchor) setActiveNav(anchor);
+      stopDashboardRefresh();
+      stopResolutionsRefresh();
+      document.getElementById('view-dashboard').classList.add('hidden');
       document.getElementById('view-fullstats').classList.remove('hidden');
+      document.getElementById('view-resolutions').classList.add('hidden');
       const iframe = document.getElementById('view-embed');
       iframe.classList.add('hidden');
       iframe.src = 'about:blank';
@@ -1071,8 +1354,10 @@ const dashboardHTML = `<!DOCTYPE html>
     function showEmbed(url, anchor) {
       if (anchor) setActiveNav(anchor);
       stopDashboardRefresh();
+      stopResolutionsRefresh();
       document.getElementById('view-dashboard').classList.add('hidden');
       document.getElementById('view-fullstats').classList.add('hidden');
+      document.getElementById('view-resolutions').classList.add('hidden');
       const iframe = document.getElementById('view-embed');
       iframe.classList.remove('hidden');
       iframe.src = url;
@@ -1090,6 +1375,11 @@ const dashboardHTML = `<!DOCTYPE html>
           showDashboard(a);
           return;
         }
+        if (a.getAttribute('data-view') === 'resolutions') {
+          e.preventDefault();
+          showResolutions(a);
+          return;
+        }
         if (a.getAttribute('data-view') === 'fullstats') {
           e.preventDefault();
           showFullStats(a);
@@ -1097,6 +1387,7 @@ const dashboardHTML = `<!DOCTYPE html>
       });
     });
     wireFullStats();
+    wireResolutions();
     async function load() {
       try {
         const r = await fetch('/stats/dashboard/data');
