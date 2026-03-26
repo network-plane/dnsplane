@@ -116,6 +116,7 @@ func SetConfig(loaded *config.Loaded) {
 	defer configStateMu.Unlock()
 	clone := *loaded
 	configState = &clone
+	SetDashboardResolutionLogCap(clone.Config.DashboardResolutionLogCap)
 }
 
 func currentConfig() config.Loaded {

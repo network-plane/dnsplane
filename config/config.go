@@ -182,6 +182,8 @@ type Config struct {
 	StatsPerfPageEnabled bool `json:"stats_perf_page_enabled,omitempty"`
 	// StatsDashboardEnabled serves GET /stats/dashboard and /stats/dashboard/data. Default true.
 	StatsDashboardEnabled bool `json:"stats_dashboard_enabled,omitempty"`
+	// DashboardResolutionLogCap is how many recent DNS resolutions are kept in memory for the dashboard log (newest retained). Default 1000. Max 1000000.
+	DashboardResolutionLogCap int `json:"dashboard_resolution_log_cap,omitempty"`
 	// PprofEnabled when true starts an HTTP server for Go runtime/pprof (CPU, heap, mutex, block, etc.).
 	// Default false. Bind address is PprofListen (default 127.0.0.1:6060 when enabled).
 	PprofEnabled bool `json:"pprof_enabled,omitempty"`
@@ -428,6 +430,7 @@ func defaultConfig(baseDir string) *Config {
 		StatsPageEnabled:            true,
 		StatsPerfPageEnabled:        true,
 		StatsDashboardEnabled:       true,
+		DashboardResolutionLogCap:   1000,
 		PrettyJSON:                  false,
 		PprofEnabled:                false,
 		PprofListen:                 "",
@@ -482,6 +485,13 @@ func (c *Config) applyDefaults(configDir string) {
 		c.CacheCompactIntervalSeconds = 1800
 	} else if c.CacheCompactIntervalSeconds < 60 {
 		c.CacheCompactIntervalSeconds = 60
+	}
+	if c.DashboardResolutionLogCap <= 0 {
+		c.DashboardResolutionLogCap = 1000
+	}
+	const maxDashboardResolutionLogCap = 1000000
+	if c.DashboardResolutionLogCap > maxDashboardResolutionLogCap {
+		c.DashboardResolutionLogCap = maxDashboardResolutionLogCap
 	}
 	if c.ClusterSyncIntervalSeconds < 0 {
 		c.ClusterSyncIntervalSeconds = 0
@@ -776,6 +786,9 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	}
 	if r, ok := raw["stats_dashboard_enabled"]; ok {
 		_ = json.Unmarshal(r, &c.StatsDashboardEnabled)
+	}
+	if r, ok := raw["dashboard_resolution_log_cap"]; ok {
+		_ = json.Unmarshal(r, &c.DashboardResolutionLogCap)
 	}
 	if r, ok := raw["pprof_enabled"]; ok {
 		_ = json.Unmarshal(r, &c.PprofEnabled)

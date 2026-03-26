@@ -50,8 +50,10 @@ flowchart TD
 | **[docs/upstream-health.md](docs/upstream-health.md)** | **Upstream health checks**: periodic probes, marking servers down, config keys, logs, and **curl** examples. |
 | **[docs/clustering.md](docs/clustering.md)** | **Multi-node record sync**: TCP peer protocol, `cluster_*` config keys, auth token, sequences, deployment notes. |
 | **[docs/dnsplane.example.json](docs/dnsplane.example.json)** | Full example `dnsplane.json` with documented keys and defaults (adjust paths for your install). |
-| **[examples/dnsplane-example.json](examples/dnsplane-example.json)** | Small starter `dnsplane.json` (DoT / DoH / DNSSEC present, off by default). |
+| **[examples/dnsplane-example.json](examples/dnsplane-example.json)** | Small starter `dnsplane.json` (DoT / DoH / DNSSEC present, off by default). Includes **`dashboard_resolution_log_cap`** for the dashboard Resolutions log. |
 | **[examples/dnsservers-example.json](examples/dnsservers-example.json)** | Example `dnsservers.json` with a global upstream and split DNS via **`domain_whitelist`**. |
+| **[examples/curl-stats-dashboard.sh](examples/curl-stats-dashboard.sh)** | **`curl`** examples for `/stats/dashboard`, `/stats/dashboard/data`, and `/stats/dashboard/resolutions`. |
+| **[examples/README.md](examples/README.md)** | Index of example files and how they relate to **`docs/dnsplane.example.json`**. |
 
 DoT, DoH, and DNSSEC options are summarized in [docs/security-public-dns.md](docs/security-public-dns.md) and in the config tables under [Main config options](#main-config-options-dnsplanejson). Upcoming work is listed in [TODO.md](TODO.md).
 
@@ -298,7 +300,8 @@ See **[docs/dnsplane.example.json](docs/dnsplane.example.json)** for every key a
 | --- | --- |
 | `stats_page_enabled` | HTML `/stats/page` (default on). |
 | `stats_perf_page_enabled` | HTML `/stats/perf/page` (default on). |
-| `stats_dashboard_enabled` | `/stats/dashboard` and `/stats/dashboard/data` (default on). |
+| `stats_dashboard_enabled` | `/stats/dashboard`, `/stats/dashboard/data`, and `/stats/dashboard/resolutions` (default on). |
+| `dashboard_resolution_log_cap` | How many recent DNS resolutions are kept **in memory** for the dashboard **Resolutions log** (default `1000`; max `1000000`). Not persisted; lost on restart. |
 | `full_stats`, `full_stats_dir` | Optional aggregated stats DB + TUI `statistics` commands. |
 | `pprof_enabled` | **Default `false`.** If `true`, exposes runtime profiling over HTTP (Go pprof: CPU, heap, etc.). |
 | `pprof_listen` | Listen address when `pprof_enabled` is true; if empty, **`127.0.0.1:6060`**. In production, keep profiling on loopback or behind a protected interface. |
@@ -344,8 +347,10 @@ Enable the REST API with `"api": true` in `dnsplane.json` and set `apiport` (e.g
 | GET | `/stats` | Resolver stats as JSON: `session` / `total` scopes with resolver counters; top-level **`build`** (`version`, `go_version`, `os`, `arch`). When `full_stats` is enabled in config, includes `full_stats.enabled`, `full_stats.requesters_count`, `full_stats.domains_count`. |
 | GET | `/metrics` | Prometheus text format: counters and gauges (queries, cache hits, blocks, process uptime, etc.). With `full_stats` enabled, adds full-stats gauges. Histogram **`dnsplane_dns_resolve_duration_seconds`** reports resolve latency by QTYPE (same breakdown as `/stats/perf`). |
 | GET | `/stats/page` | Read-only HTML stats page (resolver counts, data file status, listeners; optional full-stats panel when enabled). **404** if `stats_page_enabled` is false (default is on). |
-| GET | `/stats/dashboard` | Live HTML dashboard (charts and rolling log). **404** if `stats_dashboard_enabled` is false (default is on). |
-| GET | `/stats/dashboard/data` | JSON backing the dashboard (`counters`, `perf`, `series`, `log`). **404** if `stats_dashboard_enabled` is false. |
+| GET | `/stats/dashboard` | Live HTML dashboard (charts, short rolling activity log, and **Resolutions log** page with filterable grid). **404** if `stats_dashboard_enabled` is false (default is on). |
+| GET | `/stats/dashboard/data` | JSON backing the dashboard (`counters`, `perf`, `series`, `log`, **`per_sec_rates`** — avg resolutions/s and outcome rates over the last 5 completed UTC seconds). **404** if `stats_dashboard_enabled` is false. |
+| GET | `/stats/dashboard/resolutions` | JSON for the Resolutions log: `cap` (matches `dashboard_resolution_log_cap`), `count`, `resolutions` (newest first; client IP, query, type, outcome, upstream, reply, `duration_ms`, time). **404** if `stats_dashboard_enabled` is false. |
+| POST | `/stats/dashboard/resolutions/purge` | Clears the in-memory resolution log (same data as the Resolutions log and main dashboard activity list). **404** if `stats_dashboard_enabled` is false. |
 | GET | `/stats/perf` | JSON performance breakdown: outcomes (local/cache/upstream/none) and histograms for cache-only vs upstream paths. Prefer cache-only vs upstream histograms for tuning; the combined total histogram mixes both. Reset with `POST /stats/perf/reset`. |
 | GET | `/stats/perf/page` | HTML view of `/stats/perf` (auto-refresh, reset button). **404** if `stats_perf_page_enabled` is false (default is on). |
 | POST | `/stats/perf/reset` | Clears A-record performance counters (use before measuring latency). |
