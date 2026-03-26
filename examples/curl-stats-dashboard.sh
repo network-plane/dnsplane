@@ -16,3 +16,6 @@ printf '\n'
 
 curl -sS "${BASE}/stats/dashboard/resolutions"
 printf '\n'
+
+curl -sS -X POST "${BASE}/stats/dashboard/resolutions/purge"
+printf '\n'

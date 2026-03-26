@@ -350,6 +350,7 @@ Enable the REST API with `"api": true` in `dnsplane.json` and set `apiport` (e.g
 | GET | `/stats/dashboard` | Live HTML dashboard (charts, short rolling activity log, and **Resolutions log** page with filterable grid). **404** if `stats_dashboard_enabled` is false (default is on). |
 | GET | `/stats/dashboard/data` | JSON backing the dashboard (`counters`, `perf`, `series`, `log`). **404** if `stats_dashboard_enabled` is false. |
 | GET | `/stats/dashboard/resolutions` | JSON for the Resolutions log: `cap` (matches `dashboard_resolution_log_cap`), `count`, `resolutions` (newest first; client IP, query, type, outcome, upstream, reply, `duration_ms`, time). **404** if `stats_dashboard_enabled` is false. |
+| POST | `/stats/dashboard/resolutions/purge` | Clears the in-memory resolution log (same data as the Resolutions log and main dashboard activity list). **404** if `stats_dashboard_enabled` is false. |
 | GET | `/stats/perf` | JSON performance breakdown: outcomes (local/cache/upstream/none) and histograms for cache-only vs upstream paths. Prefer cache-only vs upstream histograms for tuning; the combined total histogram mixes both. Reset with `POST /stats/perf/reset`. |
 | GET | `/stats/perf/page` | HTML view of `/stats/perf` (auto-refresh, reset button). **404** if `stats_perf_page_enabled` is false (default is on). |
 | POST | `/stats/perf/reset` | Clears A-record performance counters (use before measuring latency). |
