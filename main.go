@@ -347,7 +347,12 @@ func runServer(cmd *cobra.Command, args []string) error {
 			},
 			QueryObserver: func(qname, qtype, outcome, upstream, recordSummary string, elapsed time.Duration, clientIP string) {
 				ms := elapsed.Seconds() * 1000
+				cip := strings.TrimSpace(clientIP)
+				if cip == "" {
+					cip = "unknown"
+				}
 				data.RecordDashboardResolution(data.DashboardResolution{
+					ClientIP:   cip,
 					Qname:      qname,
 					Qtype:      qtype,
 					Outcome:    outcome,
@@ -356,12 +361,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 					DurationMs: ms,
 				})
 				if fullStatsTracker != nil {
-					ip := strings.TrimSpace(clientIP)
-					if ip == "" {
-						ip = "unknown"
-					}
 					key := fmt.Sprintf("%s:%s", qname, qtype)
-					_ = fullStatsTracker.RecordRequest(key, ip, qtype, outcome)
+					_ = fullStatsTracker.RecordRequest(key, cip, qtype, outcome)
 				}
 				if asyncLogQueue == nil || dnsLogger == nil || !appState.DaemonMode() {
 					return

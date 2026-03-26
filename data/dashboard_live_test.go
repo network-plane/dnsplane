@@ -30,3 +30,25 @@ func TestRecordDashboardResolution_Series(t *testing.T) {
 		t.Fatalf("log qname = %q", log[0].Qname)
 	}
 }
+
+func TestSetDashboardResolutionLogCap_RingSize(t *testing.T) {
+	t.Cleanup(func() { SetDashboardResolutionLogCap(1000) })
+	SetDashboardResolutionLogCap(3)
+	for i := 0; i < 5; i++ {
+		RecordDashboardResolution(DashboardResolution{
+			At:         time.Now().UTC(),
+			Qname:      "ring.example.",
+			Qtype:      "A",
+			Outcome:    "ok",
+			Record:     "1.2.3.4",
+			DurationMs: 1,
+		})
+	}
+	got := GetDashboardLogNewestFirst(100)
+	if len(got) != 3 {
+		t.Fatalf("GetDashboardLogNewestFirst: len = %d, want 3", len(got))
+	}
+	if DashboardLogCap() != 3 {
+		t.Fatalf("DashboardLogCap = %d, want 3", DashboardLogCap())
+	}
+}

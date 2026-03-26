@@ -5,18 +5,49 @@ package data
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // Live dashboard ring buffer and per-minute aggregates (in-memory only).
 const (
-	dashboardLogCap      = 400
-	dashboardSeriesSlots = 60 // last 60 minutes
+	defaultDashboardResolutionLogCap = 1000
+	maxDashboardResolutionLogCap     = 1000000 // keep in sync with config.applyDefaults clamp
+	dashboardSeriesSlots             = 60      // last 60 minutes
 )
+
+var dashboardResolutionLogCap atomic.Int32 // 0 until SetDashboardResolutionLogCap (DashboardLogCap falls back to default)
+
+// SetDashboardResolutionLogCap sets the in-memory ring size for dashboard resolution rows (from config).
+// Values outside [1, maxDashboardResolutionLogCap] are clamped; existing entries are truncated if the cap shrinks.
+func SetDashboardResolutionLogCap(n int) {
+	if n <= 0 {
+		n = defaultDashboardResolutionLogCap
+	}
+	if n > maxDashboardResolutionLogCap {
+		n = maxDashboardResolutionLogCap
+	}
+	dashboardResolutionLogCap.Store(int32(n))
+	dashboardLive.mu.Lock()
+	defer dashboardLive.mu.Unlock()
+	if len(dashboardLive.log) > n {
+		dashboardLive.log = dashboardLive.log[len(dashboardLive.log)-n:]
+	}
+}
+
+// DashboardLogCap is the maximum number of resolution rows kept in memory for the dashboard.
+func DashboardLogCap() int {
+	v := int(dashboardResolutionLogCap.Load())
+	if v <= 0 {
+		return defaultDashboardResolutionLogCap
+	}
+	return v
+}
 
 // DashboardResolution is one resolved query for the rolling log API.
 type DashboardResolution struct {
 	At         time.Time `json:"at"`
+	ClientIP   string    `json:"client_ip,omitempty"`
 	Qname      string    `json:"qname"`
 	Qtype      string    `json:"qtype"`
 	Outcome    string    `json:"outcome"`
@@ -59,9 +90,10 @@ func RecordDashboardResolution(e DashboardResolution) {
 	}
 
 	// Log ring (keep last N)
+	capVal := DashboardLogCap()
 	dashboardLive.log = append(dashboardLive.log, e)
-	if len(dashboardLive.log) > dashboardLogCap {
-		dashboardLive.log = dashboardLive.log[len(dashboardLive.log)-dashboardLogCap:]
+	if len(dashboardLive.log) > capVal {
+		dashboardLive.log = dashboardLive.log[len(dashboardLive.log)-capVal:]
 	}
 
 	mk := e.At.Unix() / 60
@@ -87,8 +119,9 @@ func GetDashboardLogNewestFirst(limit int) []DashboardResolution {
 	if limit <= 0 {
 		limit = 100
 	}
-	if limit > dashboardLogCap {
-		limit = dashboardLogCap
+	capVal := DashboardLogCap()
+	if limit > capVal {
+		limit = capVal
 	}
 	dashboardLive.mu.Lock()
 	defer dashboardLive.mu.Unlock()

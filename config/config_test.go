@@ -62,3 +62,21 @@ func TestApplyDefaults_PprofListenWhenEnabled(t *testing.T) {
 		t.Fatalf("PprofListen = %q, want 127.0.0.1:6060", c.PprofListen)
 	}
 }
+
+func TestApplyDefaults_DashboardResolutionLogCap(t *testing.T) {
+	c := &Config{}
+	c.applyDefaults(t.TempDir())
+	if c.DashboardResolutionLogCap != 1000 {
+		t.Fatalf("DashboardResolutionLogCap = %d, want 1000", c.DashboardResolutionLogCap)
+	}
+	c2 := &Config{DashboardResolutionLogCap: 5000}
+	c2.applyDefaults(t.TempDir())
+	if c2.DashboardResolutionLogCap != 5000 {
+		t.Fatalf("DashboardResolutionLogCap = %d, want 5000", c2.DashboardResolutionLogCap)
+	}
+	c3 := &Config{DashboardResolutionLogCap: 2000000}
+	c3.applyDefaults(t.TempDir())
+	if c3.DashboardResolutionLogCap != 1000000 {
+		t.Fatalf("DashboardResolutionLogCap = %d, want clamp 1000000", c3.DashboardResolutionLogCap)
+	}
+}
