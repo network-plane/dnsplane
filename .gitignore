@@ -3,6 +3,7 @@ dnsresolver
 # Config and data files (allow examples/)
 *.json
 !examples/*.json
+!docs/dnsplane.example.json
 old/*
 bin/*
 builds/
