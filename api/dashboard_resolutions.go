@@ -25,3 +25,19 @@ func dashboardResolutionsHandler(w http.ResponseWriter, r *http.Request) {
 		"resolutions": list,
 	})
 }
+
+// dashboardResolutionsPurgeHandler clears the in-memory dashboard resolution log (same store as GET /stats/dashboard/resolutions).
+func dashboardResolutionsPurgeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if !requireStatsHTMLPage(w, r, data.StatsDashboardHTMLEnabled()) {
+		return
+	}
+	data.ClearDashboardResolutionLog()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":  "ok",
+		"message": "Dashboard resolution log cleared",
+	})
+}

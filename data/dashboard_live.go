@@ -139,6 +139,14 @@ func GetDashboardLogNewestFirst(limit int) []DashboardResolution {
 	return out
 }
 
+// ClearDashboardResolutionLog removes all entries from the in-memory resolution ring.
+// Per-minute chart aggregates (GetDashboardSeries) are unchanged.
+func ClearDashboardResolutionLog() {
+	dashboardLive.mu.Lock()
+	defer dashboardLive.mu.Unlock()
+	dashboardLive.log = nil
+}
+
 // GetDashboardSeries returns the last dashboardSeriesSlots minutes, oldest → newest.
 func GetDashboardSeries() []DashboardMinutePoint {
 	dashboardLive.mu.Lock()
