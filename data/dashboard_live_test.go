@@ -53,6 +53,32 @@ func TestSetDashboardResolutionLogCap_RingSize(t *testing.T) {
 	}
 }
 
+func TestGetDashboardPerSecRates(t *testing.T) {
+	t.Cleanup(func() { SetDashboardResolutionLogCap(1000) })
+	SetDashboardResolutionLogCap(1000)
+	// Rates use completed UTC seconds [now-1 … now-5], not the current second.
+	prev := time.Unix(time.Now().UTC().Unix()-1, 0).UTC()
+	RecordDashboardResolution(DashboardResolution{
+		At: prev, Qname: "a.", Qtype: "A", Outcome: "cache", Record: "1.1.1.1", DurationMs: 1,
+	})
+	RecordDashboardResolution(DashboardResolution{
+		At: prev, Qname: "b.", Qtype: "A", Outcome: "upstream", Record: "2.2.2.2", DurationMs: 2,
+	})
+	r := GetDashboardPerSecRates(5)
+	if r.WindowSeconds != 5 {
+		t.Fatalf("WindowSeconds = %d", r.WindowSeconds)
+	}
+	if r.Resolutions < 0.35 || r.Resolutions > 0.45 {
+		t.Fatalf("Resolutions per sec = %v (want ~0.4 for 2 events / 5s)", r.Resolutions)
+	}
+	if r.Cache < 0.15 || r.Cache > 0.25 {
+		t.Fatalf("Cache per sec = %v", r.Cache)
+	}
+	if r.Upstream < 0.15 || r.Upstream > 0.25 {
+		t.Fatalf("Upstream per sec = %v", r.Upstream)
+	}
+}
+
 func TestClearDashboardResolutionLog(t *testing.T) {
 	t.Cleanup(func() { SetDashboardResolutionLogCap(1000) })
 	SetDashboardResolutionLogCap(1000)

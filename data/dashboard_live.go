@@ -4,6 +4,7 @@
 package data
 
 import (
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,6 +15,7 @@ const (
 	defaultDashboardResolutionLogCap = 1000
 	maxDashboardResolutionLogCap     = 1000000 // keep in sync with config.applyDefaults clamp
 	dashboardSeriesSlots             = 60      // last 60 minutes
+	dashboardSecondRetain            = 65      // per-second buckets kept for pruning headroom
 )
 
 var dashboardResolutionLogCap atomic.Int32 // 0 until SetDashboardResolutionLogCap (DashboardLogCap falls back to default)
@@ -68,10 +70,68 @@ type minuteAgg struct {
 	sumMs float64
 }
 
+// secondAgg holds resolution counts for one UTC second (from QueryObserver / RecordDashboardResolution).
+type secondAgg struct {
+	total    uint64
+	local    uint64
+	cache    uint64
+	upstream uint64
+	none     uint64
+	blocked  uint64
+}
+
 var dashboardLive struct {
 	mu     sync.Mutex
 	log    []DashboardResolution
 	minute map[int64]*minuteAgg
+	second map[int64]*secondAgg
+}
+
+// DashboardPerSecRates is average resolutions per second over a short window (see WindowSeconds).
+type DashboardPerSecRates struct {
+	WindowSeconds int     `json:"window_seconds"`
+	Resolutions   float64 `json:"resolutions_per_sec"`
+	Local         float64 `json:"local_per_sec"`
+	Cache         float64 `json:"cache_per_sec"`
+	Upstream      float64 `json:"upstream_per_sec"`
+	None          float64 `json:"none_per_sec"`
+	Blocked       float64 `json:"blocked_per_sec"`
+}
+
+// GetDashboardPerSecRates returns average rates over the last windowSeconds UTC seconds (excluding the current partial second).
+// windowSeconds is clamped to [1, 60]; default used when out of range is 5.
+func GetDashboardPerSecRates(windowSeconds int) DashboardPerSecRates {
+	if windowSeconds < 1 {
+		windowSeconds = 5
+	}
+	if windowSeconds > 60 {
+		windowSeconds = 60
+	}
+	now := time.Now().UTC().Unix()
+	var tot, loc, cac, up, non, blk uint64
+	dashboardLive.mu.Lock()
+	for i := int64(0); i < int64(windowSeconds); i++ {
+		sk := now - 1 - i
+		if sb := dashboardLive.second[sk]; sb != nil {
+			tot += sb.total
+			loc += sb.local
+			cac += sb.cache
+			up += sb.upstream
+			non += sb.none
+			blk += sb.blocked
+		}
+	}
+	dashboardLive.mu.Unlock()
+	wf := float64(windowSeconds)
+	return DashboardPerSecRates{
+		WindowSeconds: windowSeconds,
+		Resolutions:   float64(tot) / wf,
+		Local:         float64(loc) / wf,
+		Cache:         float64(cac) / wf,
+		Upstream:      float64(up) / wf,
+		None:          float64(non) / wf,
+		Blocked:       float64(blk) / wf,
+	}
 }
 
 // RecordDashboardResolution appends to the rolling log and updates per-minute stats.
@@ -87,6 +147,34 @@ func RecordDashboardResolution(e DashboardResolution) {
 
 	if dashboardLive.minute == nil {
 		dashboardLive.minute = make(map[int64]*minuteAgg)
+	}
+	if dashboardLive.second == nil {
+		dashboardLive.second = make(map[int64]*secondAgg)
+	}
+	sk := e.At.Unix()
+	sb := dashboardLive.second[sk]
+	if sb == nil {
+		sb = &secondAgg{}
+		dashboardLive.second[sk] = sb
+	}
+	sb.total++
+	switch strings.ToLower(strings.TrimSpace(e.Outcome)) {
+	case "local":
+		sb.local++
+	case "cache":
+		sb.cache++
+	case "upstream":
+		sb.upstream++
+	case "none":
+		sb.none++
+	case "blocked":
+		sb.blocked++
+	}
+	cutS := sk - int64(dashboardSecondRetain)
+	for k := range dashboardLive.second {
+		if k < cutS {
+			delete(dashboardLive.second, k)
+		}
 	}
 
 	// Log ring (keep last N)
