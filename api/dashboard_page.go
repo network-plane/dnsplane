@@ -9,6 +9,7 @@ import (
 
 	"dnsplane/cluster"
 	"dnsplane/data"
+	"dnsplane/fullstats"
 )
 
 func dashboardDataHandler(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +115,83 @@ func dashboardDataHandler(w http.ResponseWriter, r *http.Request) {
 			"requesters_session": sess.RequestersCount,
 		}
 	}
+
+	apiServerMu.Lock()
+	state := apiState
+	tracker := apiFullStatsTracker
+	apiServerMu.Unlock()
+
+	apiUp := state != nil && state.APIRunning()
+	dnsUp := state != nil && state.ServerStatus()
+	ready := apiUp && dnsUp
+	tuiAddr, tuiSince := "", time.Time{}
+	if state != nil {
+		tuiAddr, tuiSince = state.GetTUIClientInfo()
+	}
+	tuiPayload := map[string]any{
+		"connected":     tuiAddr != "",
+		"addr":          tuiAddr,
+		"since_rfc3339": nil,
+	}
+	if !tuiSince.IsZero() {
+		tuiPayload["since_rfc3339"] = tuiSince.UTC().Format(time.RFC3339)
+	}
+	listeners := map[string]any{
+		"dns_port":      "",
+		"api_port":      "",
+		"api_enabled":   false,
+		"client_socket": "",
+		"client_tcp":    "",
+	}
+	if state != nil {
+		ls := state.ListenerSnapshot()
+		listeners["dns_port"] = ls.DNSPort
+		listeners["api_port"] = ls.APIPort
+		listeners["api_enabled"] = ls.APIEnabled
+		listeners["client_socket"] = ls.ClientSocketPath
+		listeners["client_tcp"] = ls.ClientTCPAddress
+	}
+	payload["status"] = map[string]any{
+		"ready":     ready,
+		"api_up":    apiUp,
+		"dns_up":    dnsUp,
+		"tui":       tuiPayload,
+		"listeners": listeners,
+		"features":  buildDashboardStatusFeatures(dnsData, dnsUp),
+	}
+
+	if tracker != nil {
+		var reqs map[string]*fullstats.RequesterStats
+		var doms map[string]*fullstats.RequestStats
+		reqs, _ = tracker.GetAllRequesters()
+		doms, _ = tracker.GetAllRequests()
+		topReq := topRequestersForDashboard(reqs, dashboardFullstatsTopN)
+		topDom := topDomainsForDashboard(doms, dashboardFullstatsTopN)
+		reqRows := make([]map[string]any, len(topReq))
+		for i := range topReq {
+			reqRows[i] = map[string]any{
+				"ip":         topReq[i].IP,
+				"total":      topReq[i].Total,
+				"first_seen": topReq[i].FirstSeen,
+			}
+		}
+		domRows := make([]map[string]any, len(topDom))
+		for i := range topDom {
+			domRows[i] = map[string]any{
+				"domain":      topDom[i].Domain,
+				"record_type": topDom[i].RecordType,
+				"count":       topDom[i].Count,
+				"first_seen":  topDom[i].FirstSeen,
+				"last_seen":   topDom[i].LastSeen,
+			}
+		}
+		payload["fullstats_top"] = map[string]any{
+			"scope":      "total",
+			"requesters": reqRows,
+			"domains":    domRows,
+		}
+	}
+
 	if mgr := cluster.GlobalManager(); mgr != nil {
 		snap := mgr.StatusSnapshot()
 		payload["cluster"] = snap
@@ -136,14 +214,14 @@ func dashboardPageHandler(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(dashboardHTMLRendered))
 }
 
-// dashboardHTML is a self-contained dashboard (dark theme aligned with /stats/page; Chart.js from CDN).
-// Left nav embeds Stats/Perf/Metrics/Version in the right pane; Ctrl/Cmd-click opens the real URL in a new tab.
+// dashboardHTML is a self-contained UI (dark theme; Chart.js from CDN).
+// Left nav: Status, Statistics, embedded Tuning/Version; Ctrl/Cmd-click opens the URL in a new tab. Prometheus uses GET /metrics (not linked here).
 const dashboardHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>dnsplane — Dashboard</title>
+  <title>dnsplane</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
   <style>
     :root {
@@ -204,6 +282,32 @@ const dashboardHTML = `<!DOCTYPE html>
       font-weight: 600;
       border-right: 3px solid var(--accent);
     }
+    .nav-external {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.6rem 1.25rem 1rem;
+      margin-top: 0.25rem;
+      border-top: 1px solid var(--border);
+    }
+    .nav-external a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.45rem;
+      border-radius: var(--radius);
+      color: var(--muted);
+      text-decoration: none;
+      line-height: 0;
+    }
+    .nav-external a:hover {
+      background: var(--surface-hover);
+      color: var(--accent);
+    }
+    .nav-external .dash-icon-wrap {
+      width: 1.35rem;
+      height: 1.35rem;
+    }
     main.main-shell {
       flex: 1;
       display: flex;
@@ -213,14 +317,14 @@ const dashboardHTML = `<!DOCTYPE html>
       padding: 1.5rem 1.75rem;
       overflow: hidden;
     }
-    #view-dashboard {
+    #view-status, #view-dashboard {
       flex: 1;
       display: flex;
       flex-direction: column;
       min-height: 0;
       overflow: auto;
     }
-    #view-dashboard.hidden { display: none; }
+    #view-status.hidden, #view-dashboard.hidden { display: none; }
     #view-resolutions {
       flex: 1;
       display: flex;
@@ -384,6 +488,105 @@ const dashboardHTML = `<!DOCTYPE html>
     .dashboard-section:first-of-type .section-kicker {
       margin-top: 0;
     }
+    .status-grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+    }
+    @media (min-width: 1100px) {
+      .status-grid {
+        grid-template-columns: repeat(5, 1fr);
+      }
+    }
+    .status-cell {
+      min-height: 5.1rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      gap: 0.35rem;
+    }
+    .status-cell .status-pill {
+      font-size: 1.15rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.25;
+      word-break: break-word;
+    }
+    .status-cell .status-pill.ok { color: var(--success); }
+    .status-cell .status-pill.fail { color: var(--danger); }
+    .status-cell .status-pill.warn { color: var(--warning); }
+    .status-cell .status-pill.neutral {
+      color: var(--text);
+      font-size: 0.92rem;
+      font-weight: 500;
+    }
+    .status-cell .status-pill.mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+    .status-cell .status-pill .tui-muted { color: var(--muted); font-weight: 400; font-size: 0.82rem; }
+    .status-subkicker {
+      margin: 0.85rem 0 0.65rem 0;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+    .fs-top-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1rem;
+    }
+    .fs-top-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .fs-top-h {
+      margin: 0;
+      padding: 0.65rem 0.85rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .dash-mini-table-wrap {
+      max-height: 22rem;
+      overflow: auto;
+    }
+    .dash-mini-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    .dash-mini-table th, .dash-mini-table td {
+      padding: 0.45rem 0.65rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    .dash-mini-table th {
+      position: sticky;
+      top: 0;
+      background: var(--surface);
+      z-index: 1;
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .dash-mini-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .dash-mini-table td.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 0.78rem; }
+    .dash-mini-table tbody tr:last-child td { border-bottom: none; }
+    .dash-mini-table tbody tr:hover { background: var(--surface-hover); }
     .dashboard-section .metric-row:last-child {
       margin-bottom: 0;
     }
@@ -731,20 +934,72 @@ const dashboardHTML = `<!DOCTYPE html>
     <aside>
       <div class="brand">dnsplane</div>
       <nav>
-        <a class="active" href="/stats/dashboard" data-view="dashboard">Dashboard</a>
-        <a href="/stats/dashboard" data-view="resolutions">Resolutions log</a>
-        <a href="/stats/dashboard" data-view="fullstats">Stored stats</a>
-        <a href="/stats/page" data-embed="1">Stats</a>
-        <a href="/stats/perf/page" data-embed="1">Perf</a>
-        <a href="/metrics" data-embed="1">Metrics</a>
-        <a href="/version" data-embed="1">Version</a>
+        <a class="active" href="/stats/dashboard" data-view="status">Status</a>
+        <a href="/stats/dashboard" data-view="dashboard">Statistics</a>
+        <a href="/stats/dashboard" data-view="resolutions">Log</a>
+        <a href="/stats/dashboard" data-view="fullstats">Historical</a>
+        <a href="/stats/perf/page" data-embed="1">Tuning</a>
+        <a href="/version/page" data-embed="1">Version</a>
       </nav>
+      <div class="nav-external" aria-label="Project links">
+        <a href="https://github.com/network-plane/dnsplane" target="_blank" rel="noopener noreferrer" title="dnsplane on GitHub" aria-label="dnsplane on GitHub">§Ic:nav_github§</a>
+        <a href="https://earentir.dev" target="_blank" rel="noopener noreferrer" title="earentir.dev" aria-label="earentir.dev">§Ic:nav_site§</a>
+      </div>
     </aside>
     <main class="main-shell">
-      <div id="view-dashboard">
-        <h1>Dashboard</h1>
-        <p class="muted-link" style="margin:-0.5rem 0 1rem 0">Live data · refreshes every 2s while this view is open · <a href="/stats/dashboard/data">JSON</a></p>
-        <div id="err" class="err"></div>
+      <div id="err" class="err"></div>
+      <div id="view-status">
+        <h1>Status</h1>
+        <p class="muted-link" style="margin:-0.5rem 0 1rem 0">Listeners, readiness, and feature flags · refreshes every 2s while this view is open · <a href="/stats/dashboard/data">JSON</a></p>
+
+        <div class="dashboard-section">
+          <h2 class="section-kicker">§Ic:sec_status§Core</h2>
+          <div class="status-grid" aria-label="Server status">
+            <div class="card status-cell">
+              <h3>§Ic:st_ready§Ready</h3>
+              <div class="status-pill fail" id="st-ready">—</div>
+            </div>
+            <div class="card status-cell">
+              <h3>§Ic:st_api§API</h3>
+              <div class="status-pill fail" id="st-api">—</div>
+            </div>
+            <div class="card status-cell">
+              <h3>§Ic:st_dns§DNS</h3>
+              <div class="status-pill fail" id="st-dns">—</div>
+            </div>
+            <div class="card status-cell">
+              <h3>§Ic:st_tui§TUI client</h3>
+              <div class="status-pill neutral" id="st-tui">—</div>
+            </div>
+            <div class="card status-cell">
+              <h3>§Ic:st_dns§DNS port</h3>
+              <div class="status-pill neutral mono" id="st-dns-port">—</div>
+            </div>
+            <div class="card status-cell">
+              <h3>§Ic:st_api§API port</h3>
+              <div class="status-pill neutral mono" id="st-api-port">—</div>
+            </div>
+            <div class="card status-cell">
+              <h3>§Ic:st_toggle§API enabled</h3>
+              <div class="status-pill neutral" id="st-api-en">—</div>
+            </div>
+            <div class="card status-cell">
+              <h3>§Ic:st_plug§Client socket</h3>
+              <div class="status-pill neutral mono" id="st-sock">—</div>
+            </div>
+            <div class="card status-cell">
+              <h3>§Ic:st_socket§Client TCP</h3>
+              <div class="status-pill neutral mono" id="st-tcp">—</div>
+            </div>
+          </div>
+          <p class="status-subkicker">§Ic:sec_features§Protocols &amp; features</p>
+          <div class="status-grid" id="status-features-grid" aria-label="Protocols and feature toggles"></div>
+        </div>
+      </div>
+
+      <div id="view-dashboard" class="hidden">
+        <h1>Statistics</h1>
+        <p class="muted-link" style="margin:-0.5rem 0 1rem 0">Counters, charts, and activity · refreshes every 2s while this view is open · <a href="/stats/dashboard/data">JSON</a></p>
 
         <div class="dashboard-section">
           <h2 class="section-kicker">§Ic:sec_rates§Live rates</h2>
@@ -816,12 +1071,37 @@ const dashboardHTML = `<!DOCTYPE html>
         </div>
 
         <div class="dashboard-section" id="fullstats-kpi-section" style="display:none">
-          <h2 class="section-kicker">§Ic:sec_fullstats§Stored statistics (full_stats)</h2>
+          <h2 class="section-kicker">§Ic:sec_fullstats§Historical (full_stats)</h2>
           <div class="metric-row" id="fullstats-kpi-row">
             <div class="card"><h3>§Ic:fs_domains§Stored domains</h3><div class="value" id="m-fs-dom">—</div><div class="sub">persisted total</div></div>
             <div class="card"><h3>§Ic:fs_requesters§Stored requesters</h3><div class="value" id="m-fs-req">—</div><div class="sub">persisted total</div></div>
             <div class="card"><h3>§Ic:fs_dom_session§Domains (session)</h3><div class="value" id="m-fs-dom-s">—</div><div class="sub">since process start</div></div>
             <div class="card"><h3>§Ic:fs_req_session§Requesters (session)</h3><div class="value" id="m-fs-req-s">—</div><div class="sub">since process start</div></div>
+          </div>
+        </div>
+
+        <div class="dashboard-section" id="fullstats-top-section" style="display:none">
+          <h2 class="section-kicker">§Ic:sec_fullstats_top§Top 10 · full_stats (total)</h2>
+          <p class="muted-link" style="margin:-0.35rem 0 0.85rem 0">Persisted database · <a href="/stats/dashboard" data-view="fullstats">Browse historical</a></p>
+          <div class="fs-top-grid">
+            <div class="fs-top-panel">
+              <div class="fs-top-h">Requesters</div>
+              <div class="dash-mini-table-wrap">
+                <table class="dash-mini-table">
+                  <thead><tr><th>IP</th><th class="num">Total</th><th>First seen</th></tr></thead>
+                  <tbody id="fs-top-req-body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="fs-top-panel">
+              <div class="fs-top-h">Domains</div>
+              <div class="dash-mini-table-wrap">
+                <table class="dash-mini-table">
+                  <thead><tr><th>Domain</th><th>Type</th><th class="num">Count</th><th>First seen</th><th>Last seen</th></tr></thead>
+                  <tbody id="fs-top-dom-body"></tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -849,7 +1129,7 @@ const dashboardHTML = `<!DOCTYPE html>
         </div>
       </div>
       <div id="view-resolutions" class="hidden">
-        <h1>Resolutions log</h1>
+        <h1>Log</h1>
         <p class="res-note">This list is <strong>in memory only</strong> (last <span id="res-cap-note">1000</span> queries, newest first). It is lost on process restart and is not written to disk.</p>
         <p class="muted-link" style="margin:-0.5rem 0 1rem 0"><a href="/stats/dashboard/resolutions" target="_blank" rel="noopener">JSON</a> · refreshes every 2s while this view is open</p>
         <div class="res-toolbar">
@@ -870,7 +1150,7 @@ const dashboardHTML = `<!DOCTYPE html>
         </div>
       </div>
       <div id="view-fullstats" class="hidden">
-        <h1>Stored statistics</h1>
+        <h1>Historical</h1>
         <p class="muted-link" style="margin:-0.5rem 0 1rem 0">Full_stats database (<code>stats.db</code>) and session counters · <a id="fs-json-link" href="/stats/dashboard/fullstats/data" target="_blank" rel="noopener">JSON API</a></p>
         <div id="fs-msg" class="err" style="display:none"></div>
         <div class="fs-toolbar">
@@ -962,6 +1242,10 @@ const dashboardHTML = `<!DOCTYPE html>
       if (d > 0) return d + 'd ' + h + 'h';
       if (h > 0) return h + 'h ' + m + 'm';
       return m + 'm';
+    }
+    function fmtShortISO(iso) {
+      if (!iso) return '—';
+      try { return new Date(iso).toLocaleString(); } catch (e) { return String(iso); }
     }
     let chartReplies, chartLatency;
     let dashboardTimer = null;
@@ -1456,9 +1740,22 @@ const dashboardHTML = `<!DOCTYPE html>
         fsToggleSort(col);
       });
     }
-    function showDashboard(anchor) {
+    function showStatus(anchor) {
       if (anchor) setActiveNav(anchor);
       stopResolutionsRefresh();
+      document.getElementById('view-status').classList.remove('hidden');
+      document.getElementById('view-dashboard').classList.add('hidden');
+      document.getElementById('view-fullstats').classList.add('hidden');
+      document.getElementById('view-resolutions').classList.add('hidden');
+      const iframe = document.getElementById('view-embed');
+      iframe.classList.add('hidden');
+      iframe.src = 'about:blank';
+      startDashboardRefresh();
+    }
+    function showStatistics(anchor) {
+      if (anchor) setActiveNav(anchor);
+      stopResolutionsRefresh();
+      document.getElementById('view-status').classList.add('hidden');
       document.getElementById('view-dashboard').classList.remove('hidden');
       document.getElementById('view-fullstats').classList.add('hidden');
       document.getElementById('view-resolutions').classList.add('hidden');
@@ -1470,6 +1767,7 @@ const dashboardHTML = `<!DOCTYPE html>
     function showResolutions(anchor) {
       if (anchor) setActiveNav(anchor);
       stopDashboardRefresh();
+      document.getElementById('view-status').classList.add('hidden');
       document.getElementById('view-dashboard').classList.add('hidden');
       document.getElementById('view-fullstats').classList.add('hidden');
       document.getElementById('view-resolutions').classList.remove('hidden');
@@ -1482,6 +1780,7 @@ const dashboardHTML = `<!DOCTYPE html>
       if (anchor) setActiveNav(anchor);
       stopDashboardRefresh();
       stopResolutionsRefresh();
+      document.getElementById('view-status').classList.add('hidden');
       document.getElementById('view-dashboard').classList.add('hidden');
       document.getElementById('view-fullstats').classList.remove('hidden');
       document.getElementById('view-resolutions').classList.add('hidden');
@@ -1496,6 +1795,7 @@ const dashboardHTML = `<!DOCTYPE html>
       if (anchor) setActiveNav(anchor);
       stopDashboardRefresh();
       stopResolutionsRefresh();
+      document.getElementById('view-status').classList.add('hidden');
       document.getElementById('view-dashboard').classList.add('hidden');
       document.getElementById('view-fullstats').classList.add('hidden');
       document.getElementById('view-resolutions').classList.add('hidden');
@@ -1511,9 +1811,14 @@ const dashboardHTML = `<!DOCTYPE html>
           showEmbed(a.getAttribute('href'), a);
           return;
         }
+        if (a.getAttribute('data-view') === 'status') {
+          e.preventDefault();
+          showStatus(a);
+          return;
+        }
         if (a.getAttribute('data-view') === 'dashboard') {
           e.preventDefault();
-          showDashboard(a);
+          showStatistics(a);
           return;
         }
         if (a.getAttribute('data-view') === 'resolutions') {
@@ -1527,6 +1832,14 @@ const dashboardHTML = `<!DOCTYPE html>
         }
       });
     });
+    document.querySelector('main').addEventListener('click', function(e) {
+      var a = e.target.closest('a[data-view="fullstats"]');
+      if (!a || a.closest('aside')) return;
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
+      e.preventDefault();
+      var navFs = document.querySelector('aside nav a[data-view="fullstats"]');
+      showFullStats(navFs || null);
+    });
     wireFullStats();
     wireResolutions();
     async function load() {
@@ -1535,6 +1848,82 @@ const dashboardHTML = `<!DOCTYPE html>
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const j = await r.json();
         document.getElementById('err').textContent = '';
+        if (j.status) {
+          const st = j.status;
+          function pill(el, ok, okText, badText) {
+            el.textContent = ok ? okText : badText;
+            el.className = 'status-pill ' + (ok ? 'ok' : 'fail');
+          }
+          pill(document.getElementById('st-ready'), st.ready, 'Yes', 'No');
+          pill(document.getElementById('st-api'), st.api_up, 'Up', 'Down');
+          pill(document.getElementById('st-dns'), st.dns_up, 'Up', 'Down');
+          const tuiEl = document.getElementById('st-tui');
+          const tui = st.tui || {};
+          if (tui.connected && tui.addr) {
+            tuiEl.className = 'status-pill neutral';
+            tuiEl.innerHTML = esc(tui.addr) + (tui.since_rfc3339 ? '<span class="tui-muted"> · ' + esc(relTime(tui.since_rfc3339)) + '</span>' : '');
+          } else {
+            tuiEl.className = 'status-pill neutral';
+            tuiEl.textContent = '—';
+          }
+          const ls = st.listeners || {};
+          function setMono(id, v) {
+            const el = document.getElementById(id);
+            const s = v != null && v !== '' ? String(v) : '—';
+            el.textContent = s;
+            el.className = 'status-pill neutral mono';
+          }
+          setMono('st-dns-port', ls.dns_port);
+          setMono('st-api-port', ls.api_port);
+          const en = document.getElementById('st-api-en');
+          if (ls.api_enabled) {
+            en.textContent = 'Yes';
+            en.className = 'status-pill ok';
+          } else {
+            en.textContent = 'No';
+            en.className = 'status-pill neutral';
+          }
+          setMono('st-sock', ls.client_socket);
+          setMono('st-tcp', ls.client_tcp);
+          function featPillClass(v) {
+            if (v === 'ok') return 'status-pill ok';
+            if (v === 'bad') return 'status-pill fail';
+            if (v === 'warn') return 'status-pill warn';
+            return 'status-pill neutral';
+          }
+          const fg = document.getElementById('status-features-grid');
+          const feats = st.features || [];
+          let fh = '';
+          for (let fi = 0; fi < feats.length; fi++) {
+            const f = feats[fi];
+            const lab = f.label != null ? String(f.label) : '';
+            const val = f.value != null ? String(f.value) : '—';
+            const vc = featPillClass(f.variant);
+            fh += '<div class="card status-cell"><h3>' + esc(lab) + '</h3><div class="' + vc + '">' + esc(val) + '</div></div>';
+          }
+          fg.innerHTML = fh;
+        }
+        const ftsTop = document.getElementById('fullstats-top-section');
+        if (j.fullstats_top) {
+          ftsTop.style.display = '';
+          const ft = j.fullstats_top;
+          const reqs = ft.requesters || [];
+          const doms = ft.domains || [];
+          let rh = '';
+          for (let ri = 0; ri < reqs.length; ri++) {
+            const q = reqs[ri];
+            rh += '<tr><td class="mono">' + esc(q.ip) + '</td><td class="num">' + esc(String(q.total)) + '</td><td style="color:var(--muted);font-size:0.78rem">' + esc(fmtShortISO(q.first_seen)) + '</td></tr>';
+          }
+          document.getElementById('fs-top-req-body').innerHTML = rh || '<tr><td colspan="3" style="color:var(--muted)">No data</td></tr>';
+          let dh = '';
+          for (let di = 0; di < doms.length; di++) {
+            const d = doms[di];
+            dh += '<tr><td>' + esc(d.domain) + '</td><td class="mono">' + esc(d.record_type) + '</td><td class="num">' + esc(String(d.count)) + '</td><td style="color:var(--muted);font-size:0.78rem">' + esc(fmtShortISO(d.first_seen)) + '</td><td style="color:var(--muted);font-size:0.78rem">' + esc(fmtShortISO(d.last_seen)) + '</td></tr>';
+          }
+          document.getElementById('fs-top-dom-body').innerHTML = dh || '<tr><td colspan="5" style="color:var(--muted)">No data</td></tr>';
+        } else {
+          ftsTop.style.display = 'none';
+        }
         const c = j.counters || {};
         const ps = j.per_sec_rates || {};
         var wsec = ps.window_seconds != null ? Number(ps.window_seconds) : 5;
@@ -1666,7 +2055,7 @@ const dashboardHTML = `<!DOCTYPE html>
       }
     }
     initCharts();
-    showDashboard(null);
+    showStatus(null);
   </script>
 </body>
 </html>

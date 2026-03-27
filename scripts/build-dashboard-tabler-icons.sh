@@ -60,6 +60,8 @@ mkdir -p "$(dirname "$OUT")"
 	fetch_pair chart_latency timeline
 	fetch_pair log_resolutions list-details
 	# Section kickers (h2)
+	fetch_pair sec_rates gauge
+	fetch_pair sec_features settings
 	fetch_pair sec_traffic route
 	fetch_pair sec_cache database
 	fetch_pair sec_fast bolt
@@ -67,6 +69,19 @@ mkdir -p "$(dirname "$OUT")"
 	fetch_pair sec_adblock shield
 	fetch_pair sec_fullstats chart-bar
 	fetch_pair sec_trends chart-area-line
+	# Status row + full_stats top tables (dashboard)
+	fetch_pair sec_status heartbeat
+	fetch_pair sec_fullstats_top chart-bar-popular
+	fetch_pair st_ready circle-check
+	fetch_pair st_api api
+	fetch_pair st_dns world
+	fetch_pair st_tui terminal-2
+	fetch_pair st_toggle toggle-right
+	fetch_pair st_plug plug
+	fetch_pair st_socket router
+	# Sidebar external links
+	fetch_pair nav_github brand-github
+	fetch_pair nav_site volcano
 } >"$OUT"
 
 echo "Wrote $OUT"
