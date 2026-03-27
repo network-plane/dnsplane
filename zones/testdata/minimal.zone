@@ -1,0 +1,13 @@
+$ORIGIN example.com.
+$TTL 3600
+@   IN SOA ns1.example.com. hostmaster.example.com. 2024010101 7200 3600 1209600 3600
+@   IN NS  ns1.example.com.
+@   IN NS  ns2.example.com.
+ns1 IN A   192.0.2.1
+ns2 IN A   192.0.2.2
+www IN A   192.0.2.10
+ipv6 IN AAAA 2001:db8::1
+alias IN CNAME www.example.com.
+@   IN MX  10 mail.example.com.
+mail IN A 192.0.2.20
+txt  IN TXT "v=spf1" "include:_spf.example.com" "~all"
