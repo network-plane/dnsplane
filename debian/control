@@ -1,0 +1,17 @@
+Source: dnsplane
+Section: net
+Priority: optional
+Maintainer: dnsplane packagers <dnsplane@users.noreply.github.com>
+Rules-Requires-Root: no
+Build-Depends: debhelper-compat (= 13), golang-go
+Standards-Version: 4.6.2
+Homepage: https://github.com/network-plane/dnsplane
+
+Package: dnsplane
+Architecture: any
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Description: DNS resolver with local records and optional DoT/DoH
+ dnsplane answers DNS queries with optional local records, upstream
+ forwarding, adblock, and clustering. This package installs the server
+ binary and a systemd unit using /usr/bin/dnsplane (see
+ /usr/share/doc/dnsplane/README.packaging or upstream packaging/README.md).

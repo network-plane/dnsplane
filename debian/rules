@@ -1,0 +1,14 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+export CGO_ENABLED = 0
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	eval "$$(./packaging/version.sh export)" && \
+	go build -trimpath -ldflags "-X main.appVersion=$$DNSPLANE_VERSION_FULL" -o dnsplane .
+
+override_dh_auto_install:
+	dh_install
