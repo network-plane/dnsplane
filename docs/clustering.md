@@ -45,7 +45,7 @@ State file **`cluster_state.json`** is created next to `dnsplane.json`. It holds
 ## SRV discovery
 
 - Example record: `_dnsplane._tcp.example.com. IN SRV 0 5 7946 node1.internal.`
-- If lookup fails, the node keeps the **last successful** merge for static peers only on first failure after startup; after a failed refresh, `discovery_last_error` is set on dashboard/TUI status until the next successful lookup.
+- If lookup fails, **`discovery_last_error`** is set in status until the next successful refresh; that refresh still **merges static peers only** (SRV targets from the failed query are omitted).
 - **Static** `cluster_peers` and **SRV** targets are **deduplicated** (`host:port`); static entries appear first in the merged order.
 
 ## TUI commands
