@@ -29,11 +29,24 @@ type Manager struct {
 	log        *slog.Logger
 	dns        *data.DNSResolverData
 	peers      *peerTracker
+	lookupSRV  SRVLookup // nil uses net.LookupSRV
+
+	peerMu           sync.RWMutex
+	effectivePeers   []string
+	lastDiscSRV      string
+	lastDiscErr      string
+	lastDiscAt       time.Time
+	srvResolvedCount int
 
 	mu       sync.Mutex
 	listener net.Listener
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
+}
+
+// SetSRVLookup replaces DNS SRV resolution (tests).
+func (m *Manager) SetSRVLookup(fn SRVLookup) {
+	m.lookupSRV = fn
 }
 
 // NewManager creates a cluster manager. configPath is the path to dnsplane.json (for cluster_state.json dir).
@@ -58,6 +71,10 @@ func (m *Manager) Start(ctx context.Context, cfg config.Config) error {
 	if !cfg.ClusterEnabled {
 		return nil
 	}
+	if NormalizeSyncPolicy(cfg.ClusterSyncPolicy) == SyncPolicyPrimaryWriter && len(cfg.ClusterAllowedWriterNodeIDs) == 0 {
+		m.log.Warn("cluster: cluster_sync_policy=primary_writer but cluster_allowed_writer_node_ids is empty; incoming snapshots will be rejected")
+	}
+	m.refreshEffectivePeers()
 	addr := strings.TrimSpace(cfg.ClusterListenAddr)
 	if addr == "" {
 		addr = ":7946"
@@ -113,6 +130,24 @@ func (m *Manager) Start(ctx context.Context, cfg config.Config) error {
 		}()
 	}
 
+	discInt := cfg.ClusterDiscoveryIntervalSeconds
+	if strings.TrimSpace(cfg.ClusterDiscoverySRV) != "" && discInt > 0 {
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			t := time.NewTicker(time.Duration(discInt) * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-ctx2.Done():
+					return
+				case <-t.C:
+					m.refreshEffectivePeers()
+				}
+			}
+		}()
+	}
+
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
@@ -160,18 +195,40 @@ func (m *Manager) StatusSnapshot() StatusSnapshot {
 	if adv == "" {
 		adv = ClusterDialAddress(listen, "")
 	}
-	peers := cfg.ClusterPeers
-	return StatusSnapshot{
-		Enabled:          true,
-		NodeID:           m.state.NodeID(),
-		ListenAddr:       listen,
-		AdvertiseAddr:    adv,
-		ReplicaOnly:      cfg.ClusterReplicaOnly,
-		ClusterAdmin:     cfg.ClusterAdmin,
-		Peers:            m.peers.snapshot(peers),
-		LocalSeq:         m.state.CurrentLocalSeq(),
-		ClusterPortGuess: adv,
+	peerAddrs := m.listPeerTargets(cfg)
+	gts, gn := m.state.GlobalLWWLast()
+	m.peerMu.RLock()
+	discErr := m.lastDiscErr
+	discAt := m.lastDiscAt
+	discSRV := m.lastDiscSRV
+	srvN := m.srvResolvedCount
+	m.peerMu.RUnlock()
+	allow := append([]string(nil), cfg.ClusterAllowedWriterNodeIDs...)
+	snap := StatusSnapshot{
+		Enabled:                     true,
+		NodeID:                      m.state.NodeID(),
+		ListenAddr:                  listen,
+		AdvertiseAddr:               adv,
+		ReplicaOnly:                 cfg.ClusterReplicaOnly,
+		ClusterAdmin:                cfg.ClusterAdmin,
+		Peers:                       m.peers.snapshot(peerAddrs),
+		LocalSeq:                    m.state.CurrentLocalSeq(),
+		ClusterPortGuess:            adv,
+		SyncPolicy:                  NormalizeSyncPolicy(cfg.ClusterSyncPolicy),
+		AllowedWriterNodeIDs:        allow,
+		LastGlobalLWWUnix:           gts,
+		LastGlobalLWWNodeID:         gn,
+		ClusterDiscoverySRV:         strings.TrimSpace(cfg.ClusterDiscoverySRV),
+		ClusterDiscoveryIntervalSec: cfg.ClusterDiscoveryIntervalSeconds,
+		DiscoveryLastError:          discErr,
+		StaticPeerCount:             countNonEmptyStrings(cfg.ClusterPeers),
+		SRVPeerCount:                srvN,
+		EffectivePeerCount:          len(peerAddrs),
 	}
+	if discSRV != "" && !discAt.IsZero() {
+		snap.DiscoveryLastRefresh = discAt.UTC().Format(time.RFC3339)
+	}
+	return snap
 }
 
 // JoinInfo returns material for operators to register this node on a full server.
@@ -305,11 +362,7 @@ func (m *Manager) probeAllPeers() {
 	if token == "" {
 		return
 	}
-	for _, peer := range cfg.ClusterPeers {
-		p := strings.TrimSpace(peer)
-		if p == "" {
-			continue
-		}
+	for _, p := range m.listPeerTargets(cfg) {
 		m.probeOnce(p, token)
 	}
 }
@@ -356,7 +409,8 @@ func (m *Manager) probeOnce(peerAddr, token string) {
 // NotifyLocalRecordsChanged triggers a non-blocking push to peers after local dnsrecords are saved.
 func (m *Manager) NotifyLocalRecordsChanged() {
 	cfg := m.dns.GetResolverSettings()
-	if !cfg.ClusterEnabled || len(cfg.ClusterPeers) == 0 {
+	targets := m.listPeerTargets(cfg)
+	if !cfg.ClusterEnabled || len(targets) == 0 {
 		return
 	}
 	if cfg.ClusterReplicaOnly {
@@ -374,6 +428,7 @@ func (m *Manager) NotifyLocalRecordsChanged() {
 }
 
 func (m *Manager) pushToAllPeers(cfg config.Config) {
+	targets := m.listPeerTargets(cfg)
 	seq := m.state.NextLocalSeq()
 	rec := m.dns.GetRecords()
 	token := strings.TrimSpace(cfg.ClusterAuthToken)
@@ -391,11 +446,7 @@ func (m *Manager) pushToAllPeers(cfg config.Config) {
 		return
 	}
 
-	for _, peer := range cfg.ClusterPeers {
-		p := strings.TrimSpace(peer)
-		if p == "" {
-			continue
-		}
+	for _, p := range targets {
 		go m.pushOnce(p, token, payload)
 	}
 }
@@ -447,11 +498,7 @@ func (m *Manager) PullFromPeers(cfg config.Config) {
 	if token == "" {
 		return
 	}
-	for _, peer := range cfg.ClusterPeers {
-		p := strings.TrimSpace(peer)
-		if p == "" {
-			continue
-		}
+	for _, p := range m.listPeerTargets(cfg) {
 		m.pullOnce(p, token)
 	}
 }
@@ -500,17 +547,34 @@ func (m *Manager) pullOnce(peerAddr, token string) {
 		m.peers.recordPull(peerAddr, false)
 		return
 	}
-	records := msg.Records
 	if m.state.IsDuplicate(msg.NodeID, msg.Seq) {
 		m.peers.recordPull(peerAddr, true)
 		return
 	}
+	cfgNow := m.dns.GetResolverSettings()
+	applySnap, snapReason := ShouldApplySnapshot(cfgNow, m.state, &msg)
+	if !applySnap {
+		if m.log != nil && snapReason != "" {
+			m.log.Debug("cluster: skip pull apply", "reason", snapReason, "peer", peerAddr, "node_id", msg.NodeID)
+		}
+		m.state.CommitPeerSeq(msg.NodeID, msg.Seq)
+		m.peers.recordPull(peerAddr, true)
+		return
+	}
+	records := msg.Records
 	if err := m.dns.ApplyClusterRecords(records); err != nil {
 		m.log.Warn("cluster: apply pull", "error", err)
 		m.peers.recordPull(peerAddr, false)
 		return
 	}
 	m.state.CommitPeerSeq(msg.NodeID, msg.Seq)
+	if NormalizeSyncPolicy(cfgNow.ClusterSyncPolicy) == SyncPolicyGlobalLWW {
+		ts := msg.Timestamp
+		if ts <= 0 {
+			ts = 1
+		}
+		m.state.commitGlobalLWW(ts, msg.NodeID)
+	}
 	m.peers.recordPull(peerAddr, true)
 	m.log.Info("cluster: applied pull from peer", "peer", peerAddr, "node_id", msg.NodeID, "seq", msg.Seq)
 }
@@ -586,11 +650,27 @@ func (m *Manager) serveConn(ctx context.Context, conn net.Conn) {
 		if m.state.IsDuplicate(msg.NodeID, msg.Seq) {
 			continue
 		}
+		cfgNow := m.dns.GetResolverSettings()
+		applyOK, reason := ShouldApplySnapshot(cfgNow, m.state, &msg)
+		if !applyOK {
+			if m.log != nil && reason != "" {
+				m.log.Debug("cluster: skip inbound apply", "reason", reason, "node_id", msg.NodeID)
+			}
+			m.state.CommitPeerSeq(msg.NodeID, msg.Seq)
+			continue
+		}
 		if err := m.dns.ApplyClusterRecords(records); err != nil {
 			m.log.Warn("cluster: apply incoming", "error", err)
 			continue
 		}
 		m.state.CommitPeerSeq(msg.NodeID, msg.Seq)
+		if NormalizeSyncPolicy(cfgNow.ClusterSyncPolicy) == SyncPolicyGlobalLWW {
+			ts := msg.Timestamp
+			if ts <= 0 {
+				ts = 1
+			}
+			m.state.commitGlobalLWW(ts, msg.NodeID)
+		}
 		m.log.Info("cluster: applied records from peer", "node_id", msg.NodeID, "seq", msg.Seq, "count", len(records))
 	}
 }
@@ -623,6 +703,7 @@ func (m *Manager) applyAdminConfigFromMessage(msg *AdminConfigApplyMessage) erro
 		s.ClusterSyncIntervalSeconds = *msg.SyncInterval
 	}
 	m.dns.UpdateSettings(s)
+	m.refreshEffectivePeers()
 	return nil
 }
 
@@ -645,4 +726,62 @@ func (m *Manager) sendCurrentSnapshot(w io.Writer) {
 func (m *Manager) writeErr(conn net.Conn, msg string) {
 	b, _ := json.Marshal(SimpleMessage{Type: TypeError, Message: msg})
 	_ = WriteFrame(conn, b)
+}
+
+func (m *Manager) refreshEffectivePeers() {
+	cfg := m.dns.GetResolverSettings()
+	static := cfg.ClusterPeers
+	srvName := strings.TrimSpace(cfg.ClusterDiscoverySRV)
+	var srvTargets []string
+	var err error
+	if srvName != "" {
+		lookup := m.lookupSRV
+		if lookup == nil {
+			lookup = net.LookupSRV
+		}
+		srvTargets, err = LookupSRVTargets(lookup, srvName)
+		if err != nil && m.log != nil {
+			m.log.Warn("cluster: SRV lookup", "srv", srvName, "error", err)
+		}
+	}
+	merged := MergePeerAddrs(static, srvTargets)
+	m.peerMu.Lock()
+	m.effectivePeers = merged
+	m.lastDiscSRV = srvName
+	if err != nil {
+		m.lastDiscErr = err.Error()
+	} else {
+		m.lastDiscErr = ""
+	}
+	m.lastDiscAt = time.Now()
+	m.srvResolvedCount = len(srvTargets)
+	m.peerMu.Unlock()
+}
+
+func (m *Manager) listPeerTargets(cfg config.Config) []string {
+	m.peerMu.RLock()
+	out := m.effectivePeers
+	m.peerMu.RUnlock()
+	if len(out) > 0 {
+		cp := make([]string, len(out))
+		copy(cp, out)
+		return cp
+	}
+	var fallback []string
+	for _, p := range cfg.ClusterPeers {
+		if s := strings.TrimSpace(p); s != "" {
+			fallback = append(fallback, s)
+		}
+	}
+	return fallback
+}
+
+func countNonEmptyStrings(ss []string) int {
+	n := 0
+	for _, s := range ss {
+		if strings.TrimSpace(s) != "" {
+			n++
+		}
+	}
+	return n
 }
