@@ -10,16 +10,16 @@ import (
 	"dnsplane/config"
 )
 
-func TestStatsPageHTMLEnabled_NoConfig(t *testing.T) {
+func TestStatsHTMLGates_NoConfig(t *testing.T) {
 	if instance != nil {
 		t.Skip("resolver already initialised")
 	}
-	if !StatsPageHTMLEnabled() || !StatsPerfPageHTMLEnabled() || !StatsDashboardHTMLEnabled() {
-		t.Fatal("expected all true when instance and configState nil")
+	if !StatsPerfPageHTMLEnabled() || !StatsDashboardHTMLEnabled() {
+		t.Fatal("expected perf and dashboard HTML gates true when instance and configState nil")
 	}
 }
 
-func TestStatsPageHTMLEnabled_FromConfigState(t *testing.T) {
+func TestStatsPerfPageHTMLEnabled_FromConfigState(t *testing.T) {
 	if instance != nil {
 		t.Skip("resolver instance already initialised; configState path not tested")
 	}
@@ -30,8 +30,7 @@ func TestStatsPageHTMLEnabled_FromConfigState(t *testing.T) {
 			FileLocations: config.FileLocations{
 				DNSServerFile: filepath.Join(dir, "dnsservers.json"),
 			},
-			StatsPageEnabled:      false,
-			StatsPerfPageEnabled:  true,
+			StatsPerfPageEnabled:  false,
 			StatsDashboardEnabled: true,
 		},
 	}
@@ -42,10 +41,10 @@ func TestStatsPageHTMLEnabled_FromConfigState(t *testing.T) {
 		configStateMu.Unlock()
 	})
 
-	if StatsPageHTMLEnabled() {
-		t.Fatal("expected stats page disabled from config")
+	if StatsPerfPageHTMLEnabled() {
+		t.Fatal("expected perf page disabled from config")
 	}
-	if !StatsPerfPageHTMLEnabled() {
-		t.Fatal("expected perf page enabled")
+	if !StatsDashboardHTMLEnabled() {
+		t.Fatal("expected dashboard enabled")
 	}
 }

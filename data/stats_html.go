@@ -3,21 +3,6 @@
 
 package data
 
-// StatsPageHTMLEnabled reports whether GET /stats/page is allowed (config stats_page_enabled, default true).
-// Uses live resolver settings when initialised so TUI "server set" applies before save.
-// When config is not loaded yet, returns true so defaults match legacy behaviour.
-func StatsPageHTMLEnabled() bool {
-	if instance != nil {
-		return instance.GetResolverSettings().StatsPageEnabled
-	}
-	configStateMu.RLock()
-	defer configStateMu.RUnlock()
-	if configState == nil {
-		return true
-	}
-	return configState.Config.StatsPageEnabled
-}
-
 // StatsPerfPageHTMLEnabled reports whether GET /stats/perf/page is allowed (stats_perf_page_enabled).
 func StatsPerfPageHTMLEnabled() bool {
 	if instance != nil {
