@@ -10,7 +10,7 @@ dnsplane can replicate **local DNS records** (`dnsrecords`) between instances ov
 
 ## Configuration
 
-Set these keys in `dnsplane.json` (general layout: [README](../README.md#config-files)):
+Set these keys in `dnsplane.json` (general layout: [Config files](config-files.md)):
 
 | Key | Meaning |
 |-----|---------|
