@@ -2072,7 +2072,6 @@ func printAllServerConfig(settings config.Config) {
 	fmt.Printf("    pprof_enabled:               %v\n", settings.PprofEnabled)
 	fmt.Printf("    pprof_listen:                %s\n", settings.PprofListen)
 	fmt.Printf("    pretty_json:                 %v\n", settings.PrettyJSON)
-	fmt.Printf("    stats_page_enabled:       %v\n", settings.StatsPageEnabled)
 	fmt.Printf("    stats_perf_page_enabled:  %v\n", settings.StatsPerfPageEnabled)
 	fmt.Printf("    stats_dashboard_enabled:  %v\n", settings.StatsDashboardEnabled)
 	fmt.Printf("    full_stats:     %v\n", settings.FullStats)
@@ -2387,20 +2386,13 @@ func applyConfigSetting(cfg *config.Config, setting, value string) (successMsg s
 		}
 		cfg.CacheCompactIntervalSeconds = n
 		return fmt.Sprintf("Cache compact interval set to %d seconds", n), nil
-	case "stats_page_enabled":
-		b, e := strconv.ParseBool(value)
-		if e != nil {
-			return "", fmt.Errorf("invalid value for stats_page_enabled: %s (use true/false)", value)
-		}
-		cfg.StatsPageEnabled = b
-		return fmt.Sprintf("Stats HTML page (/stats/page) enabled set to %v", b), nil
 	case "stats_perf_page_enabled":
 		b, e := strconv.ParseBool(value)
 		if e != nil {
 			return "", fmt.Errorf("invalid value for stats_perf_page_enabled: %s (use true/false)", value)
 		}
 		cfg.StatsPerfPageEnabled = b
-		return fmt.Sprintf("Perf HTML page (/stats/perf/page) enabled set to %v", b), nil
+		return fmt.Sprintf("Tuning HTML page (/stats/perf/page) enabled set to %v", b), nil
 	case "stats_dashboard_enabled":
 		b, e := strconv.ParseBool(value)
 		if e != nil {
@@ -2823,7 +2815,7 @@ func printServerSetUsage() {
 	fmt.Println("Usage: server set <setting> <value>")
 	fmt.Println("Description: Set a config setting in memory. Run 'server save' to write to the config file.")
 	fmt.Println("Example: server set apiport 8080")
-	fmt.Println("Settings: dns_port, api_port, fallback_ip, fallback_port, timeout, api, cache_records, local_records_enabled, cache_warm_enabled, cache_warm_interval_seconds, cache_compact_enabled, cache_compact_interval_seconds, stats_page_enabled, stats_perf_page_enabled, stats_dashboard_enabled, full_stats, full_stats_dir, pprof_enabled, pprof_listen, pretty_json, server_socket, server_tcp, dnsservers_file, cache_file, records_source_location (or dnsrecords), records_source_type (file|url|git), auto_build_ptr_from_a, forward_ptr_queries, add_updates_records, log_dir, log_severity, log_rotation, log_rotation_size_mb, log_rotation_time_days; see README and docs/dnsplane.example.json for the full list.")
+	fmt.Println("Settings: dns_port, api_port, fallback_ip, fallback_port, timeout, api, cache_records, local_records_enabled, cache_warm_enabled, cache_warm_interval_seconds, cache_compact_enabled, cache_compact_interval_seconds, stats_perf_page_enabled, stats_dashboard_enabled, full_stats, full_stats_dir, pprof_enabled, pprof_listen, pretty_json, server_socket, server_tcp, dnsservers_file, cache_file, records_source_location (or dnsrecords), records_source_type (file|url|git), auto_build_ptr_from_a, forward_ptr_queries, add_updates_records, log_dir, log_severity, log_rotation, log_rotation_size_mb, log_rotation_time_days; see README and docs/dnsplane.example.json for the full list.")
 	printHelpAliasesHint()
 }
 

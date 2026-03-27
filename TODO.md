@@ -8,7 +8,6 @@ Work tracked for future releases and packaging. For **using** dnsplane, see the 
 
 - [ ] RPM spec (e.g. `packaging/dnsplane.spec`): install binary, systemd unit, optional dedicated user and config file handling. Version/release from git tag or `VERSION` file.
 - [ ] Debian packaging (`debian/`): control, rules, changelog, install paths for binary and unit.
-- [ ] Packaging notes: how to build and sign packages locally; keep signing keys off shared CI unless you use project-specific secret storage.
 - [ ] Optional: Alpine APK, Homebrew formula, Windows MSI or zip.
 
 ---
@@ -18,7 +17,6 @@ Work tracked for future releases and packaging. For **using** dnsplane, see the 
 - [ ] `GET /dns/records`: optional `?name=` / `?type=` filters aligned with the TUI list behavior.
 - [ ] Per-server fallback: optional second upstream when a whitelist-only server fails.
 - [ ] Record updates by stable id (name + type + value) to avoid accidental overwrites.
-- [ ] Performance work driven by profiling results if a clear bottleneck appears.
 
 ---
 
@@ -42,3 +40,6 @@ Work tracked for future releases and packaging. For **using** dnsplane, see the 
 - [ ] cPanel-oriented notes: `/var/named/` (or equivalent), reload via `rndc` or scripts, WHM nameserver options.
 - [ ] Optional RFC 2136 dynamic updates where panels expect them.
 - [ ] README sections: “Using dnsplane with ISPConfig” and “Using dnsplane with cPanel” (examples and reload scripts).
+
+
+## 5. Web UI for Configuration
