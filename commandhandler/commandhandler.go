@@ -956,6 +956,9 @@ func runToolsDig() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResult 
 		} else {
 			dnsData := data.GetInstance()
 			servers = dnsservers.GetUpstreamEndpointsForQuery(dnsData.GetServers(), queryName, true)
+			if len(servers) > 0 {
+				servers = dnsservers.AppendPerServerFallbacks(servers, dnsData.GetServers())
+			}
 			if len(servers) == 0 {
 				settings := dnsData.GetResolverSettings()
 				fallbackIP := strings.TrimSpace(settings.FallbackServerIP)

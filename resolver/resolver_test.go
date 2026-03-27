@@ -4,6 +4,7 @@ package resolver
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync"
 	"testing"
@@ -62,6 +63,27 @@ func (u *recordingUpstream) reset() {
 	u.mu.Lock()
 	u.queries = nil
 	u.mu.Unlock()
+}
+
+// upstreamFailAddrs records every Query attempt, fails for HealthKeys in fail, otherwise delegates to rec.
+type upstreamFailAddrs struct {
+	fail map[string]struct{}
+	rec  *recordingUpstream
+}
+
+func (u *upstreamFailAddrs) Query(ctx context.Context, question dns.Question, ep dnsservers.UpstreamEndpoint) (*dns.Msg, error) {
+	u.rec.mu.Lock()
+	u.rec.queries = append(u.rec.queries, struct{ name, server string }{question.Name, ep.HealthKey()})
+	u.rec.mu.Unlock()
+	if _, ok := u.fail[ep.HealthKey()]; ok {
+		return nil, errors.New("upstream down")
+	}
+	msg := &dns.Msg{}
+	msg.SetReply(&dns.Msg{Question: []dns.Question{question}})
+	msg.Rcode = dns.RcodeSuccess
+	hdr := dns.RR_Header{Name: question.Name, Rrtype: question.Qtype, Class: dns.ClassINET, Ttl: 60}
+	msg.Answer = []dns.RR{&dns.A{Hdr: hdr, A: net.IPv4(1, 2, 3, 4).To4()}}
+	return msg, nil
 }
 
 // whitelistIntegrationStore implements Store with one global and one whitelist server.
@@ -151,6 +173,56 @@ func TestWhitelistIntegration(t *testing.T) {
 		if q.server != "8.8.8.8:53" {
 			t.Errorf("global domain: expected only 8.8.8.8:53 to be queried, got server %q", q.server)
 		}
+	}
+}
+
+// TestWhitelistPerServerFallback verifies that when the whitelist primary fails, an optional per-row fallback answers.
+func TestWhitelistPerServerFallback(t *testing.T) {
+	rec := &recordingUpstream{}
+	up := &upstreamFailAddrs{
+		fail: map[string]struct{}{"192.168.5.5:53": {}},
+		rec:  rec,
+	}
+	whitelistServer := dnsservers.DNSServer{
+		Address:           "192.168.5.5",
+		Port:              "53",
+		Active:            true,
+		DomainWhitelist:   []string{"internal.example"},
+		FallbackAddress:   "10.0.0.2",
+		FallbackPort:      "53",
+		FallbackTransport: "udp",
+	}
+	store := &whitelistIntegrationStore{
+		servers: []dnsservers.DNSServer{whitelistServer},
+		config:  config.Config{},
+	}
+	r := New(Config{
+		Store:           store,
+		Upstream:        up,
+		UpstreamTimeout: 2 * time.Second,
+	})
+	ctx := context.Background()
+	q := dns.Question{Name: "api.internal.example.", Qtype: dns.TypeA, Qclass: dns.ClassINET}
+	msg := &dns.Msg{}
+	msg.SetQuestion(q.Name, q.Qtype)
+	r.HandleQuestion(ctx, q, msg)
+	if msg.Rcode != dns.RcodeSuccess || len(msg.Answer) == 0 {
+		t.Fatalf("expected success from fallback, rcode=%v answers=%d", msg.Rcode, len(msg.Answer))
+	}
+	// Resolver returns on first success while other upstream goroutines may still be starting Query.
+	time.Sleep(15 * time.Millisecond)
+	got := rec.recorded()
+	var sawPrimary, sawFallback bool
+	for _, x := range got {
+		switch x.server {
+		case "192.168.5.5:53":
+			sawPrimary = true
+		case "10.0.0.2:53":
+			sawFallback = true
+		}
+	}
+	if !sawPrimary || !sawFallback {
+		t.Fatalf("expected primary and fallback queried, got %+v", got)
 	}
 }
 

@@ -3,6 +3,7 @@
 package dnsrecords_test
 
 import (
+	"strings"
 	"testing"
 
 	"dnsplane/dnsrecords"
@@ -24,6 +25,56 @@ func TestAddRecordAddsRecord(t *testing.T) {
 	}
 	if updated[0].TTL != 3600 {
 		t.Fatalf("expected TTL default to 3600, got %d", updated[0].TTL)
+	}
+	if strings.TrimSpace(updated[0].ID) == "" {
+		t.Fatal("expected non-empty record id")
+	}
+}
+
+func TestAddRecordDuplicateExplicitID(t *testing.T) {
+	r1 := dnsrecords.DNSRecord{Name: "a.com", Type: "A", Value: "1.1.1.1", ID: "00000000-0000-4000-8000-000000000001"}
+	updated, _, err := dnsrecords.AddRecord(r1, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2 := dnsrecords.DNSRecord{Name: "b.com", Type: "A", Value: "2.2.2.2", ID: "00000000-0000-4000-8000-000000000001"}
+	if _, _, err := dnsrecords.AddRecord(r2, updated, false); err == nil {
+		t.Fatal("expected duplicate id error")
+	}
+}
+
+func TestUpdateRecordByID(t *testing.T) {
+	r0 := dnsrecords.DNSRecord{Name: "x.com", Type: "A", Value: "1.1.1.1", ID: "aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee"}
+	records := []dnsrecords.DNSRecord{r0}
+	in := dnsrecords.DNSRecord{Name: "y.com", Type: "A", Value: "9.9.9.9"}
+	updated, _, err := dnsrecords.UpdateRecordByID("aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee", in, records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated) != 1 || updated[0].Name != "y.com" || updated[0].Value != "9.9.9.9" {
+		t.Fatalf("got %+v", updated[0])
+	}
+}
+
+func TestUpdateRecordByIDUnknown(t *testing.T) {
+	records := []dnsrecords.DNSRecord{{Name: "x.com", Type: "A", Value: "1.1.1.1", ID: "real-id"}}
+	in := dnsrecords.DNSRecord{Name: "y.com", Type: "A", Value: "9.9.9.9"}
+	if _, _, err := dnsrecords.UpdateRecordByID("missing", in, records); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestRemoveRecordByID(t *testing.T) {
+	records := []dnsrecords.DNSRecord{
+		{Name: "a.com", Type: "A", Value: "1.1.1.1", ID: "id-a"},
+		{Name: "b.com", Type: "A", Value: "2.2.2.2", ID: "id-b"},
+	}
+	updated, _, err := dnsrecords.RemoveRecordByID("id-a", records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updated) != 1 || updated[0].ID != "id-b" {
+		t.Fatalf("got %+v", updated)
 	}
 }
 
@@ -153,6 +204,59 @@ func TestList(t *testing.T) {
 	}
 	if !result.Detailed {
 		t.Error("List(details) Detailed = false, want true")
+	}
+}
+
+func TestFilterRecords(t *testing.T) {
+	records := []dnsrecords.DNSRecord{
+		{Name: "foo.example.com", Type: "A", Value: "1.1.1.1", TTL: 3600},
+		{Name: "bar.example.com", Type: "AAAA", Value: "::1", TTL: 3600},
+		{Name: "other.net", Type: "TXT", Value: "x", TTL: 3600},
+	}
+	got, err := dnsrecords.FilterRecords(records, "example", "")
+	if err != nil {
+		t.Fatalf("FilterRecords: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("name example: got %d records, want 2", len(got))
+	}
+	got, err = dnsrecords.FilterRecords(records, "", "A")
+	if err != nil {
+		t.Fatalf("FilterRecords: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "foo.example.com" {
+		t.Fatalf("type A: got %+v", got)
+	}
+	got, err = dnsrecords.FilterRecords(records, "example", "AAAA")
+	if err != nil {
+		t.Fatalf("FilterRecords: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "bar.example.com" {
+		t.Fatalf("name+type: got %+v", got)
+	}
+	if _, err := dnsrecords.FilterRecords(records, "", "NOTATYPE"); err == nil {
+		t.Fatal("invalid type: want error")
+	}
+}
+
+func TestListAppliesStringFilter(t *testing.T) {
+	records := []dnsrecords.DNSRecord{
+		{Name: "a.com", Type: "A", Value: "1.1.1.1", TTL: 3600},
+		{Name: "b.com", Type: "TXT", Value: "x", TTL: 3600},
+	}
+	result, err := dnsrecords.List(records, []string{"A"})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(result.Records) != 1 || result.Records[0].Type != "A" {
+		t.Fatalf("filter by type A: got %+v", result.Records)
+	}
+	result, err = dnsrecords.List(records, []string{"com"})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(result.Records) != 2 {
+		t.Fatalf("substring com: want 2, got %d", len(result.Records))
 	}
 }
 

@@ -25,13 +25,18 @@ type DNSServer struct {
 	// Transport is udp, tcp, dot, or doh (empty = udp).
 	Transport string `json:"transport,omitempty"`
 	// DoHURL is the full HTTPS URL for DNS-over-HTTPS (required for transport doh if address is not a URL).
-	DoHURL          string    `json:"doh_url,omitempty"`
-	Active          bool      `json:"active"`
-	LocalResolver   bool      `json:"local_resolver"`
-	AdBlocker       bool      `json:"adblocker"`
-	DomainWhitelist []string  `json:"domain_whitelist,omitempty"`
-	LastUsed        time.Time `json:"last_used,omitempty"`
-	LastSuccess     time.Time `json:"last_success,omitempty"`
+	DoHURL          string   `json:"doh_url,omitempty"`
+	Active          bool     `json:"active"`
+	LocalResolver   bool     `json:"local_resolver"`
+	AdBlocker       bool     `json:"adblocker"`
+	DomainWhitelist []string `json:"domain_whitelist,omitempty"`
+	// Optional second upstream queried in parallel with this row (same race as primaries). Used when the row is selected (e.g. whitelist path).
+	FallbackAddress   string    `json:"fallback_address,omitempty"`
+	FallbackPort      string    `json:"fallback_port,omitempty"`
+	FallbackTransport string    `json:"fallback_transport,omitempty"`
+	FallbackDoHURL    string    `json:"fallback_doh_url,omitempty"`
+	LastUsed          time.Time `json:"last_used,omitempty"`
+	LastSuccess       time.Time `json:"last_success,omitempty"`
 }
 
 var (
@@ -297,8 +302,23 @@ func applyArgsToDNSServer(server *DNSServer, args []string) error {
 			server.Transport = strings.ToLower(strings.TrimSpace(val))
 		case "doh_url":
 			server.DoHURL = val
+		case "fallback_address":
+			if val == "" {
+				server.FallbackAddress = ""
+				server.FallbackPort = ""
+				server.FallbackTransport = ""
+				server.FallbackDoHURL = ""
+			} else {
+				server.FallbackAddress = val
+			}
+		case "fallback_port":
+			server.FallbackPort = val
+		case "fallback_transport":
+			server.FallbackTransport = strings.ToLower(strings.TrimSpace(val))
+		case "fallback_doh_url":
+			server.FallbackDoHURL = val
 		default:
-			return fmt.Errorf("unknown parameter %q; allowed: active, localresolver, adblocker, whitelist, transport, doh_url", key)
+			return fmt.Errorf("unknown parameter %q; allowed: active, localresolver, adblocker, whitelist, transport, doh_url, fallback_address, fallback_port, fallback_transport, fallback_doh_url", key)
 		}
 	}
 	return nil
@@ -332,7 +352,7 @@ func UsageRemove() []Message {
 // Helper function to handle the help command.
 func usageAdd() []Message {
 	msgs := []Message{
-		{Level: LevelInfo, Text: "Usage  : add <Address> [Port] [active:true|false] [localresolver:true|false] [adblocker:true|false] [whitelist:suffix1,suffix2,...]"},
+		{Level: LevelInfo, Text: "Usage  : add <Address> [Port] [active:true|false] [localresolver:true|false] [adblocker:true|false] [whitelist:suffix1,suffix2,...] [fallback_address:IP] [fallback_port:53] [fallback_transport:udp|tcp|dot|doh] [fallback_doh_url:https://...]"},
 		{Level: LevelInfo, Text: "Example: add 1.1.1.1 53"},
 		{Level: LevelInfo, Text: "Example: add 192.168.5.5 53 active:true localresolver:true adblocker:false whitelist:example.com,example.org"},
 	}
@@ -349,7 +369,7 @@ func usageRemove() []Message {
 
 func usageUpdate() []Message {
 	msgs := []Message{
-		{Level: LevelInfo, Text: "Usage  : update <Address> [Port] [active:true|false] [localresolver:true|false] [adblocker:true|false] [whitelist:suffix1,suffix2,...]"},
+		{Level: LevelInfo, Text: "Usage  : update <Address> [Port] [active:true|false] [localresolver:true|false] [adblocker:true|false] [whitelist:suffix1,suffix2,...] [fallback_address:IP] [fallback_port:53] ..."},
 		{Level: LevelInfo, Text: "Example: update 1.1.1.1 53 active:false"},
 		{Level: LevelInfo, Text: "Example: update 192.168.5.5 adblocker:true whitelist:example.com,example.org"},
 	}
