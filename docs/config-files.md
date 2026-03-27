@@ -60,7 +60,7 @@ For **url** and **git**, `refresh_interval_seconds` defaults to 60 if omitted.
 
 ### Upstream servers (`dnsservers.json`) and domain whitelist
 
-The file is JSON: **`{ "dnsservers": [ ... ] }`**. Each entry has at least `address`, `port`, `active`, `local_resolver`, `adblocker`. Optional: `transport` (`udp` / `tcp` / `dot` / `doh`), `doh_url` for DoH.
+The file is JSON: **`{ "dnsservers": [ ... ] }`**. Each entry has at least `address`, `port`, `active`, `local_resolver`, `adblocker`. Optional: `transport` (`udp` / `tcp` / `dot` / `doh`), `doh_url` for DoH. Optional **per-row fallback** (queried in parallel with that row): `fallback_address`, `fallback_port` (default `53`), `fallback_transport` (defaults to the row’s `transport`), `fallback_doh_url` (for DoH fallbacks).
 
 **`domain_whitelist`** (optional array of strings): if set, this upstream is used **only** for query names that match an entry (exact name or a subdomain under that suffix). Names that match **any** active whitelisted server are resolved **only** via those servers — **not** via global upstreams (no `domain_whitelist`) and **not** via the configured **`fallback_server_*`** for that query. You can list **multiple** suffixes on one server, or use **multiple** server rows each with its own whitelist and IP.
 
@@ -201,7 +201,7 @@ Enable the REST API with `"api": true` in `dnsplane.json` and set `apiport` (e.g
 
 **TLS, bind, and rate limits:** set `api_tls_cert` and `api_tls_key` to PEM file paths to serve the REST API over HTTPS. Use `dns_bind` and `api_bind` (e.g. `"127.0.0.1"`) to listen on a specific address instead of all interfaces. Per-IP limits: `api_rate_limit_rps` / `api_rate_limit_burst` (HTTP 429 when exceeded), `dns_rate_limit_rps` / `dns_rate_limit_burst` (DNS `REFUSED` when exceeded). Amplification hardening: `dns_amplification_max_ratio` caps packed response size vs packed request (0 disables).
 
-**Upstream transport:** in `dnsservers.json`, each server may set `transport` to `udp` (default), `tcp`, `dot` (TLS to port 853 by default), or `doh`. For DoH set `doh_url` to the full `https://…/dns-query` URL (or put a URL in `address` when using `doh`). Optional `fallback_server_transport` applies to the configured fallback resolver. **`domain_whitelist`** (split DNS) is documented in [Upstream servers (`dnsservers.json`)](#upstream-servers-dnsserversjson-and-domain-whitelist).
+**Upstream transport:** in `dnsservers.json`, each server may set `transport` to `udp` (default), `tcp`, `dot` (TLS to port 853 by default), or `doh`. For DoH set `doh_url` to the full `https://…/dns-query` URL (or put a URL in `address` when using `doh`). Global config **`fallback_server_*`** applies when the query is **not** using whitelist-only upstreams. Per-row **`fallback_*`** fields add a second resolver in the same parallel race (see [resolution.md](resolution.md)). **`domain_whitelist`** (split DNS) is documented in [Upstream servers (`dnsservers.json`)](#upstream-servers-dnsserversjson-and-domain-whitelist). **`POST` / `PUT` `/dns/servers`** accept the same `fallback_*` JSON keys as `dnsservers.json`.
 
 **Public / internet-facing DNS:** see [security-public-dns.md](security-public-dns.md) for DoT/DoH listeners (`dot_*`, `doh_*`), response limit modes (`dns_response_limit_mode` `sliding_window` vs `rrl`), DNSSEC validation flags, and metrics.
 
@@ -211,8 +211,10 @@ Enable the REST API with `"api": true` in `dnsplane.json` and set `apiport` (e.g
 | GET | `/ready` | Readiness: returns 200 when the API and DNS listener are both up, 503 otherwise. Response is JSON with `ready`, `api`, `dns`, `tui_client` (connected, addr, since), `listeners` (dns_port, api_port, api_enabled, client_socket_path, client_tcp_address), and **`build`** (`version`, `go_version`, `os`, `arch`). Use this for load balancers and orchestrator readiness checks (e.g. Kubernetes). |
 | GET | `/version` | Build metadata as JSON: `version`, `go_version`, `os`, `arch` (same as `build` in `/stats` and `/ready`). |
 | GET | `/version/page` | HTML view of the same build fields (for embedding in the dashboard). **404** if `stats_dashboard_enabled` is false. |
-| GET | `/dns/records` | List DNS records (same data as the TUI). Returns JSON with `records` and optional `filter`, `messages`. |
-| POST | `/dns/records` | Add a DNS record. Body: `{"name":"...","type":"A","value":"...","ttl":3600}`. |
+| GET | `/dns/records` | List DNS records (same data as the TUI). Returns JSON with `records`, optional `detailed` (boolean), `filter`, `messages`. **Query:** `name` (substring on normalized owner name), `type` (DNS type, AND with `name` when both set; invalid `type` → **400**), `details` or `d` (`1` / `true` for verbose fields in each record, like `record list details`). |
+| POST | `/dns/records` | Add a DNS record. Body: `{"name":"...","type":"A","value":"...","ttl":3600}`. Optional **`id`**: if set, must be unique (for import/sync); if omitted, the server assigns a UUID. Response lists include **`id`** on each record. |
+| PUT | `/dns/records` | Update a record. With **`id`** in the body, replace that row’s name/type/value/TTL (stable update). Without **`id`**, same as today: match **name + type + value** and update in place (legacy). |
+| DELETE | `/dns/records` | Delete by query **`?id=`**… or JSON body `{"id":"..."}`. Otherwise **`name`** (required) plus optional **`type`** / **`value`** (same as legacy). |
 | GET | `/dns/servers` | List upstreams plus health: `servers`, `upstream_health_check_enabled`, interval/failures hints, and `upstream_health` per `address_port` (unhealthy, consecutive_failures, last_probe_*, last_success_at). |
 | GET | `/dns/upstreams/health` | Same health slice and check settings without full server config. See [upstream-health.md](upstream-health.md). |
 | GET | `/stats` | Resolver stats as JSON: `session` / `total` scopes with resolver counters; top-level **`build`** (`version`, `go_version`, `os`, `arch`). When `full_stats` is enabled in config, includes `full_stats.enabled`, `full_stats.requesters_count`, `full_stats.domains_count`. |

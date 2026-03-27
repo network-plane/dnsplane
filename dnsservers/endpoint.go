@@ -68,6 +68,73 @@ func ServerToEndpoint(s DNSServer) UpstreamEndpoint {
 }
 
 // FallbackEndpoint builds an endpoint from config-style fallback fields.
+// ServerFallbackEndpoint builds the optional per-row fallback upstream, if configured.
+func ServerFallbackEndpoint(s DNSServer) (UpstreamEndpoint, bool) {
+	addr := strings.TrimSpace(s.FallbackAddress)
+	dohURL := strings.TrimSpace(s.FallbackDoHURL)
+	if addr == "" && dohURL == "" {
+		return UpstreamEndpoint{}, false
+	}
+	port := strings.TrimSpace(s.FallbackPort)
+	if port == "" {
+		port = "53"
+	}
+	t := strings.ToLower(strings.TrimSpace(s.FallbackTransport))
+	if t == "" {
+		t = strings.ToLower(strings.TrimSpace(s.Transport))
+	}
+	if t == "" {
+		t = "udp"
+	}
+	fs := DNSServer{
+		Address:   addr,
+		Port:      port,
+		Transport: t,
+		DoHURL:    dohURL,
+	}
+	return ServerToEndpoint(fs), true
+}
+
+func endpointInPrimaries(ep UpstreamEndpoint, primaries []UpstreamEndpoint) bool {
+	epT := strings.TrimSpace(ep.Transport)
+	for _, p := range primaries {
+		if p.Addr == ep.Addr && strings.EqualFold(strings.TrimSpace(p.Transport), epT) {
+			return true
+		}
+	}
+	return false
+}
+
+// AppendPerServerFallbacks appends each selected server's optional fallback endpoint to primaries when not already present (dedupe by HealthKey).
+func AppendPerServerFallbacks(primaries []UpstreamEndpoint, dnsServerData []DNSServer) []UpstreamEndpoint {
+	if len(primaries) == 0 {
+		return primaries
+	}
+	out := append([]UpstreamEndpoint(nil), primaries...)
+	seen := map[string]struct{}{}
+	for _, e := range out {
+		seen[e.HealthKey()] = struct{}{}
+	}
+	for _, s := range dnsServerData {
+		ep := ServerToEndpoint(s)
+		if !endpointInPrimaries(ep, primaries) {
+			continue
+		}
+		fe, ok := ServerFallbackEndpoint(s)
+		if !ok {
+			continue
+		}
+		k := fe.HealthKey()
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, fe)
+	}
+	return out
+}
+
+// FallbackEndpoint builds an endpoint from config-style fallback fields.
 func FallbackEndpoint(fallbackIP, fallbackPort, transport string) UpstreamEndpoint {
 	t := strings.ToLower(strings.TrimSpace(transport))
 	if t == "" {

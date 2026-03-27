@@ -221,6 +221,9 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 	settings := r.store.GetResolverSettings()
 	allServers := r.store.GetServers()
 	dnsServers := dnsservers.GetUpstreamEndpointsForQuery(allServers, question.Name, true)
+	if len(dnsServers) > 0 {
+		dnsServers = dnsservers.AppendPerServerFallbacks(dnsServers, allServers)
+	}
 	useWhitelist := false
 	for _, s := range allServers {
 		if s.Active && dnsservers.ServerMatchesQuery(s, question.Name) {
