@@ -118,12 +118,12 @@ func sanitizeForDir(s string) string {
 	return s
 }
 
-// RecordsSourceIsReadOnly returns true if the current config uses a read-only records source (url or git).
+// RecordsSourceIsReadOnly returns true if the current config uses a read-only records source (url, git, or bind_dir).
 func RecordsSourceIsReadOnly() bool {
 	cfg := currentConfig().Config.FileLocations
 	if cfg.RecordsSource == nil {
 		return false
 	}
 	t := strings.ToLower(strings.TrimSpace(cfg.RecordsSource.Type))
-	return t == config.RecordsSourceURL || t == config.RecordsSourceGit
+	return t == config.RecordsSourceURL || t == config.RecordsSourceGit || t == config.RecordsSourceBindDir
 }

@@ -49,6 +49,8 @@ type DNSResolverData struct {
 	statsTotalBlocks      atomic.Int64
 	statsQueriesForwarded atomic.Int64
 
+	stopRecordsSourceWatch func()
+
 	// Cache compaction schedule (background loop in main updates these for /stats/dashboard).
 	cacheCompactScheduleMu  sync.RWMutex
 	nextCacheCompactAt      time.Time
@@ -217,6 +219,16 @@ func (d *DNSResolverData) Initialize() error {
 			interval := time.Duration(rs.RefreshIntervalSeconds) * time.Second
 			go d.recordsRefreshLoop(interval)
 		}
+		if t == config.RecordsSourceBindDir && rs.RefreshIntervalSeconds > 0 {
+			interval := time.Duration(rs.RefreshIntervalSeconds) * time.Second
+			go d.recordsRefreshLoop(interval)
+		}
+		if t == config.RecordsSourceBindDir && rs.Watch {
+			wdir := strings.TrimSpace(rs.Location)
+			if wdir != "" {
+				d.stopRecordsSourceWatch = startBindDirWatch(d, wdir)
+			}
+		}
 	}
 
 	return nil
@@ -256,6 +268,10 @@ func (d *DNSResolverData) cachePersistWorker() {
 func (d *DNSResolverData) Close() {
 	if d == nil {
 		return
+	}
+	if d.stopRecordsSourceWatch != nil {
+		d.stopRecordsSourceWatch()
+		d.stopRecordsSourceWatch = nil
 	}
 	d.persistCloseOnce.Do(func() {
 		if d.persistCh != nil {
@@ -344,6 +360,9 @@ func (d *DNSResolverData) UpdateRecords(records []dnsrecords.DNSRecord) error {
 	if reject {
 		return fmt.Errorf("cluster: local record writes are disabled on this node (cluster_reject_local_writes)")
 	}
+	if RecordsSourceIsReadOnly() {
+		return fmt.Errorf("records source is read-only")
+	}
 	d.storeRecords(records, true)
 	return nil
 }
@@ -355,6 +374,9 @@ func (d *DNSResolverData) UpdateRecordsInMemory(records []dnsrecords.DNSRecord) 
 	d.mu.RUnlock()
 	if reject {
 		return fmt.Errorf("cluster: local record writes are disabled on this node (cluster_reject_local_writes)")
+	}
+	if RecordsSourceIsReadOnly() {
+		return fmt.Errorf("records source is read-only")
 	}
 	d.storeRecords(records, false)
 	return nil
@@ -521,7 +543,22 @@ func SaveDNSServers(dnsServers []dnsservers.DNSServer) error {
 	return SaveToJSON(paths.DNSServerFile, data)
 }
 
-// LoadDNSRecords loads DNS records from the configured records_source (file, URL, or git).
+// ReloadRecordsFromSource reloads records from the configured source into memory without persisting to a JSON file.
+func (d *DNSResolverData) ReloadRecordsFromSource() (int, error) {
+	records, err := LoadDNSRecords()
+	if err != nil {
+		return 0, err
+	}
+	d.storeRecords(records, false)
+	return len(records), nil
+}
+
+// ReloadDNSRecordsFromSource reloads the singleton resolver's records from the configured source.
+func ReloadDNSRecordsFromSource() (int, error) {
+	return GetInstance().ReloadRecordsFromSource()
+}
+
+// LoadDNSRecords loads DNS records from the configured records_source (file, URL, git, or bind_dir).
 // Record names are canonicalized (trailing dot stripped) for consistent display.
 func LoadDNSRecords() ([]dnsrecords.DNSRecord, error) {
 	paths := currentConfig().Config.FileLocations
@@ -539,6 +576,8 @@ func LoadDNSRecords() ([]dnsrecords.DNSRecord, error) {
 		return loadRecordsFromURL(loc)
 	case config.RecordsSourceGit:
 		return loadRecordsFromGit(loc)
+	case config.RecordsSourceBindDir:
+		return loadRecordsBindDir(rs)
 	case config.RecordsSourceFile:
 		fallthrough
 	default:

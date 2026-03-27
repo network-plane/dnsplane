@@ -4,6 +4,7 @@ go 1.26.1
 
 require (
 	github.com/chzyer/readline v1.5.1
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-git/go-git/v5 v5.17.0
 	github.com/inconshreveable/mousetrap v1.1.0
