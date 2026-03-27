@@ -10,3 +10,5 @@ builds/
 rpm-artifacts/
 
 .*
+# Track CI/workflows despite the rule above (matches any path segment starting with '.').
+!.github/
