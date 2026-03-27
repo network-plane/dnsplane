@@ -18,19 +18,24 @@ const (
 	systemConfigPath = "/etc/" + FileName
 )
 
-// RecordsSourceType is how the DNS records file is provided: local file, HTTP(S) URL, or git repo.
+// RecordsSourceType is how the DNS records file is provided: local file, HTTP(S) URL, git repo, or BIND zone directory.
 const (
-	RecordsSourceFile = "file"
-	RecordsSourceURL  = "url"
-	RecordsSourceGit  = "git"
+	RecordsSourceFile    = "file"
+	RecordsSourceURL     = "url"
+	RecordsSourceGit     = "git"
+	RecordsSourceBindDir = "bind_dir"
 )
 
-// RecordsSourceConfig describes where to load DNS records from (single source: file, URL, or git).
+// RecordsSourceConfig describes where to load DNS records from (single source: file, URL, git, or bind_dir).
 // When Type is "file", Location is the local path (read/write). When "url" or "git", Location is the URL and records are read-only; RefreshIntervalSeconds controls re-fetch interval.
+// When Type is "bind_dir", Location is a directory of zone files; IncludePattern globs under it unless NamedConf lists paths.
 type RecordsSourceConfig struct {
-	Type                   string `json:"type"`                               // "file", "url", or "git"
-	Location               string `json:"location"`                           // path, http(s) URL, or git repo URL
+	Type                   string `json:"type"`                               // "file", "url", "git", or "bind_dir"
+	Location               string `json:"location"`                           // path, http(s) URL, git repo URL, or zone directory
 	RefreshIntervalSeconds int    `json:"refresh_interval_seconds,omitempty"` // for url/git: how often to check for changes (seconds)
+	IncludePattern         string `json:"include_pattern,omitempty"`          // bind_dir: glob under Location (default "*.db")
+	NamedConf              string `json:"named_conf,omitempty"`               // bind_dir: optional path to named.conf fragment with zone { file "..."; }
+	Watch                  bool   `json:"watch,omitempty"`                    // bind_dir: watch zone files and reload (debounced)
 }
 
 // FileLocations describes the JSON data files used by dnsplane.
@@ -38,7 +43,7 @@ type RecordsSourceConfig struct {
 type FileLocations struct {
 	DNSServerFile string               `json:"dnsservers"`
 	CacheFile     string               `json:"cache"`
-	RecordsSource *RecordsSourceConfig `json:"records_source"` // required: type "file"|"url"|"git", location = path or URL
+	RecordsSource *RecordsSourceConfig `json:"records_source"` // required: type "file"|"url"|"git"|"bind_dir", location = path, URL, repo, or zone directory
 }
 
 // DNSRecordSettings mirrors record handling settings persisted in the config.
@@ -219,6 +224,10 @@ type Config struct {
 	ClusterDiscoverySRV string `json:"cluster_discovery_srv,omitempty"`
 	// ClusterDiscoveryIntervalSeconds refreshes SRV lookups; 0 means startup only. Default 60 when cluster_discovery_srv is set.
 	ClusterDiscoveryIntervalSeconds int `json:"cluster_discovery_interval_seconds,omitempty"`
+	// AXFREnabled allows answering AXFR over TCP/DoT from in-memory records (e.g. bind_dir). Default false.
+	AXFREnabled bool `json:"axfr_enabled,omitempty"`
+	// AXFRAllowedNetworks lists CIDRs allowed to request AXFR (e.g. "127.0.0.0/8", "::1/128"). Empty with AXFREnabled still means refuse all until configured.
+	AXFRAllowedNetworks []string `json:"axfr_allowed_networks,omitempty"`
 }
 
 // Loaded contains the configuration together with metadata about the source file.
@@ -564,6 +573,12 @@ func (c *Config) applyDefaults(configDir string) {
 		if rs.RefreshIntervalSeconds <= 0 {
 			rs.RefreshIntervalSeconds = 60
 		}
+	} else if strings.EqualFold(strings.TrimSpace(rs.Type), RecordsSourceBindDir) {
+		rs.Type = RecordsSourceBindDir
+		rs.Location = ensureAbsolutePath(configDir, rs.Location, "zones")
+		if nc := strings.TrimSpace(rs.NamedConf); nc != "" {
+			rs.NamedConf = ensureAbsolutePath(configDir, nc, "")
+		}
 	} else {
 		// type "file" or empty: treat as file, make location absolute
 		rs.Type = RecordsSourceFile
@@ -877,6 +892,12 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 		if strings.TrimSpace(c.ClusterDiscoverySRV) != "" {
 			c.ClusterDiscoveryIntervalSeconds = 60
 		}
+	}
+	if r, ok := raw["axfr_enabled"]; ok {
+		_ = json.Unmarshal(r, &c.AXFREnabled)
+	}
+	if r, ok := raw["axfr_allowed_networks"]; ok {
+		_ = json.Unmarshal(r, &c.AXFRAllowedNetworks)
 	}
 	return nil
 }

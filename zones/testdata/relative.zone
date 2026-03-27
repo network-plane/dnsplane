@@ -1,0 +1,4 @@
+$TTL 300
+$ORIGIN corp.example.net.
+app  IN A 10.0.0.5
+deep.sub IN A 10.0.0.6

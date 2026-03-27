@@ -9,6 +9,10 @@ import (
 	"dnsplane/dnsrecords"
 )
 
+// maxFuzzInputLen caps fuzz input size. canonicalizeRecordNameForStorage used to strip one trailing dot per
+// iteration; huge runs of '.' were O(n) in a hot loop and could exceed fuzz deadlines in CI.
+const maxFuzzInputLen = 1024
+
 func TestAddRecordAddsRecord(t *testing.T) {
 	record := dnsrecords.DNSRecord{
 		Name:  "example.com.",
@@ -264,6 +268,9 @@ func TestListAppliesStringFilter(t *testing.T) {
 func FuzzAddRecord(f *testing.F) {
 	f.Add("example.com.", "A", "127.0.0.1")
 	f.Fuzz(func(t *testing.T, name, recordType, value string) {
+		if len(name) > maxFuzzInputLen || len(recordType) > maxFuzzInputLen || len(value) > maxFuzzInputLen {
+			return
+		}
 		record := dnsrecords.DNSRecord{Name: name, Type: recordType, Value: value}
 		_, _, _ = dnsrecords.AddRecord(record, nil, false)
 	})
@@ -275,6 +282,9 @@ func FuzzNormalizeRecordNameKey(f *testing.F) {
 	f.Add("EXAMPLE.COM")
 	f.Add("")
 	f.Fuzz(func(t *testing.T, name string) {
+		if len(name) > maxFuzzInputLen {
+			return
+		}
 		_ = dnsrecords.NormalizeRecordNameKey(name)
 		_ = dnsrecords.CanonicalizeRecordNameForStorage(name)
 	})
@@ -286,6 +296,9 @@ func FuzzNormalizeRecordTypeAndValue(f *testing.F) {
 	f.Add("AAAA", "::1")
 	f.Add("CNAME", "foo.example.com")
 	f.Fuzz(func(t *testing.T, recordType, value string) {
+		if len(recordType) > maxFuzzInputLen || len(value) > maxFuzzInputLen {
+			return
+		}
 		_ = dnsrecords.NormalizeRecordType(recordType)
 		_ = dnsrecords.NormalizeRecordValueKey(recordType, value)
 	})
@@ -302,6 +315,9 @@ func FuzzFindAllRecords(f *testing.F) {
 	f.Add("example.com.", "AAAA")
 	f.Add("1.0.0.127.in-addr.arpa", "PTR")
 	f.Fuzz(func(t *testing.T, lookupRecord, recordType string) {
+		if len(lookupRecord) > maxFuzzInputLen || len(recordType) > maxFuzzInputLen {
+			return
+		}
 		_ = dnsrecords.FindAllRecords(records, lookupRecord, recordType, true)
 		_ = dnsrecords.FindRecord(records, lookupRecord, recordType, true)
 	})

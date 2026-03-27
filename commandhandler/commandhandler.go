@@ -434,7 +434,7 @@ func runRecordLoad() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResul
 		if cliutil.IsHelpRequest(input.Raw) {
 			msgs := infoMessages(
 				"Usage: record load",
-				"Description: Load DNS records from the default storage file.",
+				"Description: Reload DNS records from the configured records_source (file, url, git, or bind_dir).",
 				"Hint: append '?', 'help', or 'h' after the command to view this usage.",
 			)
 			return tui.CommandResult{Status: tui.StatusSuccess, Messages: msgs}
@@ -444,20 +444,15 @@ func runRecordLoad() func(tui.CommandRuntime, tui.CommandInput) tui.CommandResul
 			return tui.CommandResult{Status: tui.StatusFailed, Messages: msgs, Error: &tui.CommandError{Message: "unexpected arguments", Severity: tui.SeverityWarning}}
 		}
 		dnsData := data.GetInstance()
-		records, err := data.LoadDNSRecords()
+		n, err := data.ReloadDNSRecordsFromSource()
 		if err != nil {
 			return tui.CommandResult{
 				Status: tui.StatusFailed,
 				Error:  &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError},
 			}
 		}
-		if err := dnsData.UpdateRecords(records); err != nil {
-			return tui.CommandResult{
-				Status: tui.StatusFailed,
-				Error:  &tui.CommandError{Err: err, Message: err.Error(), Severity: tui.SeverityError},
-			}
-		}
-		return tui.CommandResult{Status: tui.StatusSuccess, Payload: records, Messages: infoMessages("DNS records loaded.")}
+		records := dnsData.GetRecords()
+		return tui.CommandResult{Status: tui.StatusSuccess, Payload: records, Messages: infoMessages(fmt.Sprintf("DNS records reloaded from source (%d records).", n))}
 	}
 }
 

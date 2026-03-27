@@ -15,6 +15,8 @@
   "doh_path": "/dns-query",
   "doh_cert_file": "",
   "doh_key_file": "",
+  "axfr_enabled": false,
+  "axfr_allowed_networks": [],
   "dnssec_validate": false,
   "dnssec_validate_strict": false,
   "dnssec_trust_anchor_file": "",

@@ -15,6 +15,9 @@ A DNS server with a TUI and REST API. For common record types (**A**, **AAAA**, 
 | **[docs/host-tuning.md](docs/host-tuning.md)** | Optional **Linux OS / host tuning** for DNS latency (buffers, limits, containers). |
 | **[docs/upstream-health.md](docs/upstream-health.md)** | **Upstream health checks**: probes, marking servers down, config, logs, **curl**. |
 | **[docs/clustering.md](docs/clustering.md)** | **Multi-node record sync**: TCP peers, `cluster_*` keys, auth, deployment notes. |
+| **[docs/zone-files.md](docs/zone-files.md)** | **BIND zone files** as `records_source` (`bind_dir`), reload, optional AXFR. |
+| **[docs/ispconfig.md](docs/ispconfig.md)** | **ISPConfig**: typical zone paths, reload workflow with dnsplane. |
+| **[docs/cpanel.md](docs/cpanel.md)** | **cPanel / WHM**: `/var/named`, reload, high-level deployment notes. |
 | **[docs/security-public-dns.md](docs/security-public-dns.md)** | DoT / DoH / DNSSEC when exposing DNS to the internet. |
 | **[docs/dnsplane.example.json](docs/dnsplane.example.json)** | Full annotated example `dnsplane.json`. |
 | **[examples/dnsplane-example.json](examples/dnsplane-example.json)** | Short starter config (DoT/DoH/DNSSEC present, off by default). |

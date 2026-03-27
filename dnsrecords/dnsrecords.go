@@ -118,10 +118,8 @@ func normalizeRecordType(recordType string) string {
 // canonicalizeRecordNameForStorage trims space and strips trailing dots so stored names are consistent (no FQDN trailing dot).
 func canonicalizeRecordNameForStorage(name string) string {
 	name = strings.TrimSpace(name)
-	for strings.HasSuffix(name, ".") {
-		name = strings.TrimSuffix(name, ".")
-	}
-	return name
+	// TrimRight (not a per-dot loop): a long run of '.' is O(n) once, avoiding pathological CPU on hostile input.
+	return strings.TrimRight(name, ".")
 }
 
 // CanonicalizeRecordNameForStorage is the exported form for use when loading records from file.

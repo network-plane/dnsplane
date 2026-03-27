@@ -17,6 +17,7 @@ import (
 	"dnsplane/abuse"
 	"dnsplane/config"
 	"dnsplane/data"
+	"dnsplane/dnsrecords"
 	"dnsplane/dnsserve"
 	"dnsplane/resolver"
 
@@ -70,6 +71,7 @@ func handleRequestProto(w dns.ResponseWriter, request *dns.Msg, proto string) {
 	dep := dnsserve.Dependencies{
 		Resolver:        dnsResolver,
 		Settings:        func() config.Config { return data.GetInstance().GetResolverSettings() },
+		LocalRecords:    func() []dnsrecords.DNSRecord { return data.GetInstance().GetRecords() },
 		ResponseLimiter: responseLimiter,
 		QueryLimiter:    dnsQueryLimiter,
 		OnLimiterDrop:   data.RecordLimiterDrop,
@@ -253,6 +255,7 @@ func doHHandler(w http.ResponseWriter, r *http.Request, path string) {
 	dep := dnsserve.Dependencies{
 		Resolver:        dnsResolver,
 		Settings:        func() config.Config { return data.GetInstance().GetResolverSettings() },
+		LocalRecords:    func() []dnsrecords.DNSRecord { return data.GetInstance().GetRecords() },
 		ResponseLimiter: responseLimiter,
 		QueryLimiter:    dnsQueryLimiter,
 		OnLimiterDrop:   data.RecordLimiterDrop,
