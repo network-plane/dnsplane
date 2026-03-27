@@ -11,7 +11,8 @@ A DNS server with a TUI and REST API. For common record types (**A**, **AAAA**, 
 | **[docs/usage.md](docs/usage.md)** | **Server and client** commands, flags, config/data paths, **TUI** overview, demo. |
 | **[docs/config-files.md](docs/config-files.md)** | **JSON files** (`dnsrecords`, `dnsservers`, cache, `dnsplane.json`), **records source** (file/URL/Git), **domain whitelist**, **adblock**, **main config tables**, **REST API**, **curl** (upstream health). |
 | **[docs/logging.md](docs/logging.md)** | Log directory, severity, rotation; client `--log-file`. |
-| **[docs/systemd.md](docs/systemd.md)** | **systemd** install using `systemd/dnsplane.service`. |
+| **[docs/systemd.md](docs/systemd.md)** | **systemd**: manual unit (`/usr/local/...`) vs **package** unit (`/usr/bin/dnsplane`). |
+| **[packaging/README.md](packaging/README.md)** | **RPM / Debian** builds, `version.sh` (`BASE-SHORTSHA`), local `rpmbuild` / `dpkg-buildpackage`. |
 | **[docs/host-tuning.md](docs/host-tuning.md)** | Optional **Linux OS / host tuning** for DNS latency (buffers, limits, containers). |
 | **[docs/upstream-health.md](docs/upstream-health.md)** | **Upstream health checks**: probes, marking servers down, config, logs, **curl**. |
 | **[docs/clustering.md](docs/clustering.md)** | **Multi-node record sync**: TCP peers, `cluster_*` keys, auth, deployment notes. |

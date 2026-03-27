@@ -42,7 +42,8 @@ const (
 	tuiClientKillCmd = "dnsplane-kill"
 )
 
-var appVersion = "1.4.175"
+// Default release string for normal builds; RPM/DEB may override with -ldflags "-X main.appVersion=..." (see packaging/version.sh).
+var appVersion = "1.4.181"
 
 var (
 	appState         = daemon.NewState()

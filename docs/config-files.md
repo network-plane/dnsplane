@@ -1,6 +1,6 @@
 # Config files and API reference
 
-JSON data files, `dnsplane.json` keys, REST paths, and curl samples. For resolution order and the diagram see [resolution.md](resolution.md). For CLI paths and the TUI see [usage.md](usage.md). For logging options see [logging.md](logging.md).
+JSON data files, `dnsplane.json` keys, REST paths, and curl samples. For resolution order and the diagram see [resolution.md](resolution.md). For CLI paths and the TUI see [usage.md](usage.md). For logging options see [logging.md](logging.md). **RPM/Debian packages** and version strings (`BASE-SHORTSHA`): [packaging/README.md](../packaging/README.md).
 
 ## Config Files
 

@@ -1,0 +1,72 @@
+# Build RPMs on Fedora and Rocky Linux using packaging/dnsplane.spec.
+# Triggers: manual dispatch, pushes to master, and semver-ish version tags.
+# Checkout uses fetch-depth: 0 so packaging/version.sh matches local tag/SHA behavior.
+
+name: Package RPM
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Optional git ref to checkout (branch, tag, or SHA)"
+        required: false
+        default: ""
+  push:
+    branches: [master]
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  rpm:
+    name: RPM (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [fedora:latest, rockylinux:9]
+
+    container:
+      image: ${{ matrix.image }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.ref != '' && github.event.inputs.ref || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install RPM build tools
+        run: |
+          dnf install -y rpm-build git systemd-rpm-macros
+
+      - name: Build RPMs
+        run: |
+          set -euo pipefail
+          eval "$(./packaging/version.sh export)"
+          mkdir -p "${HOME}/rpmbuild/"{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+          git archive --format=tar --prefix="dnsplane-${DNSPLANE_VERSION_BASE}/" HEAD \
+            | gzip -c > "${HOME}/rpmbuild/SOURCES/dnsplane-${DNSPLANE_VERSION_BASE}.tar.gz"
+          cp packaging/dnsplane.spec "${HOME}/rpmbuild/SPECS/"
+          rpmbuild -ba "${HOME}/rpmbuild/SPECS/dnsplane.spec" \
+            --define "dnsplane_base ${DNSPLANE_VERSION_BASE}" \
+            --define "dnsplane_short ${DNSPLANE_GIT_SHORT}"
+          mkdir -p "${GITHUB_WORKSPACE}/rpm-artifacts"
+          shopt -s nullglob
+          for f in "${HOME}/rpmbuild/RPMS"/*/*.rpm "${HOME}/rpmbuild/SRPMS"/*.src.rpm; do
+            cp -a "$f" "${GITHUB_WORKSPACE}/rpm-artifacts/"
+          done
+          ls -la "${GITHUB_WORKSPACE}/rpm-artifacts/"
+
+      - name: Upload RPM artifacts
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: rpm-${{ matrix.image == 'fedora:latest' && 'fedora' || 'rocky' }}
+          path: rpm-artifacts/
+          if-no-files-found: error

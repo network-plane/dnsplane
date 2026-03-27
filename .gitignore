@@ -7,5 +7,6 @@ dnsresolver
 old/*
 bin/*
 builds/
+rpm-artifacts/
 
 .*
