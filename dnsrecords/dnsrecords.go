@@ -4,8 +4,11 @@
 package dnsrecords
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +22,7 @@ import (
 
 // DNSRecord holds the data for a DNS record
 type DNSRecord struct {
+	ID          string    `json:"id,omitempty"`
 	Name        string    `json:"name"`
 	Type        string    `json:"type"`
 	Value       string    `json:"value"`
@@ -58,6 +62,36 @@ type ListResult struct {
 	Detailed bool
 	Filter   string
 	Messages []Message
+}
+
+// NewRecordID returns a new RFC 4122-style UUID (v4) as a lowercase hex string.
+func NewRecordID() string {
+	var b [16]byte
+	if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
+		// Unlikely; still produce a distinct value.
+		now := time.Now().UnixNano()
+		for i := 0; i < 8; i++ {
+			b[i] = byte(now >> (8 * i))
+		}
+		_, _ = rand.Read(b[8:])
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	s := hex.EncodeToString(b[:])
+	return s[0:8] + "-" + s[8:12] + "-" + s[12:16] + "-" + s[16:20] + "-" + s[20:32]
+}
+
+func findDNSRecordIndexByID(dnsRecords []DNSRecord, id string) int {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return -1
+	}
+	for i, record := range dnsRecords {
+		if strings.TrimSpace(record.ID) == id {
+			return i
+		}
+	}
+	return -1
 }
 
 // findDNSRecordIndex returns the index of the DNSRecord in dnsRecords
@@ -129,6 +163,54 @@ func NormalizeRecordValueKey(recordType, value string) string {
 	return normalizeRecordValueKey(recordType, value)
 }
 
+// FilterRecords returns records matching optional name substring and optional exact DNS type.
+// nameSubstr: if non-empty, the normalized record owner name must contain the normalized substring.
+// typ: if non-empty, must be a valid DNS type (case-insensitive); the record's type must match.
+// Both conditions are combined with AND when both are set.
+func FilterRecords(records []DNSRecord, nameSubstr, typ string) ([]DNSRecord, error) {
+	typ = strings.TrimSpace(typ)
+	if typ != "" {
+		nt := normalizeRecordType(typ)
+		if _, ok := dns.StringToType[nt]; !ok {
+			return nil, fmt.Errorf("%w: invalid DNS type %q", ErrInvalidArgs, typ)
+		}
+		typ = nt
+	}
+	needle := strings.TrimSpace(nameSubstr)
+	var nameKeyNeedle string
+	if needle != "" {
+		nameKeyNeedle = normalizeRecordNameKey(needle)
+	}
+	out := make([]DNSRecord, 0)
+	for _, r := range records {
+		if typ != "" && normalizeRecordType(r.Type) != typ {
+			continue
+		}
+		if nameKeyNeedle != "" && !strings.Contains(normalizeRecordNameKey(r.Name), nameKeyNeedle) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// ApplyLegacyListFilter applies the TUI single-string filter: if the whole string is a valid DNS type,
+// filter by that type; otherwise substring match on the normalized owner name.
+func ApplyLegacyListFilter(records []DNSRecord, filter string) []DNSRecord {
+	filter = strings.TrimSpace(filter)
+	if filter == "" {
+		return records
+	}
+	if t := normalizeRecordType(filter); t != "" {
+		if _, ok := dns.StringToType[t]; ok {
+			out, _ := FilterRecords(records, "", t)
+			return out
+		}
+	}
+	out, _ := FilterRecords(records, filter, "")
+	return out
+}
+
 // Add inserts a DNS record or updates an existing one when allowed. It returns the
 // updated slice alongside informational messages.
 func Add(fullCommand []string, dnsRecords []DNSRecord, allowUpdate bool) ([]DNSRecord, []Message, error) {
@@ -185,6 +267,12 @@ func addRecordInternal(dnsRecord DNSRecord, dnsRecords []DNSRecord, allowUpdate 
 	if existingIndex != -1 {
 		oldRecord := dnsRecords[existingIndex]
 		if allowUpdate {
+			if strings.TrimSpace(dnsRecord.ID) == "" {
+				dnsRecord.ID = oldRecord.ID
+			}
+			if strings.TrimSpace(dnsRecord.ID) == "" {
+				dnsRecord.ID = NewRecordID()
+			}
 			dnsRecord.UpdatedOn = time.Now()
 			dnsRecords[existingIndex] = dnsRecord
 			updatedRecToPrint := converters.ConvertValuesToStrings(
@@ -212,6 +300,15 @@ func addRecordInternal(dnsRecord DNSRecord, dnsRecords []DNSRecord, allowUpdate 
 			Message{Level: LevelWarn, Text: fmt.Sprintf("Current  : %v", existingRec)},
 		)
 		return dnsRecords, messages, nil
+	}
+
+	if tid := strings.TrimSpace(dnsRecord.ID); tid != "" {
+		if findDNSRecordIndexByID(dnsRecords, tid) != -1 {
+			msg := Message{Level: LevelError, Text: fmt.Sprintf("a record with id %q already exists", tid)}
+			return dnsRecords, []Message{msg}, ErrInvalidArgs
+		}
+	} else {
+		dnsRecord.ID = NewRecordID()
 	}
 
 	dnsRecords = append(dnsRecords, dnsRecord)
@@ -243,6 +340,7 @@ func List(dnsRecords []DNSRecord, args []string) (ListResult, error) {
 
 	if result.Filter != "" {
 		result.Messages = append(result.Messages, Message{Level: LevelInfo, Text: fmt.Sprintf("Filtering records by: %s", result.Filter)})
+		result.Records = ApplyLegacyListFilter(result.Records, result.Filter)
 	}
 
 	if len(result.Records) == 0 {
@@ -337,6 +435,71 @@ func Remove(fullCommand []string, dnsRecords []DNSRecord) ([]DNSRecord, []Messag
 	dnsRecords = append(dnsRecords[:existingIndex], dnsRecords[existingIndex+1:]...)
 	messages = append(messages, Message{Level: LevelInfo, Text: fmt.Sprintf("Removed: %v", removedRec)})
 	return dnsRecords, messages, nil
+}
+
+// UpdateRecordByID replaces the record with the given id. The id field in `in` is ignored; body must include name, type, value (ttl optional).
+func UpdateRecordByID(id string, in DNSRecord, dnsRecords []DNSRecord) ([]DNSRecord, []Message, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return dnsRecords, []Message{{Level: LevelError, Text: "id is required"}}, ErrInvalidArgs
+	}
+	idx := findDNSRecordIndexByID(dnsRecords, id)
+	if idx == -1 {
+		return dnsRecords, []Message{{Level: LevelError, Text: "no record with that id"}}, ErrInvalidArgs
+	}
+
+	in.Name = canonicalizeRecordNameForStorage(in.Name)
+	in.Value = strings.TrimSpace(in.Value)
+	in.Type = normalizeRecordType(in.Type)
+	if in.Name == "" || in.Type == "" || in.Value == "" {
+		return dnsRecords, []Message{{Level: LevelError, Text: "name, type, and value are required"}}, ErrInvalidArgs
+	}
+	if _, ok := dns.StringToType[in.Type]; !ok {
+		return dnsRecords, []Message{{Level: LevelError, Text: fmt.Sprintf("invalid DNS record type: %s", in.Type)}}, ErrInvalidArgs
+	}
+	if in.TTL == 0 {
+		in.TTL = 3600
+	}
+	if err := validateRecordValue(in.Type, in.Value); err != nil {
+		return dnsRecords, []Message{{Level: LevelError, Text: err.Error()}}, ErrInvalidArgs
+	}
+
+	other := findDNSRecordIndex(dnsRecords, in.Name, in.Type, in.Value)
+	if other != -1 && other != idx {
+		msg := Message{Level: LevelWarn, Text: "A record already exists with the same name, type, and value."}
+		return dnsRecords, []Message{msg}, ErrInvalidArgs
+	}
+
+	old := dnsRecords[idx]
+	in.ID = id
+	in.AddedOn = old.AddedOn
+	if in.MACAddress == "" {
+		in.MACAddress = old.MACAddress
+	}
+	in.CacheRecord = old.CacheRecord
+	in.LastQuery = old.LastQuery
+	in.UpdatedOn = time.Now()
+	dnsRecords[idx] = in
+	messages := []Message{{Level: LevelInfo, Text: fmt.Sprintf("Updated record id=%s", id)}}
+	return dnsRecords, messages, nil
+}
+
+// RemoveRecordByID removes the record with the given id.
+func RemoveRecordByID(id string, dnsRecords []DNSRecord) ([]DNSRecord, []Message, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return dnsRecords, []Message{{Level: LevelError, Text: "id is required"}}, ErrInvalidArgs
+	}
+	idx := findDNSRecordIndexByID(dnsRecords, id)
+	if idx == -1 {
+		return dnsRecords, []Message{{Level: LevelWarn, Text: "no record with that id"}}, ErrInvalidArgs
+	}
+	removedRecord := dnsRecords[idx]
+	removedRec := converters.ConvertValuesToStrings(
+		converters.GetFieldValuesByNamesArray(removedRecord,
+			[]string{"Name", "Type", "Value", "TTL"}))
+	dnsRecords = append(dnsRecords[:idx], dnsRecords[idx+1:]...)
+	return dnsRecords, []Message{{Level: LevelInfo, Text: fmt.Sprintf("Removed: %v", removedRec)}}, nil
 }
 
 // Helper function to check if the help command is invoked.

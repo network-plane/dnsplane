@@ -14,16 +14,9 @@ Work tracked for future releases and packaging. For **using** dnsplane, see the 
 
 ## 2. API and resolver enhancements
 
-- [ ] `GET /dns/records`: optional `?name=` / `?type=` filters aligned with the TUI list behavior.
-- [ ] Per-server fallback: optional second upstream when a whitelist-only server fails.
-- [ ] Record updates by stable id (name + type + value) to avoid accidental overwrites.
-
----
-
-## 3. Clustered DNS (multi-node sync)
-
-- [ ] Stronger topology options than last-writer-wins: primary/replica, Raft, or configurable conflict rules.
-- [ ] Optional peer discovery (e.g. DNS SRV) instead of only static `cluster_peers`.
+- [x] `GET /dns/records`: optional `?name=` / `?type=` filters aligned with the TUI list behavior.
+- [x] Per-server fallback: optional second upstream when a whitelist-only server fails.
+- [x] Record updates by stable id (name + type + value) to avoid accidental overwrites.
 
 ---
 

@@ -441,6 +441,7 @@ func metricsHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type AddRecordRequest struct {
+	ID    string  `json:"id,omitempty"`
 	Name  string  `json:"name"`
 	Type  string  `json:"type"`
 	Value string  `json:"value"`
@@ -453,6 +454,7 @@ func (r AddRecordRequest) toDNSRecord() dnsrecords.DNSRecord {
 		ttl = *r.TTL
 	}
 	return dnsrecords.DNSRecord{
+		ID:    strings.TrimSpace(r.ID),
 		Name:  strings.TrimSpace(r.Name),
 		Type:  strings.TrimSpace(r.Type),
 		Value: strings.TrimSpace(r.Value),
@@ -496,14 +498,63 @@ func addRecordHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"status": "record added", "messages": extractRecordMessages(messages)})
 }
 
+func listRecordsQueryDetails(q url.Values) bool {
+	v := strings.TrimSpace(strings.ToLower(q.Get("details")))
+	if v == "1" || v == "true" || v == "yes" {
+		return true
+	}
+	vd := strings.TrimSpace(strings.ToLower(q.Get("d")))
+	return vd == "1" || vd == "true" || vd == "yes"
+}
+
+func listRecordsFilterDesc(nameQ, typeQ string) string {
+	switch {
+	case nameQ != "" && typeQ != "":
+		return "name=" + nameQ + "&type=" + typeQ
+	case nameQ != "":
+		return "name=" + nameQ
+	case typeQ != "":
+		return "type=" + typeQ
+	default:
+		return ""
+	}
+}
+
 func listRecordsHandler(w http.ResponseWriter, r *http.Request) {
 	dnsData := data.GetInstance()
 	records := dnsData.GetRecords()
-	result, err := dnsrecords.List(records, []string{})
-	if errors.Is(err, dnsrecords.ErrHelpRequested) {
-		writeJSON(w, http.StatusOK, map[string]any{"messages": extractRecordMessages(result.Messages)})
-		return
+	q := r.URL.Query()
+	nameQ := strings.TrimSpace(q.Get("name"))
+	typeQ := strings.TrimSpace(q.Get("type"))
+	detailed := listRecordsQueryDetails(q)
+
+	if nameQ != "" || typeQ != "" {
+		filtered, err := dnsrecords.FilterRecords(records, nameQ, typeQ)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		records = filtered
 	}
+
+	result := dnsrecords.ListResult{
+		Records:  records,
+		Detailed: detailed,
+		Filter:   listRecordsFilterDesc(nameQ, typeQ),
+	}
+	if result.Filter != "" {
+		result.Messages = append(result.Messages, dnsrecords.Message{
+			Level: dnsrecords.LevelInfo,
+			Text:  fmt.Sprintf("Filtering records by: %s", result.Filter),
+		})
+	}
+	if len(result.Records) == 0 {
+		result.Messages = append(result.Messages, dnsrecords.Message{
+			Level: dnsrecords.LevelInfo,
+			Text:  "No records found.",
+		})
+	}
+
 	resp := map[string]any{
 		"records":  result.Records,
 		"detailed": result.Detailed,
@@ -545,6 +596,23 @@ func updateRecordHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	record := request.toDNSRecord()
 	records := dnsData.GetRecords()
+	if id := strings.TrimSpace(request.ID); id != "" {
+		updated, messages, err := dnsrecords.UpdateRecordByID(id, record, records)
+		if err != nil {
+			status := http.StatusBadRequest
+			if !errors.Is(err, dnsrecords.ErrInvalidArgs) {
+				status = http.StatusInternalServerError
+			}
+			writeJSON(w, status, map[string]any{"error": err.Error(), "messages": extractRecordMessages(messages)})
+			return
+		}
+		if err := dnsData.UpdateRecords(updated); err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "record updated", "messages": extractRecordMessages(messages)})
+		return
+	}
 	updated, messages, err := dnsrecords.AddRecord(record, records, true)
 	if err != nil {
 		status := http.StatusBadRequest
@@ -562,20 +630,25 @@ func updateRecordHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func deleteRecordHandler(w http.ResponseWriter, r *http.Request) {
-	var name, recordType, value string
+	var name, recordType, value, id string
 	if r.Method == http.MethodDelete && r.URL.RawQuery != "" {
 		q := r.URL.Query()
 		name = q.Get("name")
 		recordType = q.Get("type")
 		value = q.Get("value")
+		id = q.Get("id")
 	}
-	if (name == "" && recordType == "" && value == "") && r.Body != nil {
+	if r.Body != nil {
 		var body struct {
+			ID    string `json:"id"`
 			Name  string `json:"name"`
 			Type  string `json:"type"`
 			Value string `json:"value"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			if id == "" {
+				id = body.ID
+			}
 			if name == "" {
 				name = body.Name
 			}
@@ -586,6 +659,26 @@ func deleteRecordHandler(w http.ResponseWriter, r *http.Request) {
 				value = body.Value
 			}
 		}
+	}
+	id = strings.TrimSpace(id)
+	if id != "" {
+		dnsData := data.GetInstance()
+		records := dnsData.GetRecords()
+		updated, messages, err := dnsrecords.RemoveRecordByID(id, records)
+		if err != nil {
+			status := http.StatusBadRequest
+			if !errors.Is(err, dnsrecords.ErrInvalidArgs) {
+				status = http.StatusInternalServerError
+			}
+			writeJSON(w, status, map[string]any{"error": err.Error(), "messages": extractRecordMessages(messages)})
+			return
+		}
+		if err := dnsData.UpdateRecords(updated); err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "record deleted", "messages": extractRecordMessages(messages)})
+		return
 	}
 	name = strings.TrimSpace(name)
 	recordType = strings.TrimSpace(recordType)
@@ -621,12 +714,16 @@ func deleteRecordHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type addServerRequest struct {
-	Address         string   `json:"address"`
-	Port            string   `json:"port"`
-	Active          *bool    `json:"active,omitempty"`
-	LocalResolver   *bool    `json:"local_resolver,omitempty"`
-	AdBlocker       *bool    `json:"adblocker,omitempty"`
-	DomainWhitelist []string `json:"domain_whitelist,omitempty"`
+	Address           string   `json:"address"`
+	Port              string   `json:"port"`
+	Active            *bool    `json:"active,omitempty"`
+	LocalResolver     *bool    `json:"local_resolver,omitempty"`
+	AdBlocker         *bool    `json:"adblocker,omitempty"`
+	DomainWhitelist   []string `json:"domain_whitelist,omitempty"`
+	FallbackAddress   string   `json:"fallback_address,omitempty"`
+	FallbackPort      string   `json:"fallback_port,omitempty"`
+	FallbackTransport string   `json:"fallback_transport,omitempty"`
+	FallbackDoHURL    string   `json:"fallback_doh_url,omitempty"`
 }
 
 func serverRequestToArgs(req addServerRequest) []string {
@@ -645,6 +742,18 @@ func serverRequestToArgs(req addServerRequest) []string {
 	}
 	if len(req.DomainWhitelist) > 0 {
 		args = append(args, "whitelist:"+strings.Join(req.DomainWhitelist, ","))
+	}
+	if s := strings.TrimSpace(req.FallbackAddress); s != "" {
+		args = append(args, "fallback_address:"+s)
+	}
+	if s := strings.TrimSpace(req.FallbackPort); s != "" {
+		args = append(args, "fallback_port:"+s)
+	}
+	if s := strings.TrimSpace(req.FallbackTransport); s != "" {
+		args = append(args, "fallback_transport:"+s)
+	}
+	if s := strings.TrimSpace(req.FallbackDoHURL); s != "" {
+		args = append(args, "fallback_doh_url:"+s)
 	}
 	return args
 }
