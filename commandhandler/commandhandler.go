@@ -2392,7 +2392,7 @@ func applyConfigSetting(cfg *config.Config, setting, value string) (successMsg s
 			return "", fmt.Errorf("invalid value for stats_perf_page_enabled: %s (use true/false)", value)
 		}
 		cfg.StatsPerfPageEnabled = b
-		return fmt.Sprintf("Perf HTML page (/stats/perf/page) enabled set to %v", b), nil
+		return fmt.Sprintf("Tuning HTML page (/stats/perf/page) enabled set to %v", b), nil
 	case "stats_dashboard_enabled":
 		b, e := strconv.ParseBool(value)
 		if e != nil {
