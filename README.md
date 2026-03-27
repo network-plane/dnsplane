@@ -309,7 +309,7 @@ See **[docs/dnsplane.example.json](docs/dnsplane.example.json)** for every key a
 
 **Upstream health** — `upstream_health_check_enabled`, `upstream_health_check_failures`, `upstream_health_check_interval_seconds`, `upstream_health_check_query_name`. See [docs/upstream-health.md](docs/upstream-health.md).
 
-**Clustering** — `cluster_enabled`, `cluster_listen_addr`, `cluster_peers`, `cluster_auth_token`, `cluster_node_id`, `cluster_sync_interval_seconds`, `cluster_advertise_addr`, `cluster_replica_only`, `cluster_reject_local_writes`, `cluster_admin`, `cluster_admin_token`. See [docs/clustering.md](docs/clustering.md).
+**Clustering** — `cluster_enabled`, `cluster_listen_addr`, `cluster_peers`, `cluster_auth_token`, `cluster_node_id`, `cluster_sync_interval_seconds`, `cluster_advertise_addr`, `cluster_replica_only`, `cluster_reject_local_writes`, `cluster_admin`, `cluster_admin_token`, `cluster_sync_policy`, `cluster_allowed_writer_node_ids`, `cluster_discovery_srv`, `cluster_discovery_interval_seconds`. See [docs/clustering.md](docs/clustering.md).
 
 **Files and records**
 

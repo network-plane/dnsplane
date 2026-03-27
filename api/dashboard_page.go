@@ -2029,6 +2029,18 @@ const dashboardHTML = `<!DOCTYPE html>
             cr.innerHTML = '<span class="muted-link">Cluster is disabled.</span>';
           } else {
             let ch = '<div><strong>node_id</strong> ' + esc(cl.node_id) + ' · <strong>seq</strong> ' + esc(String(cl.local_seq)) + '</div>';
+            ch += '<div style="margin-top:0.35rem"><strong>sync_policy</strong> ' + esc(cl.sync_policy || 'lww_per_node');
+            if (cl.last_global_lww_unix && cl.last_global_lww_node_id) {
+              ch += ' · <strong>global_lww</strong> ts=' + esc(String(cl.last_global_lww_unix)) + ' node=' + esc(cl.last_global_lww_node_id);
+            }
+            ch += '</div>';
+            if (cl.cluster_discovery_srv) {
+              ch += '<div style="margin-top:0.35rem"><strong>SRV</strong> ' + esc(cl.cluster_discovery_srv);
+              ch += ' · <strong>peers</strong> static ' + esc(String(cl.static_peer_count != null ? cl.static_peer_count : '—')) + ' / srv ' + esc(String(cl.srv_peer_count != null ? cl.srv_peer_count : '—')) + ' / eff ' + esc(String(cl.effective_peer_count != null ? cl.effective_peer_count : '—'));
+              if (cl.discovery_last_refresh) ch += ' · <strong>refresh</strong> ' + esc(cl.discovery_last_refresh);
+              if (cl.discovery_last_error) ch += ' · <span style="color:var(--bad)">' + esc(cl.discovery_last_error) + '</span>';
+              ch += '</div>';
+            }
             ch += '<div style="margin-top:0.35rem"><strong>replica_only</strong> ' + esc(String(cl.replica_only)) + ' · <strong>cluster_admin</strong> ' + esc(String(cl.cluster_admin)) + '</div>';
             ch += '<div style="margin-top:0.35rem"><strong>dial</strong> ' + esc(cl.advertise_addr || cl.cluster_port_guess || '—') + '</div>';
             const peers = cl.peers || [];

@@ -22,6 +22,7 @@ import (
 
 	"dnsplane/adblock"
 	"dnsplane/cliutil"
+	"dnsplane/cluster"
 	"dnsplane/config"
 	"dnsplane/data"
 	"dnsplane/dnsrecordcache"
@@ -2084,6 +2085,10 @@ func printAllServerConfig(settings config.Config) {
 	fmt.Printf("    cluster_reject_local_writes: %v\n", settings.ClusterRejectLocalWrites)
 	fmt.Printf("    cluster_admin: %v\n", settings.ClusterAdmin)
 	fmt.Printf("    cluster_peers: %d entries\n", len(settings.ClusterPeers))
+	fmt.Printf("    cluster_sync_policy: %s\n", settings.ClusterSyncPolicy)
+	fmt.Printf("    cluster_allowed_writer_node_ids: %d entries\n", len(settings.ClusterAllowedWriterNodeIDs))
+	fmt.Printf("    cluster_discovery_srv: %s\n", settings.ClusterDiscoverySRV)
+	fmt.Printf("    cluster_discovery_interval_seconds: %d\n", settings.ClusterDiscoveryIntervalSeconds)
 	fmt.Println("  File locations:")
 	fmt.Printf("    dnsservers:  %s\n", settings.FileLocations.DNSServerFile)
 	fmt.Printf("    cache:       %s\n", settings.FileLocations.CacheFile)
@@ -2559,6 +2564,26 @@ func applyConfigSetting(cfg *config.Config, setting, value string) (successMsg s
 	case "cluster_admin_token":
 		cfg.ClusterAdminToken = value
 		return "cluster_admin_token updated", nil
+	case "cluster_sync_policy":
+		cfg.ClusterSyncPolicy = strings.TrimSpace(value)
+		return fmt.Sprintf("cluster_sync_policy set to %s", cfg.ClusterSyncPolicy), nil
+	case "cluster_allowed_writer_node_ids":
+		ids, err := parseClusterPeersList(value)
+		if err != nil {
+			return "", fmt.Errorf("cluster_allowed_writer_node_ids: %w", err)
+		}
+		cfg.ClusterAllowedWriterNodeIDs = ids
+		return fmt.Sprintf("cluster_allowed_writer_node_ids set (%d ids)", len(ids)), nil
+	case "cluster_discovery_srv":
+		cfg.ClusterDiscoverySRV = strings.TrimSpace(value)
+		return fmt.Sprintf("cluster_discovery_srv set to %s", cfg.ClusterDiscoverySRV), nil
+	case "cluster_discovery_interval_seconds":
+		n, e := strconv.Atoi(value)
+		if e != nil || n < 0 {
+			return "", fmt.Errorf("invalid cluster_discovery_interval_seconds: %s", value)
+		}
+		cfg.ClusterDiscoveryIntervalSeconds = n
+		return fmt.Sprintf("cluster_discovery_interval_seconds set to %d", n), nil
 	default:
 		return "", fmt.Errorf("unknown setting: %s", setting)
 	}
@@ -2607,6 +2632,7 @@ func handleServerSet(args []string) {
 		return
 	}
 	dnsData.UpdateSettingsInMemory(settings)
+	cluster.GlobalRefreshPeerList()
 	fmt.Println(msg)
 	fmt.Println("Run 'server save' to persist the config to the config file.")
 }
@@ -2815,7 +2841,7 @@ func printServerSetUsage() {
 	fmt.Println("Usage: server set <setting> <value>")
 	fmt.Println("Description: Set a config setting in memory. Run 'server save' to write to the config file.")
 	fmt.Println("Example: server set apiport 8080")
-	fmt.Println("Settings: dns_port, api_port, fallback_ip, fallback_port, timeout, api, cache_records, local_records_enabled, cache_warm_enabled, cache_warm_interval_seconds, cache_compact_enabled, cache_compact_interval_seconds, stats_perf_page_enabled, stats_dashboard_enabled, full_stats, full_stats_dir, pprof_enabled, pprof_listen, pretty_json, server_socket, server_tcp, dnsservers_file, cache_file, records_source_location (or dnsrecords), records_source_type (file|url|git), auto_build_ptr_from_a, forward_ptr_queries, add_updates_records, log_dir, log_severity, log_rotation, log_rotation_size_mb, log_rotation_time_days; see README and docs/dnsplane.example.json for the full list.")
+	fmt.Println("Settings: dns_port, api_port, fallback_ip, fallback_port, timeout, api, cache_records, local_records_enabled, cache_warm_enabled, cache_warm_interval_seconds, cache_compact_enabled, cache_compact_interval_seconds, stats_perf_page_enabled, stats_dashboard_enabled, full_stats, full_stats_dir, pprof_enabled, pprof_listen, pretty_json, server_socket, server_tcp, dnsservers_file, cache_file, records_source_location (or dnsrecords), records_source_type (file|url|git), auto_build_ptr_from_a, forward_ptr_queries, add_updates_records, log_dir, log_severity, log_rotation, log_rotation_size_mb, log_rotation_time_days, cluster_enabled, cluster_listen_addr, cluster_peers, cluster_auth_token, cluster_node_id, cluster_sync_interval_seconds, cluster_advertise_addr, cluster_replica_only, cluster_reject_local_writes, cluster_admin, cluster_admin_token, cluster_sync_policy, cluster_allowed_writer_node_ids, cluster_discovery_srv, cluster_discovery_interval_seconds; see README and docs/dnsplane.example.json for the full list.")
 	printHelpAliasesHint()
 }
 
