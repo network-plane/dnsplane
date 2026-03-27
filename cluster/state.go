@@ -15,17 +15,21 @@ import (
 
 // PersistedState is stored next to dnsplane.json as cluster_state.json.
 type PersistedState struct {
-	NodeID   string            `json:"node_id"`
-	LocalSeq uint64            `json:"local_seq"`
-	PeerSeq  map[string]uint64 `json:"peer_seq,omitempty"`
+	NodeID              string            `json:"node_id"`
+	LocalSeq            uint64            `json:"local_seq"`
+	PeerSeq             map[string]uint64 `json:"peer_seq,omitempty"`
+	LastGlobalLWWUnix   int64             `json:"last_global_lww_unix,omitempty"`
+	LastGlobalLWWNodeID string            `json:"last_global_lww_node_id,omitempty"`
 }
 
 type stateManager struct {
-	mu       sync.Mutex
-	path     string
-	nodeID   string
-	localSeq uint64
-	peerSeq  map[string]uint64
+	mu                  sync.Mutex
+	path                string
+	nodeID              string
+	localSeq            uint64
+	peerSeq             map[string]uint64
+	lastGlobalLWWUnix   int64
+	lastGlobalLWWNodeID string
 }
 
 func newStateManager(configFilePath string) *stateManager {
@@ -69,14 +73,18 @@ func (s *stateManager) load(cfgNodeID string) error {
 	if s.peerSeq == nil {
 		s.peerSeq = make(map[string]uint64)
 	}
+	s.lastGlobalLWWUnix = ps.LastGlobalLWWUnix
+	s.lastGlobalLWWNodeID = strings.TrimSpace(ps.LastGlobalLWWNodeID)
 	return nil
 }
 
 func (s *stateManager) saveLocked() error {
 	ps := PersistedState{
-		NodeID:   s.nodeID,
-		LocalSeq: s.localSeq,
-		PeerSeq:  s.peerSeq,
+		NodeID:              s.nodeID,
+		LocalSeq:            s.localSeq,
+		PeerSeq:             s.peerSeq,
+		LastGlobalLWWUnix:   s.lastGlobalLWWUnix,
+		LastGlobalLWWNodeID: s.lastGlobalLWWNodeID,
 	}
 	data, err := json.MarshalIndent(ps, "", "  ")
 	if err != nil {
@@ -144,4 +152,43 @@ func randomID() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
+}
+
+// shouldAcceptGlobalLWW returns true if (ts, nodeID) wins over the last applied global LWW tuple.
+func (s *stateManager) shouldAcceptGlobalLWW(ts int64, nodeID string) bool {
+	if ts <= 0 {
+		ts = 1
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastGlobalLWWUnix == 0 && s.lastGlobalLWWNodeID == "" {
+		return true
+	}
+	if ts > s.lastGlobalLWWUnix {
+		return true
+	}
+	if ts < s.lastGlobalLWWUnix {
+		return false
+	}
+	return nodeID > s.lastGlobalLWWNodeID
+}
+
+func (s *stateManager) commitGlobalLWW(ts int64, nodeID string) {
+	if ts <= 0 {
+		ts = 1
+	}
+	nodeID = strings.TrimSpace(nodeID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastGlobalLWWUnix = ts
+	s.lastGlobalLWWNodeID = nodeID
+	_ = s.saveLocked()
+}
+
+// GlobalLWWLast returns the persisted global LWW winner (for status).
+func (s *stateManager) GlobalLWWLast() (ts int64, nodeID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastGlobalLWWUnix, s.lastGlobalLWWNodeID
 }

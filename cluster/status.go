@@ -24,15 +24,26 @@ type PeerStatus struct {
 
 // StatusSnapshot is JSON-safe cluster runtime status for dashboard / TUI.
 type StatusSnapshot struct {
-	Enabled          bool         `json:"enabled"`
-	NodeID           string       `json:"node_id"`
-	ListenAddr       string       `json:"listen_addr"`
-	AdvertiseAddr    string       `json:"advertise_addr,omitempty"`
-	ReplicaOnly      bool         `json:"replica_only"`
-	ClusterAdmin     bool         `json:"cluster_admin"`
-	Peers            []PeerStatus `json:"peers"`
-	LocalSeq         uint64       `json:"local_seq"`
-	ClusterPortGuess string       `json:"cluster_port_guess,omitempty"`
+	Enabled                     bool         `json:"enabled"`
+	NodeID                      string       `json:"node_id"`
+	ListenAddr                  string       `json:"listen_addr"`
+	AdvertiseAddr               string       `json:"advertise_addr,omitempty"`
+	ReplicaOnly                 bool         `json:"replica_only"`
+	ClusterAdmin                bool         `json:"cluster_admin"`
+	Peers                       []PeerStatus `json:"peers"`
+	LocalSeq                    uint64       `json:"local_seq"`
+	ClusterPortGuess            string       `json:"cluster_port_guess,omitempty"`
+	SyncPolicy                  string       `json:"sync_policy,omitempty"`
+	AllowedWriterNodeIDs        []string     `json:"allowed_writer_node_ids,omitempty"`
+	LastGlobalLWWUnix           int64        `json:"last_global_lww_unix,omitempty"`
+	LastGlobalLWWNodeID         string       `json:"last_global_lww_node_id,omitempty"`
+	ClusterDiscoverySRV         string       `json:"cluster_discovery_srv,omitempty"`
+	ClusterDiscoveryIntervalSec int          `json:"cluster_discovery_interval_seconds,omitempty"`
+	DiscoveryLastRefresh        string       `json:"discovery_last_refresh,omitempty"`
+	DiscoveryLastError          string       `json:"discovery_last_error,omitempty"`
+	StaticPeerCount             int          `json:"static_peer_count"`
+	SRVPeerCount                int          `json:"srv_peer_count"`
+	EffectivePeerCount          int          `json:"effective_peer_count"`
 }
 
 type peerTracker struct {

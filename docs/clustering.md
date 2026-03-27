@@ -25,8 +25,28 @@ Set these keys in `dnsplane.json` (general layout: [README](../README.md#config-
 | `cluster_reject_local_writes` | `true`: reject **local** record edits (TUI/API); cluster-applied records still work. |
 | `cluster_admin` | `true`: this node may send **admin** messages (`admin_config_apply`) to peers. |
 | `cluster_admin_token` | Shared secret for **remote admin**; must be **non-empty** on a peer to accept `admin_config_apply`. Same value should be configured on admin nodes that push config/roles. |
+| `cluster_sync_policy` | How incoming `records_full` snapshots are accepted: `lww_per_node` (default), `primary_writer`, `global_lww`. See **Sync policies** below. |
+| `cluster_allowed_writer_node_ids` | JSON array of `node_id` strings. Required for `primary_writer`: only snapshots whose sender `node_id` is listed are applied. If the policy is `primary_writer` and this list is empty, **all** incoming snapshots are rejected (with a startup warning). |
+| `cluster_discovery_srv` | Optional DNS SRV query name, RFC 2782 form, e.g. `_dnsplane._tcp.example.com.` Resolved targets are **merged** with `cluster_peers` for push, pull, and probes; SRV results are not written to `dnsplane.json`. |
+| `cluster_discovery_interval_seconds` | Seconds between SRV refreshes when `cluster_discovery_srv` is set. If the key is **omitted** but SRV is set, defaults to **60**. Use **`0`** to resolve SRV **only at startup** (no periodic refresh). |
 
-State file **`cluster_state.json`** is created next to `dnsplane.json`. It holds `node_id`, `local_seq`, and per-peer sequence numbers for duplicate detection.
+State file **`cluster_state.json`** is created next to `dnsplane.json`. It holds `node_id`, `local_seq`, per-peer sequence numbers for duplicate detection, and (for `global_lww`) `last_global_lww_unix` / `last_global_lww_node_id`.
+
+## Sync policies
+
+| Policy | Behavior |
+|--------|----------|
+| `lww_per_node` (default) | Same as historical behavior: each sender has a monotonic sequence; duplicates are skipped. **Different nodes** can still overwrite each other—whoever applies last replaces the full local record store. Safe when only **one** node performs writes. |
+| `primary_writer` | Only snapshots from a `node_id` in `cluster_allowed_writer_node_ids` are applied; others are ignored (peer sequence is still advanced so the same frame is not retried forever). |
+| `global_lww` | One logical “winner” per snapshot: compares `timestamp_unix` on the message (pushes set this to send time). Newer timestamp wins; if equal, **lexicographic** `node_id` breaks ties. Persisted across restarts. **Clock skew** between nodes can cause the wrong snapshot to win—use reliable time sync (NTP). |
+
+**Interaction with roles:** `cluster_replica_only` and `cluster_reject_local_writes` still apply as before. Prefer **single writer** + `primary_writer` or `global_lww` when multiple nodes might otherwise edit records.
+
+## SRV discovery
+
+- Example record: `_dnsplane._tcp.example.com. IN SRV 0 5 7946 node1.internal.`
+- If lookup fails, **`discovery_last_error`** is set in status until the next successful refresh; that refresh still **merges static peers only** (SRV targets from the failed query are omitted).
+- **Static** `cluster_peers` and **SRV** targets are **deduplicated** (`host:port`); static entries appear first in the merged order.
 
 ## TUI commands
 
@@ -49,7 +69,7 @@ Inside the **cluster** context, `?` / `help` on a command shows usage. Typical c
 
 ## Web dashboard
 
-The live dashboard (`/stats/dashboard`) includes a **Cluster** panel (read-only) when the process registers a cluster manager. It shows node id, sequence, replica/admin flags, dial address, and a per-peer table (reachability, probe RTT, last error). Management remains in the TUI.
+The live dashboard (`/stats/dashboard`) includes a **Cluster** panel (read-only) when the process registers a cluster manager. It shows node id, sequence, sync policy, optional global LWW winner, discovery SRV / last refresh / error, static vs SRV peer counts, replica/admin flags, dial address, and a per-peer table (reachability, probe RTT, last error). Management remains in the TUI.
 
 ## Remote admin protocol
 
@@ -72,13 +92,13 @@ The target persists via `data.UpdateSettings`. **REST API does not** expose conf
 1. **Frames:** `uint32` big-endian length + UTF-8 JSON body (max 64 MiB per frame).
 2. **Auth:** first client message after connect is `{"type":"auth","token":"<cluster_auth_token>"}`; server responds with `auth_ok` or `auth_fail`.
 3. **Messages:** `records_full`, `pull`, `ping` / `pong`, `admin_config_apply` / `admin_config_ok` / `admin_config_fail`, `error`.
-4. **Ordering:** Each node maintains a monotonic **local sequence**; peers track **last seen** sequence per node id to avoid re-applying the same snapshot.
+4. **Ordering:** Each node maintains a monotonic **local sequence**; peers track **last seen** sequence per sender `node_id` to avoid re-applying the same snapshot. **`cluster_sync_policy`** may further restrict or order applies (see **Sync policies**).
 
 Traffic is **not TLS** by default. Run the cluster port only on a **trusted network** or tunnel (e.g. VPN, SSH, WireGuard).
 
 ## Deployment notes
 
-- **Split-brain:** If two nodes edit records independently, **last writer wins** by sequence; there is no CRDT or Raft election in this release.
+- **Split-brain:** With default `lww_per_node`, two writers can still overwrite each other. Use **`primary_writer`** or **`global_lww`** to tighten behavior. **Raft** or similar consensus is not implemented in this release.
 - **Load balancer:** Point DNS clients at the VIP; **cluster sync** is a separate TCP port between nodes—do not expose it to the public Internet without protection.
 - **Single writer:** For predictable behavior, prefer **one** admin path (e.g. TUI on one node) or accept occasional overwrites.
 

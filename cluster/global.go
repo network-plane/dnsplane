@@ -23,3 +23,13 @@ func GlobalManager() *Manager {
 	defer globalMu.RUnlock()
 	return globalManager
 }
+
+// GlobalRefreshPeerList recomputes static ∪ SRV peer targets (e.g. after in-memory config change).
+func GlobalRefreshPeerList() {
+	globalMu.RLock()
+	m := globalManager
+	globalMu.RUnlock()
+	if m != nil {
+		m.refreshEffectivePeers()
+	}
+}

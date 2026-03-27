@@ -211,6 +211,14 @@ type Config struct {
 	ClusterAdmin bool `json:"cluster_admin,omitempty"`
 	// ClusterAdminToken must match incoming admin_config_apply; empty disables remote admin apply.
 	ClusterAdminToken string `json:"cluster_admin_token,omitempty"`
+	// ClusterSyncPolicy controls how incoming record snapshots are ordered: lww_per_node (default), primary_writer, global_lww. See docs/clustering.md.
+	ClusterSyncPolicy string `json:"cluster_sync_policy,omitempty"`
+	// ClusterAllowedWriterNodeIDs lists sender node_id values allowed when ClusterSyncPolicy is primary_writer.
+	ClusterAllowedWriterNodeIDs []string `json:"cluster_allowed_writer_node_ids,omitempty"`
+	// ClusterDiscoverySRV is an optional DNS SRV name (e.g. _dnsplane._tcp.example.com.) merged with cluster_peers for dial targets.
+	ClusterDiscoverySRV string `json:"cluster_discovery_srv,omitempty"`
+	// ClusterDiscoveryIntervalSeconds refreshes SRV lookups; 0 means startup only. Default 60 when cluster_discovery_srv is set.
+	ClusterDiscoveryIntervalSeconds int `json:"cluster_discovery_interval_seconds,omitempty"`
 }
 
 // Loaded contains the configuration together with metadata about the source file.
@@ -492,6 +500,9 @@ func (c *Config) applyDefaults(configDir string) {
 	}
 	if c.ClusterSyncIntervalSeconds < 0 {
 		c.ClusterSyncIntervalSeconds = 0
+	}
+	if c.ClusterDiscoveryIntervalSeconds < 0 {
+		c.ClusterDiscoveryIntervalSeconds = 0
 	}
 	if c.APIRateLimitBurst < 0 {
 		c.APIRateLimitBurst = 0
@@ -849,6 +860,23 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	}
 	if r, ok := raw["cluster_admin_token"]; ok {
 		_ = json.Unmarshal(r, &c.ClusterAdminToken)
+	}
+	if r, ok := raw["cluster_sync_policy"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterSyncPolicy)
+	}
+	if r, ok := raw["cluster_allowed_writer_node_ids"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterAllowedWriterNodeIDs)
+	}
+	if r, ok := raw["cluster_discovery_srv"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterDiscoverySRV)
+	}
+	if r, ok := raw["cluster_discovery_interval_seconds"]; ok {
+		_ = json.Unmarshal(r, &c.ClusterDiscoveryIntervalSeconds)
+	}
+	if _, ok := raw["cluster_discovery_interval_seconds"]; !ok {
+		if strings.TrimSpace(c.ClusterDiscoverySRV) != "" {
+			c.ClusterDiscoveryIntervalSeconds = 60
+		}
 	}
 	return nil
 }
