@@ -208,6 +208,7 @@ func RegisterDNSRoutes(router chi.Router) {
 	router.Get("/version/page", versionPageHandler)
 	router.Get("/dns/records", listRecordsHandler)
 	router.Post("/dns/records", addRecordHandler)
+	router.Post("/dns/records/reload", reloadRecordsHandler)
 	router.Put("/dns/records", updateRecordHandler)
 	router.Delete("/dns/records", deleteRecordHandler)
 	router.Get("/dns/servers", listServersHandler)
@@ -466,6 +467,20 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func reloadRecordsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	n, err := data.ReloadDNSRecordsFromSource()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "reloaded", "records": n})
 }
 
 func addRecordHandler(w http.ResponseWriter, r *http.Request) {
