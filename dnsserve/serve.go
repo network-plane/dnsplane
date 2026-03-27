@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"dnsplane/config"
+	"dnsplane/dnsrecords"
 	"dnsplane/resolver"
 
 	"github.com/miekg/dns"
@@ -31,6 +32,8 @@ type ServeMeta struct {
 type Dependencies struct {
 	Resolver *resolver.Resolver
 	Settings func() config.Config
+	// LocalRecords supplies in-memory records for AXFR (optional).
+	LocalRecords func() []dnsrecords.DNSRecord
 	// Optional response-side abuse limiter (nil = disabled).
 	ResponseLimiter ResponseLimiter
 	// QueryLimiter is the existing per-IP query token bucket (nil = disabled).
@@ -62,6 +65,11 @@ func ServeDNS(ctx context.Context, req *dns.Msg, meta ServeMeta, dep Dependencie
 	}
 
 	st := dep.Settings()
+	if req.Opcode == dns.OpcodeUpdate {
+		resp.SetRcode(req, dns.RcodeNotImplemented)
+		return resp
+	}
+
 	if st.DNSRefuseANY && hasANYQuestion(req) {
 		resp.SetRcode(req, dns.RcodeNotImplemented)
 		return resp
@@ -86,6 +94,15 @@ func ServeDNS(ctx context.Context, req *dns.Msg, meta ServeMeta, dep Dependencie
 			}
 		}
 		return resp
+	}
+
+	if axfrResp, ok := tryServeAXFR(req, meta, dep); ok {
+		clampEDNS(axfrResp, st.DNSMaxEDNSUDPPayload)
+		// Intentionally skip clampAmplified: AXFR legitimately returns many RRs vs a small query.
+		if dep.ResponseLimiter != nil {
+			dep.ResponseLimiter.RecordResponse(clientIP, qname)
+		}
+		return axfrResp
 	}
 
 	if dep.Resolver != nil {
