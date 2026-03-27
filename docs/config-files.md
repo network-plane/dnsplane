@@ -13,15 +13,16 @@ JSON data files, `dnsplane.json` keys, REST paths, and curl samples. For resolut
 
 Starter copies in the repo: **[examples/dnsplane-example.json](../examples/dnsplane-example.json)** and **[examples/dnsservers-example.json](../examples/dnsservers-example.json)** (point `file_locations.dnsservers` at your real path, e.g. `./dnsservers.json`).
 
-### Records source (file, URL, or Git)
+### Records source (file, URL, Git, or BIND zone directory)
 
 DNS records are always configured via `file_locations.records_source` in `dnsplane.json`. One source type applies for both loading and (when writable) saving:
 
 - **file** – Local path; records are read from and written to this path (e.g. `dnsrecords.json`). Default.
 - **url** – HTTP(S) URL that returns JSON in the same format as the records file (`{"records": [...]}`). Read-only; a refresh interval controls how often dnsplane re-fetches.
 - **git** – Git repository URL (HTTPS or SSH). dnsplane clones/pulls the repo and reads `dnsrecords.json` at the **root**. Read-only; refresh interval controls how often it runs `git pull`.
+- **bind_dir** – Directory of BIND-style zone files (see [zone-files.md](zone-files.md)). Read-only for API/TUI mutations that would persist to JSON; use **`POST /dns/records/reload`**, **`record load`**, optional **`watch`**, or optional **`refresh_interval_seconds`** to refresh from disk.
 
-When using **url** or **git**, the TUI and API can still add/update/remove records in memory, but changes are overwritten on the next refresh.
+For **url**, **git**, and **bind_dir**, record **add/update/delete** via API and TUI returns **403** (records source is read-only). **`POST /dns/records/reload`** and **`record load`** still reload from the configured source.
 
 Example – local file (default):
 
@@ -57,6 +58,21 @@ Example – Git (read-only):
 ```
 
 For **url** and **git**, `refresh_interval_seconds` defaults to 60 if omitted.
+
+Example – BIND zone directory (read-only):
+
+```json
+"records_source": {
+  "type": "bind_dir",
+  "location": "/var/named",
+  "include_pattern": "*.db",
+  "named_conf": "/etc/named.conf.local",
+  "watch": true,
+  "refresh_interval_seconds": 300
+}
+```
+
+Omit `named_conf` to glob `include_pattern` under `location` (default pattern `*.db`). Set `refresh_interval_seconds` only if you want periodic reloads in addition to (or instead of) `watch`.
 
 ### Upstream servers (`dnsservers.json`) and domain whitelist
 
@@ -135,6 +151,8 @@ See **[dnsplane.example.json](dnsplane.example.json)** for every key and default
 | --- | --- |
 | `dot_enabled`, `dot_bind`, `dot_port`, `dot_cert_file`, `dot_key_file` | DNS over TLS listener. |
 | `doh_enabled`, `doh_bind`, `doh_port`, `doh_path`, `doh_cert_file`, `doh_key_file` | DNS over HTTPS. |
+| `axfr_enabled` | If true, answer **AXFR** over **TCP** and **DoT** for zones present in local records (single-message transfer). |
+| `axfr_allowed_networks` | CIDR list allowed to request AXFR (e.g. `["127.0.0.0/8","10.0.0.0/8"]`). If `axfr_enabled` is true but this list is empty or invalid, AXFR is refused. |
 
 **Response / abuse limits**
 
@@ -184,7 +202,7 @@ See **[dnsplane.example.json](dnsplane.example.json)** for every key and default
 
 **Files and records**
 
-- `file_locations` — `dnsservers`, `cache`, `records_source` (`type` + `location` + optional `refresh_interval_seconds` for url/git). See [Records source](#records-source-file-url-or-git) above. **`dnsservers.json`** format and per-server **`domain_whitelist`**: [Upstream servers (`dnsservers.json`)](#upstream-servers-dnsserversjson-and-domain-whitelist).
+- `file_locations` — `dnsservers`, `cache`, `records_source` (`type` + `location` + optional `refresh_interval_seconds` for url/git/bind_dir, plus bind_dir-only `include_pattern`, `named_conf`, `watch`). See [Records source](#records-source-file-url-git-or-bind-zone-directory) above. **`dnsservers.json`** format and per-server **`domain_whitelist`**: [Upstream servers (`dnsservers.json`)](#upstream-servers-dnsserversjson-and-domain-whitelist).
 - `adblock_list_files` — list of hosts-style list paths loaded at startup.
 
 **`DNSRecordSettings`** — `auto_build_ptr_from_a`, `forward_ptr_queries`, `add_updates_records`.
@@ -213,6 +231,7 @@ Enable the REST API with `"api": true` in `dnsplane.json` and set `apiport` (e.g
 | GET | `/version/page` | HTML view of the same build fields (for embedding in the dashboard). **404** if `stats_dashboard_enabled` is false. |
 | GET | `/dns/records` | List DNS records (same data as the TUI). Returns JSON with `records`, optional `detailed` (boolean), `filter`, `messages`. **Query:** `name` (substring on normalized owner name), `type` (DNS type, AND with `name` when both set; invalid `type` → **400**), `details` or `d` (`1` / `true` for verbose fields in each record, like `record list details`). |
 | POST | `/dns/records` | Add a DNS record. Body: `{"name":"...","type":"A","value":"...","ttl":3600}`. Optional **`id`**: if set, must be unique (for import/sync); if omitted, the server assigns a UUID. Response lists include **`id`** on each record. |
+| POST | `/dns/records/reload` | Reload records from the configured `records_source` (no body). Returns `{"status":"reloaded","records":N}`. Subject to **`api_auth_token`** when set. |
 | PUT | `/dns/records` | Update a record. With **`id`** in the body, replace that row’s name/type/value/TTL (stable update). Without **`id`**, same as today: match **name + type + value** and update in place (legacy). |
 | DELETE | `/dns/records` | Delete by query **`?id=`**… or JSON body `{"id":"..."}`. Otherwise **`name`** (required) plus optional **`type`** / **`value`** (same as legacy). |
 | GET | `/dns/servers` | List upstreams plus health: `servers`, `upstream_health_check_enabled`, interval/failures hints, and `upstream_health` per `address_port` (unhealthy, consecutive_failures, last_probe_*, last_success_at). |

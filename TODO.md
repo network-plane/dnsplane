@@ -12,14 +12,6 @@ Work tracked for future releases and packaging. For **using** dnsplane, see the 
 
 ---
 
-## 2. API and resolver enhancements
-
-- [x] `GET /dns/records`: optional `?name=` / `?type=` filters aligned with the TUI list behavior.
-- [x] Per-server fallback: optional second upstream when a whitelist-only server fails.
-- [x] Record updates by stable id (name + type + value) to avoid accidental overwrites.
-
----
-
 ## 4. ISPConfig and cPanel compatibility
 
 **Goal:** Run dnsplane where panels already manage zones (BIND/PowerDNS), reading zone files the panel maintains.
