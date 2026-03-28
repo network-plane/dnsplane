@@ -220,7 +220,7 @@ func dashboardPageHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // dashboardHTML is a self-contained UI (dark theme; Chart.js from CDN).
-// Left nav: Status, Statistics, embedded Tuning/Version; Ctrl/Cmd-click opens the URL in a new tab. Prometheus uses GET /metrics (not linked here).
+// Left nav: Status, Statistics, Log, Historical, in-dashboard Tuning, embedded Version; Ctrl/Cmd-click opens the URL in a new tab.
 const dashboardHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -782,6 +782,7 @@ const dashboardHTML = `<!DOCTYPE html>
     }
     .err { color: var(--danger); padding: 1rem; }
     .ws-status { font-size: 0.78rem; color: var(--muted); margin: -0.35rem 0 0.75rem 0; min-height: 1.2em; }
+    #ws-status.is-hidden-for-embed { display: none; }
     .muted-link { color: var(--muted); font-size: 0.85rem; }
     .muted-link a { color: var(--accent); }
     code {
@@ -799,6 +800,25 @@ const dashboardHTML = `<!DOCTYPE html>
       overflow: auto;
     }
     #view-fullstats.hidden { display: none; }
+    #view-perf {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: auto;
+    }
+    #view-perf.hidden { display: none; }
+    #view-perf .perf-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+    #view-perf .perf-panel h2 { font-size: 1rem; margin: 0 0 0.5rem 0; }
+    #view-perf table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    #view-perf th, #view-perf td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+    #view-perf th { color: var(--muted); font-weight: 600; }
+    #view-perf .perf-num { text-align: right; font-variant-numeric: tabular-nums; }
+    #view-perf .perf-hist-sub { font-size: 0.8rem; color: var(--muted); font-weight: 600; margin: 0.75rem 0 0.35rem 0; }
+    #view-perf .perf-chart-wrap { position: relative; height: 220px; margin-top: 0.35rem; }
+    #view-perf .perf-row-two { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; align-items: start; }
+    #view-perf .perf-row-two .perf-panel { margin-bottom: 0; }
+    @media (max-width: 42rem) { #view-perf .perf-row-two { grid-template-columns: 1fr; } }
     .fs-toolbar {
       display: flex;
       flex-wrap: wrap;
@@ -945,7 +965,7 @@ const dashboardHTML = `<!DOCTYPE html>
         <a href="/stats/dashboard" data-view="dashboard">Statistics</a>
         <a href="/stats/dashboard" data-view="resolutions">Log</a>
         <a href="/stats/dashboard" data-view="fullstats">Historical</a>
-        <a href="/stats/perf/page" data-embed="1">Tuning</a>
+        <a href="/stats/dashboard" data-view="perf">Tuning</a>
         <a href="/version/page" data-embed="1">Version</a>
       </nav>
       <div class="nav-external" aria-label="Project links">
@@ -1191,6 +1211,12 @@ const dashboardHTML = `<!DOCTYPE html>
           <span id="fs-total" class="muted-link"></span>
         </div>
       </div>
+      <div id="view-perf" class="hidden">
+        <h1>Tuning (fast path)</h1>
+        <p class="muted-link" style="margin:-0.5rem 0 1rem 0"><a href="/stats/perf">JSON</a> · <button type="button" class="fs-btn" id="dash-perf-reset">Reset counters</button></p>
+        <p id="dash-perf-err" class="err" style="display:none;margin:0 0 0.75rem 0;padding:0"></p>
+        <div id="dash-perf-root"></div>
+      </div>
       <iframe id="view-embed" class="view-embed hidden" title="Embedded view" sandbox="allow-scripts allow-same-origin"></iframe>
     </main>
   </div>
@@ -1258,7 +1284,9 @@ const dashboardHTML = `<!DOCTYPE html>
     let chartReplies, chartLatency;
     let dashboardTimer = null;
     let resolutionsTimer = null;
+    let dashPerfPollTimer = null;
     let dashboardWebSocket = null;
+    var dashPerfHistCharts = {};
     var resState = { raw: [], chips: [], sortCol: 'at', sortDir: 'desc' };
     function setWsStreamStatus(text) {
       var el = document.getElementById('ws-status');
@@ -1280,6 +1308,7 @@ const dashboardHTML = `<!DOCTYPE html>
     function stopAllDashboardLive() {
       stopDashboardPollOnly();
       stopResolutionsRefresh();
+      stopDashPerfPoll();
       if (dashboardWebSocket) {
         try { dashboardWebSocket.close(); } catch (e) {}
         dashboardWebSocket = null;
@@ -1291,10 +1320,12 @@ const dashboardHTML = `<!DOCTYPE html>
       var logOn = !document.getElementById('view-resolutions').classList.contains('hidden');
       var statsOn = !document.getElementById('view-dashboard').classList.contains('hidden');
       var statusOn = !document.getElementById('view-status').classList.contains('hidden');
+      var perfOn = !document.getElementById('view-perf').classList.contains('hidden');
       var wantStats = statsOn || statusOn;
       var wantRes = logOn;
+      var wantPerf = perfOn;
       try {
-        dashboardWebSocket.send(JSON.stringify({ op: 'sub', stats: wantStats, resolutions: wantRes, perf: false }));
+        dashboardWebSocket.send(JSON.stringify({ op: 'sub', stats: wantStats, resolutions: wantRes, perf: wantPerf }));
       } catch (e) {}
     }
     function tryStartDashboardWebSocket() {
@@ -1335,6 +1366,7 @@ const dashboardHTML = `<!DOCTYPE html>
         var st = !document.getElementById('view-status').classList.contains('hidden');
         var da = !document.getElementById('view-dashboard').classList.contains('hidden');
         var lo = !document.getElementById('view-resolutions').classList.contains('hidden');
+        var pe = !document.getElementById('view-perf').classList.contains('hidden');
         if (st || da) {
           load();
           if (!dashboardTimer) dashboardTimer = setInterval(load, 2000);
@@ -1342,6 +1374,10 @@ const dashboardHTML = `<!DOCTYPE html>
         if (lo) {
           loadResolutionsData();
           if (!resolutionsTimer) resolutionsTimer = setInterval(loadResolutionsData, 2000);
+        }
+        if (pe) {
+          loadDashPerf();
+          if (!dashPerfPollTimer) dashPerfPollTimer = setInterval(loadDashPerf, 2000);
         }
       };
       dashboardWebSocket.onerror = function() {
@@ -1354,6 +1390,7 @@ const dashboardHTML = `<!DOCTYPE html>
           document.getElementById('err').textContent = '';
           if (msg.dashboard) applyDashboardPayload(msg.dashboard);
           if (msg.resolutions) applyResolutionsPayload(msg.resolutions);
+          if (msg.perf) applyDashPerfPayload(msg.perf);
         } catch (ex) {}
       };
     }
@@ -1852,13 +1889,22 @@ const dashboardHTML = `<!DOCTYPE html>
         fsToggleSort(col);
       });
     }
+    function showShellUpdatesForEmbed(show) {
+      var wsEl = document.getElementById('ws-status');
+      if (!wsEl) return;
+      if (show) wsEl.classList.remove('is-hidden-for-embed');
+      else wsEl.classList.add('is-hidden-for-embed');
+    }
     function showStatus(anchor) {
       if (anchor) setActiveNav(anchor);
+      showShellUpdatesForEmbed(true);
       stopResolutionsRefresh();
+      stopDashPerfPoll();
       document.getElementById('view-status').classList.remove('hidden');
       document.getElementById('view-dashboard').classList.add('hidden');
       document.getElementById('view-fullstats').classList.add('hidden');
       document.getElementById('view-resolutions').classList.add('hidden');
+      document.getElementById('view-perf').classList.add('hidden');
       const iframe = document.getElementById('view-embed');
       iframe.classList.add('hidden');
       iframe.src = 'about:blank';
@@ -1866,11 +1912,14 @@ const dashboardHTML = `<!DOCTYPE html>
     }
     function showStatistics(anchor) {
       if (anchor) setActiveNav(anchor);
+      showShellUpdatesForEmbed(true);
       stopResolutionsRefresh();
+      stopDashPerfPoll();
       document.getElementById('view-status').classList.add('hidden');
       document.getElementById('view-dashboard').classList.remove('hidden');
       document.getElementById('view-fullstats').classList.add('hidden');
       document.getElementById('view-resolutions').classList.add('hidden');
+      document.getElementById('view-perf').classList.add('hidden');
       const iframe = document.getElementById('view-embed');
       iframe.classList.add('hidden');
       iframe.src = 'about:blank';
@@ -1878,11 +1927,14 @@ const dashboardHTML = `<!DOCTYPE html>
     }
     function showResolutions(anchor) {
       if (anchor) setActiveNav(anchor);
+      showShellUpdatesForEmbed(true);
       stopDashboardRefresh();
+      stopDashPerfPoll();
       document.getElementById('view-status').classList.add('hidden');
       document.getElementById('view-dashboard').classList.add('hidden');
       document.getElementById('view-fullstats').classList.add('hidden');
       document.getElementById('view-resolutions').classList.remove('hidden');
+      document.getElementById('view-perf').classList.add('hidden');
       const iframe = document.getElementById('view-embed');
       iframe.classList.add('hidden');
       iframe.src = 'about:blank';
@@ -1890,11 +1942,13 @@ const dashboardHTML = `<!DOCTYPE html>
     }
     function showFullStats(anchor) {
       if (anchor) setActiveNav(anchor);
+      showShellUpdatesForEmbed(false);
       stopAllDashboardLive();
       document.getElementById('view-status').classList.add('hidden');
       document.getElementById('view-dashboard').classList.add('hidden');
       document.getElementById('view-fullstats').classList.remove('hidden');
       document.getElementById('view-resolutions').classList.add('hidden');
+      document.getElementById('view-perf').classList.add('hidden');
       const iframe = document.getElementById('view-embed');
       iframe.classList.add('hidden');
       iframe.src = 'about:blank';
@@ -1904,14 +1958,31 @@ const dashboardHTML = `<!DOCTYPE html>
     }
     function showEmbed(url, anchor) {
       if (anchor) setActiveNav(anchor);
+      showShellUpdatesForEmbed(false);
       stopAllDashboardLive();
       document.getElementById('view-status').classList.add('hidden');
       document.getElementById('view-dashboard').classList.add('hidden');
       document.getElementById('view-fullstats').classList.add('hidden');
       document.getElementById('view-resolutions').classList.add('hidden');
+      document.getElementById('view-perf').classList.add('hidden');
       const iframe = document.getElementById('view-embed');
       iframe.classList.remove('hidden');
       iframe.src = url;
+    }
+    function showPerf(anchor) {
+      if (anchor) setActiveNav(anchor);
+      showShellUpdatesForEmbed(true);
+      stopDashboardRefresh();
+      stopResolutionsRefresh();
+      document.getElementById('view-status').classList.add('hidden');
+      document.getElementById('view-dashboard').classList.add('hidden');
+      document.getElementById('view-fullstats').classList.add('hidden');
+      document.getElementById('view-resolutions').classList.add('hidden');
+      document.getElementById('view-perf').classList.remove('hidden');
+      const iframe = document.getElementById('view-embed');
+      iframe.classList.add('hidden');
+      iframe.src = 'about:blank';
+      startDashPerfRefresh();
     }
     document.querySelectorAll('aside nav a').forEach(function(a) {
       a.addEventListener('click', function(e) {
@@ -1939,6 +2010,11 @@ const dashboardHTML = `<!DOCTYPE html>
         if (a.getAttribute('data-view') === 'fullstats') {
           e.preventDefault();
           showFullStats(a);
+          return;
+        }
+        if (a.getAttribute('data-view') === 'perf') {
+          e.preventDefault();
+          showPerf(a);
         }
       });
     });
@@ -2179,6 +2255,169 @@ const dashboardHTML = `<!DOCTYPE html>
         document.getElementById('err').textContent = 'Failed to load: ' + e.message;
       }
     }
+    function stopDashPerfPoll() {
+      if (dashPerfPollTimer) {
+        clearInterval(dashPerfPollTimer);
+        dashPerfPollTimer = null;
+      }
+    }
+    function dashPerfChartCommon() {
+      var grid = '#30363d';
+      var tick = '#8b949e';
+      return {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        scales: {
+          x: {
+            grid: { color: grid },
+            ticks: { color: tick, maxRotation: 45, minRotation: 0, font: { size: 10 } }
+          },
+          y: {
+            beginAtZero: true,
+            grid: { color: grid },
+            ticks: { color: tick }
+          }
+        },
+        plugins: { legend: { display: false } }
+      };
+    }
+    function dashPerfDestroyHist(id) {
+      if (dashPerfHistCharts[id]) {
+        dashPerfHistCharts[id].destroy();
+        delete dashPerfHistCharts[id];
+      }
+    }
+    function dashPerfUpdateHist(canvasId, buckets, borderRgb, fillRgb) {
+      var el = document.getElementById(canvasId);
+      if (!el) return;
+      var labels = [];
+      var vals = [];
+      (buckets || []).forEach(function(b) {
+        labels.push(b.label);
+        vals.push(Number(b.count));
+      });
+      dashPerfHistCharts[canvasId] = new Chart(el, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Count',
+            data: vals,
+            backgroundColor: fillRgb,
+            borderColor: borderRgb,
+            borderWidth: 1
+          }]
+        },
+        options: dashPerfChartCommon()
+      });
+    }
+    function dashPerfRow(k, v) {
+      return '<tr><th>' + esc(k) + '</th><td class="perf-num">' + esc(v) + '</td></tr>';
+    }
+    function applyDashPerfPayload(j) {
+      var errEl = document.getElementById('dash-perf-err');
+      if (errEl) {
+        errEl.textContent = '';
+        errEl.style.display = 'none';
+      }
+      const a = j.a_resolve || {};
+      let h = '<div class="perf-row-two">';
+      h += '<div class="perf-panel"><h2>Outcomes</h2><table>';
+      h += dashPerfRow('Total resolves', a.total);
+      h += dashPerfRow('Local (dnsrecords)', a.outcome_local);
+      h += dashPerfRow('Cache (dnscache)', a.outcome_cache);
+      h += dashPerfRow('Upstream', a.outcome_upstream);
+      h += dashPerfRow('No answer', a.outcome_none);
+      h += '</table></div>';
+      h += '<div class="perf-panel"><h2>Latency (all resolves)</h2><table>';
+      h += dashPerfRow('Avg total (ms)', (a.avg_total_ms != null ? a.avg_total_ms.toFixed(3) : '—'));
+      h += dashPerfRow('Avg prep (ms)', (a.avg_prep_ms != null ? a.avg_prep_ms.toFixed(3) : '—'));
+      h += dashPerfRow('Max total (ms)', (a.max_total_ms != null ? a.max_total_ms.toFixed(3) : '—'));
+      h += '</table></div>';
+      h += '</div>';
+      h += '<div class="perf-panel"><h2>Cache-only path (dnscache hit)</h2><table>';
+      h += dashPerfRow('Count', a.outcome_cache);
+      h += dashPerfRow('Avg total (ms)', (a.avg_total_ms_cache_only != null ? a.avg_total_ms_cache_only.toFixed(3) : '—'));
+      h += dashPerfRow('Max total (ms)', (a.max_total_ms_cache_only != null ? a.max_total_ms_cache_only.toFixed(3) : '—'));
+      h += '</table><p class="muted-link" style="margin:0.5rem 0 0 0;font-size:0.8rem">If tail latency in dig is here, resolver/cache path. If flat here but dig spikes, compare Upstream count.</p>';
+      h += '<p class="perf-hist-sub">Total time (ms) — histogram</p><div class="perf-chart-wrap"><canvas id="dash-perf-hist-cache"></canvas></div></div>';
+      if (a.outcome_upstream > 0) {
+        h += '<div class="perf-panel"><h2>Upstream path (any)</h2><table>';
+        h += dashPerfRow('Count', a.outcome_upstream);
+        h += dashPerfRow('Avg upstream wait (ms)', a.avg_upstream_wait_ms != null ? a.avg_upstream_wait_ms.toFixed(3) : '—');
+        h += dashPerfRow('Avg slowest upstream (ms)', a.avg_max_upstream_ms != null ? a.avg_max_upstream_ms.toFixed(3) : '—');
+        h += dashPerfRow('Avg servers queried', a.avg_upstream_servers != null ? a.avg_upstream_servers.toFixed(2) : '—');
+        h += '</table><p class="perf-hist-sub">Total time (ms) — histogram</p><div class="perf-chart-wrap"><canvas id="dash-perf-hist-upstream"></canvas></div></div>';
+      }
+      h += '<div class="perf-panel"><h2>Histogram — all outcomes (mixed)</h2>';
+      h += '<p class="perf-hist-sub">Total time (ms) — histogram</p><div class="perf-chart-wrap"><canvas id="dash-perf-hist-total"></canvas></div></div>';
+      const byQt = j.by_query_type || {};
+      const qtKeys = Object.keys(byQt).sort();
+      if (qtKeys.length > 0) {
+        h += '<div class="perf-panel"><h2>By QTYPE</h2><table><thead><tr><th>Type</th><th class="perf-num">Total</th><th class="perf-num">Avg ms</th><th class="perf-num">Local</th><th class="perf-num">Cache</th><th class="perf-num">Upstream</th><th class="perf-num">None</th></tr></thead><tbody>';
+        qtKeys.forEach(function(k) {
+          const q = byQt[k];
+          h += '<tr><td>' + esc(k) + '</td><td class="perf-num">' + q.total + '</td><td class="perf-num">' +
+            (q.avg_total_ms != null ? q.avg_total_ms.toFixed(3) : '—') + '</td><td class="perf-num">' + q.outcome_local +
+            '</td><td class="perf-num">' + q.outcome_cache + '</td><td class="perf-num">' + q.outcome_upstream +
+            '</td><td class="perf-num">' + q.outcome_none + '</td></tr>';
+        });
+        h += '</tbody></table></div>';
+      }
+      h += '<div class="perf-panel muted-link"><p>' + esc(j.description || '') + '</p><ul>';
+      (j.notes || []).forEach(function(n) { h += '<li>' + esc(n) + '</li>'; });
+      h += '</ul><p>Since first A-resolve in this window: ' + esc(j.since_first_resolve || '—') + '</p></div>';
+      dashPerfDestroyHist('dash-perf-hist-cache');
+      dashPerfDestroyHist('dash-perf-hist-upstream');
+      dashPerfDestroyHist('dash-perf-hist-total');
+      document.getElementById('dash-perf-root').innerHTML = h;
+      dashPerfUpdateHist('dash-perf-hist-cache', a.histogram_cache_only_ms, '#3fb950', 'rgba(63,185,80,0.45)');
+      if (a.outcome_upstream > 0) {
+        dashPerfUpdateHist('dash-perf-hist-upstream', a.histogram_upstream_ms, '#d29922', 'rgba(210,153,34,0.45)');
+      }
+      dashPerfUpdateHist('dash-perf-hist-total', a.histogram_total_ms, '#58a6ff', 'rgba(88,166,255,0.45)');
+    }
+    async function loadDashPerf() {
+      try {
+        const r = await fetch('/stats/perf');
+        const j = await r.json();
+        applyDashPerfPayload(j);
+      } catch (e) {
+        var el = document.getElementById('dash-perf-err');
+        if (el) {
+          el.textContent = String(e);
+          el.style.display = 'block';
+        }
+      }
+    }
+    function startDashPerfRefresh() {
+      stopDashPerfPoll();
+      loadDashPerf();
+      dashPerfPollTimer = setInterval(loadDashPerf, 2000);
+      tryStartDashboardWebSocket();
+      notifyDashboardWSSubscription();
+      syncDashboardUpdatesLabel();
+    }
+    function wireDashPerf() {
+      var btn = document.getElementById('dash-perf-reset');
+      if (!btn) return;
+      btn.addEventListener('click', async function() {
+        try {
+          const r = await fetch('/stats/perf/reset', { method: 'POST' });
+          const j = await r.json();
+          if (!r.ok) throw new Error(j.message || r.statusText);
+          await loadDashPerf();
+        } catch (e) {
+          var el = document.getElementById('dash-perf-err');
+          if (el) {
+            el.textContent = String(e);
+            el.style.display = 'block';
+          }
+        }
+      });
+    }
+    wireDashPerf();
     initCharts();
     showStatus(null);
   </script>

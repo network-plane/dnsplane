@@ -182,7 +182,7 @@ func dashboardWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 			if wantRes && data.StatsDashboardHTMLEnabled() {
 				env["resolutions"] = buildDashboardResolutionsPayload()
 			}
-			if wantPerf && data.StatsPerfPageHTMLEnabled() {
+			if wantPerf && data.StatsDashboardHTMLEnabled() {
 				env["perf"] = buildPerfReportPayload()
 			}
 			b, err := json.Marshal(env)
