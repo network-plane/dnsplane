@@ -43,7 +43,7 @@ const (
 )
 
 // Default release string for normal builds; RPM/DEB may override with -ldflags "-X main.appVersion=..." (see packaging/version.sh).
-var appVersion = "1.4.181"
+var appVersion = "1.4.185"
 
 var (
 	appState         = daemon.NewState()
