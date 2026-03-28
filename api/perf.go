@@ -4,6 +4,7 @@
 package api
 
 import (
+	"encoding/json"
 	"html/template"
 	"net/http"
 
@@ -28,11 +29,26 @@ func perfResetHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "Resolver perf counters reset"})
 }
 
+// buildPerfReportPayload returns the same JSON shape as GET /stats/perf (for WebSocket push).
+func buildPerfReportPayload() map[string]any {
+	rep := data.GetResolverPerfReport()
+	b, err := json.Marshal(rep)
+	if err != nil {
+		return map[string]any{"error": err.Error()}
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return map[string]any{"error": err.Error()}
+	}
+	return m
+}
+
 var perfPageTemplate = template.Must(template.New("perf").Parse(`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="dnsplane-api-token" content="">
   <title>dnsplane — Tuning</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
   <style>
@@ -66,7 +82,7 @@ var perfPageTemplate = template.Must(template.New("perf").Parse(`<!DOCTYPE html>
 </head>
 <body>
   <h1>Tuning (fast path)</h1>
-  <p class="muted">Auto-refresh every 2s · <a href="/stats/perf">JSON</a>
+  <p class="muted">Live WebSocket (<code>/stats/dashboard/ws</code>, <code>perf: true</code>) when supported, else HTTP every 2s · <a href="/stats/perf">JSON</a>
     · <button type="button" id="reset">Reset counters</button></p>
   <p id="err"></p>
   <div id="root"></div>
@@ -130,10 +146,15 @@ var perfPageTemplate = template.Must(template.New("perf").Parse(`<!DOCTYPE html>
         options: perfChartCommon()
       });
     }
-    async function load() {
-      try {
-        const r = await fetch('/stats/perf');
-        const j = await r.json();
+    var perfPollTimer = null;
+    var perfWebSocket = null;
+    function stopPerfPoll() {
+      if (perfPollTimer) {
+        clearInterval(perfPollTimer);
+        perfPollTimer = null;
+      }
+    }
+    function applyPerfPayload(j) {
         document.getElementById('err').textContent = '';
         const a = j.a_resolve || {};
         let h = '<div class="perf-row-two">';
@@ -191,9 +212,60 @@ var perfPageTemplate = template.Must(template.New("perf").Parse(`<!DOCTYPE html>
           perfUpdateHist('perf-hist-upstream', a.histogram_upstream_ms, '#d29922', 'rgba(210,153,34,0.45)');
         }
         perfUpdateHist('perf-hist-total', a.histogram_total_ms, '#58a6ff', 'rgba(88,166,255,0.45)');
+    }
+    async function load() {
+      try {
+        const r = await fetch('/stats/perf');
+        const j = await r.json();
+        applyPerfPayload(j);
       } catch (e) {
         document.getElementById('err').textContent = String(e);
       }
+    }
+    function tryStartPerfWebSocket() {
+      if (!window.WebSocket) {
+        return;
+      }
+      if (perfWebSocket && (perfWebSocket.readyState === WebSocket.CONNECTING || perfWebSocket.readyState === WebSocket.OPEN)) {
+        return;
+      }
+      var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      var u = new URL('/stats/dashboard/ws', location.href);
+      u.protocol = proto;
+      var meta = document.querySelector('meta[name="dnsplane-api-token"]');
+      var tok = meta && meta.getAttribute('content');
+      if (tok && String(tok).trim()) {
+        u.searchParams.set('access_token', String(tok).trim());
+      }
+      try {
+        perfWebSocket = new WebSocket(u.toString());
+      } catch (e) {
+        return;
+      }
+      perfWebSocket.onopen = function() {
+        stopPerfPoll();
+        try {
+          perfWebSocket.send(JSON.stringify({ op: 'sub', stats: false, resolutions: false, perf: true }));
+        } catch (e2) {}
+      };
+      perfWebSocket.onclose = function() {
+        perfWebSocket = null;
+        stopPerfPoll();
+        load();
+        perfPollTimer = setInterval(load, 2000);
+      };
+      perfWebSocket.onerror = function() {
+        try { perfWebSocket.close(); } catch (e3) {}
+      };
+      perfWebSocket.onmessage = function(ev) {
+        try {
+          var msg = JSON.parse(ev.data);
+          if (msg.v !== 1 || !msg.perf) {
+            return;
+          }
+          applyPerfPayload(msg.perf);
+        } catch (ex) {}
+      };
     }
     document.getElementById('reset').onclick = async function() {
       try {
@@ -206,7 +278,8 @@ var perfPageTemplate = template.Must(template.New("perf").Parse(`<!DOCTYPE html>
       }
     };
     load();
-    setInterval(load, 2000);
+    perfPollTimer = setInterval(load, 2000);
+    tryStartPerfWebSocket();
   </script>
 </body>
 </html>

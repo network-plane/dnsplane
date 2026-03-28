@@ -18,12 +18,17 @@ func dashboardResolutionsHandler(w http.ResponseWriter, r *http.Request) {
 	if !requireStatsHTMLPage(w, r, data.StatsDashboardHTMLEnabled()) {
 		return
 	}
+	writeJSON(w, http.StatusOK, buildDashboardResolutionsPayload())
+}
+
+// buildDashboardResolutionsPayload returns the same JSON object as GET /stats/dashboard/resolutions.
+func buildDashboardResolutionsPayload() map[string]any {
 	list := data.GetDashboardLogNewestFirst(data.DashboardLogCap())
-	writeJSON(w, http.StatusOK, map[string]any{
+	return map[string]any{
 		"cap":         data.DashboardLogCap(),
 		"count":       len(list),
 		"resolutions": list,
-	})
+	}
 }
 
 // dashboardResolutionsPurgeHandler clears the in-memory dashboard resolution log (same store as GET /stats/dashboard/resolutions).

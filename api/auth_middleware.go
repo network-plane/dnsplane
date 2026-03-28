@@ -45,7 +45,11 @@ func apiAuthExempt(r *http.Request) bool {
 		return false
 	}
 	p := path.Clean("/" + strings.TrimPrefix(r.URL.Path, "/"))
-	return p == "/health" || p == "/ready"
+	if p == "/health" || p == "/ready" {
+		return true
+	}
+	// WebSocket upgrade cannot send Authorization from browsers; auth runs in dashboardWebSocketHandler.
+	return p == "/stats/dashboard/ws"
 }
 
 func apiRequestAuthorized(r *http.Request, want string) bool {

@@ -33,6 +33,12 @@ func TestDashboardPageHandler(t *testing.T) {
 	if !strings.Contains(body, `id="res-purge"`) {
 		t.Fatal("expected purge button on resolutions log view")
 	}
+	if !strings.Contains(body, "/stats/dashboard/ws") {
+		t.Fatal("expected dashboard WebSocket URL in client script")
+	}
+	if !strings.Contains(body, `id="ws-status"`) {
+		t.Fatal("expected WebSocket status element")
+	}
 }
 
 func TestDashboardResolutionsHandler(t *testing.T) {
