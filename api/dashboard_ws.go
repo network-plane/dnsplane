@@ -86,7 +86,7 @@ func dashboardWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	if !data.StatsDashboardHTMLEnabled() && !data.StatsPerfPageHTMLEnabled() {
+	if !data.StatsDashboardHTMLEnabled() {
 		http.NotFound(w, r)
 		return
 	}
@@ -182,7 +182,7 @@ func dashboardWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 			if wantRes && data.StatsDashboardHTMLEnabled() {
 				env["resolutions"] = buildDashboardResolutionsPayload()
 			}
-			if wantPerf && data.StatsDashboardHTMLEnabled() {
+			if wantPerf {
 				env["perf"] = buildPerfReportPayload()
 			}
 			b, err := json.Marshal(env)

@@ -14,12 +14,12 @@ func TestStatsHTMLGates_NoConfig(t *testing.T) {
 	if instance != nil {
 		t.Skip("resolver already initialised")
 	}
-	if !StatsPerfPageHTMLEnabled() || !StatsDashboardHTMLEnabled() {
-		t.Fatal("expected perf and dashboard HTML gates true when instance and configState nil")
+	if !StatsDashboardHTMLEnabled() {
+		t.Fatal("expected dashboard HTML gate true when instance and configState nil")
 	}
 }
 
-func TestStatsPerfPageHTMLEnabled_FromConfigState(t *testing.T) {
+func TestStatsDashboardHTMLEnabled_FromConfigState(t *testing.T) {
 	if instance != nil {
 		t.Skip("resolver instance already initialised; configState path not tested")
 	}
@@ -30,8 +30,7 @@ func TestStatsPerfPageHTMLEnabled_FromConfigState(t *testing.T) {
 			FileLocations: config.FileLocations{
 				DNSServerFile: filepath.Join(dir, "dnsservers.json"),
 			},
-			StatsPerfPageEnabled:  false,
-			StatsDashboardEnabled: true,
+			StatsDashboardEnabled: false,
 		},
 	}
 	SetConfig(loaded)
@@ -41,10 +40,7 @@ func TestStatsPerfPageHTMLEnabled_FromConfigState(t *testing.T) {
 		configStateMu.Unlock()
 	})
 
-	if StatsPerfPageHTMLEnabled() {
-		t.Fatal("expected perf page disabled from config")
-	}
-	if !StatsDashboardHTMLEnabled() {
-		t.Fatal("expected dashboard enabled")
+	if StatsDashboardHTMLEnabled() {
+		t.Fatal("expected dashboard disabled from config")
 	}
 }

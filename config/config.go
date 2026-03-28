@@ -181,8 +181,6 @@ type Config struct {
 	CacheCompactEnabled bool `json:"cache_compact_enabled,omitempty"`
 	// CacheCompactIntervalSeconds is seconds between compaction passes. Default 1800 (30 minutes). Minimum 60 when enabled.
 	CacheCompactIntervalSeconds int `json:"cache_compact_interval_seconds,omitempty"`
-	// StatsPerfPageEnabled serves GET /stats/perf/page (HTML). Default true.
-	StatsPerfPageEnabled bool `json:"stats_perf_page_enabled,omitempty"`
 	// StatsDashboardEnabled serves GET /stats/dashboard and /stats/dashboard/data. Default true.
 	StatsDashboardEnabled bool `json:"stats_dashboard_enabled,omitempty"`
 	// DashboardResolutionLogCap is how many recent DNS resolutions are kept in memory for the dashboard log (newest retained). Default 1000. Max 1000000.
@@ -442,7 +440,6 @@ func defaultConfig(baseDir string) *Config {
 		CacheWarmIntervalSeconds:    10,
 		CacheCompactEnabled:         true,
 		CacheCompactIntervalSeconds: 1800,
-		StatsPerfPageEnabled:        true,
 		StatsDashboardEnabled:       true,
 		DashboardResolutionLogCap:   1000,
 		PrettyJSON:                  false,
@@ -801,9 +798,6 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 	if r, ok := raw["cache_compact_interval_seconds"]; ok {
 		_ = json.Unmarshal(r, &c.CacheCompactIntervalSeconds)
 	}
-	if r, ok := raw["stats_perf_page_enabled"]; ok {
-		_ = json.Unmarshal(r, &c.StatsPerfPageEnabled)
-	}
 	if r, ok := raw["stats_dashboard_enabled"]; ok {
 		_ = json.Unmarshal(r, &c.StatsDashboardEnabled)
 	}
@@ -837,9 +831,6 @@ func (c *Config) UnmarshalJSON(data []byte) error {
 		c.CacheCompactIntervalSeconds = 1800
 	}
 	// Opt-out HTML stats UIs: default true when keys are absent (legacy configs).
-	if _, ok := raw["stats_perf_page_enabled"]; !ok {
-		c.StatsPerfPageEnabled = true
-	}
 	if _, ok := raw["stats_dashboard_enabled"]; !ok {
 		c.StatsDashboardEnabled = true
 	}
