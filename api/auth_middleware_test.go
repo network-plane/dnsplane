@@ -34,6 +34,9 @@ func TestApiAuthExempt(t *testing.T) {
 	if apiAuthExempt(httptest.NewRequest(http.MethodGet, "/dns/records", nil)) {
 		t.Fatal("GET /dns/records not exempt")
 	}
+	if !apiAuthExempt(httptest.NewRequest(http.MethodGet, "/stats/dashboard/ws", nil)) {
+		t.Fatal("GET /stats/dashboard/ws exempt for handshake auth in handler")
+	}
 }
 
 func TestApiRequestAuthorized(t *testing.T) {

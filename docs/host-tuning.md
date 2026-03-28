@@ -44,9 +44,9 @@ Usually leave `GOMAXPROCS` default. Pinning CPUs rarely helps unless you have me
 
 ## Benchmarking dnsplane (after host or code changes)
 
-1. `POST /stats/perf/reset` (or use the button on the perf HTML page) to zero counters.
+1. `POST /stats/perf/reset` (or use **Tuning** → Reset counters in the dashboard) to zero counters.
 2. Run your steady query load (e.g. `dig` loop or `dnsperf`) for a few minutes.
-3. `GET /stats/perf` (JSON) or open the perf page: compare **`avg_prep_ms`**, **`avg_total_ms`**, and histograms; use **`by_query_type`** to see A vs AAAA vs other types.
+3. `GET /stats/perf` (JSON) or open **Tuning** in the dashboard: compare **`avg_prep_ms`**, **`avg_total_ms`**, and histograms; use **`by_query_type`** to see A vs AAAA vs other types.
 4. Repeat with the same workload after sysctl/governor changes so comparisons are fair.
 
 ## macOS / Windows

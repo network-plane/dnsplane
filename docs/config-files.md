@@ -187,8 +187,7 @@ See **[dnsplane.example.json](dnsplane.example.json)** for every key and default
 
 | Key | Meaning |
 | --- | --- |
-| `stats_perf_page_enabled` | HTML `/stats/perf/page` (default on). |
-| `stats_dashboard_enabled` | `/stats/dashboard`, `/stats/dashboard/data`, and `/stats/dashboard/resolutions` (default on). |
+| `stats_dashboard_enabled` | `/stats/dashboard` (HTML UI including **Tuning**), `/stats/dashboard/data`, `/stats/dashboard/resolutions`, and `/stats/dashboard/ws` (default on). |
 | `dashboard_resolution_log_cap` | How many recent DNS resolutions are kept **in memory** for the dashboard **Log** view (default `1000`; max `1000000`). Not persisted; lost on restart. |
 | `full_stats`, `full_stats_dir` | Optional aggregated stats DB + TUI `statistics` commands. |
 | `pprof_enabled` | **Default `false`.** If `true`, exposes runtime profiling over HTTP (Go pprof: CPU, heap, etc.). |
@@ -238,12 +237,11 @@ Enable the REST API with `"api": true` in `dnsplane.json` and set `apiport` (e.g
 | GET | `/dns/upstreams/health` | Same health slice and check settings without full server config. See [upstream-health.md](upstream-health.md). |
 | GET | `/stats` | Resolver stats as JSON: `session` / `total` scopes with resolver counters; top-level **`build`** (`version`, `go_version`, `os`, `arch`). When `full_stats` is enabled in config, includes `full_stats.enabled`, `full_stats.requesters_count`, `full_stats.domains_count`. |
 | GET | `/metrics` | Prometheus text format: counters and gauges (queries, cache hits, blocks, process uptime, etc.). With `full_stats` enabled, adds full-stats gauges. Histogram **`dnsplane_dns_resolve_duration_seconds`** reports resolve latency by QTYPE (same breakdown as `/stats/perf`). |
-| GET | `/stats/dashboard` | Live HTML UI: **Status** (listeners + feature flags), **Statistics** (rates, charts, full_stats top 10, activity log), **Log** (recent resolutions), **Historical** (full_stats), plus nav links for embedded **Tuning** (perf), **Metrics**, **Version**. **404** if `stats_dashboard_enabled` is false (default is on). |
+| GET | `/stats/dashboard` | Live HTML UI: **Status** (listeners + feature flags), **Statistics** (rates, charts, full_stats top 10, activity log), **Log** (recent resolutions), **Historical** (full_stats), **Tuning** (fast-path perf histograms), plus embedded **Version**. **404** if `stats_dashboard_enabled` is false (default is on). |
 | GET | `/stats/dashboard/data` | JSON backing the dashboard (`counters`, `perf`, `summary`, **`status`**, `series`, `log`, **`per_sec_rates`**, **`fullstats`** / **`fullstats_top`** when `full_stats` is on). **404** if `stats_dashboard_enabled` is false. |
 | GET | `/stats/dashboard/resolutions` | JSON for the dashboard **Log** (resolutions): `cap` (matches `dashboard_resolution_log_cap`), `count`, `resolutions` (newest first; client IP, query, type, outcome, upstream, reply, `duration_ms`, time). **404** if `stats_dashboard_enabled` is false. |
 | POST | `/stats/dashboard/resolutions/purge` | Clears the in-memory resolution log (same data as the dashboard **Log** and main dashboard activity list). **404** if `stats_dashboard_enabled` is false. |
-| GET | `/stats/perf` | JSON performance breakdown: outcomes (local/cache/upstream/none) and histograms for cache-only vs upstream paths. Prefer cache-only vs upstream histograms for tuning; the combined total histogram mixes both. Reset with `POST /stats/perf/reset`. |
-| GET | `/stats/perf/page` | HTML view of `/stats/perf` (auto-refresh, reset button). **404** if `stats_perf_page_enabled` is false (default is on). |
+| GET | `/stats/perf` | JSON performance breakdown: outcomes (local/cache/upstream/none) and histograms for cache-only vs upstream paths. Prefer cache-only vs upstream histograms for tuning; the combined total histogram mixes both. Reset with `POST /stats/perf/reset`. The dashboard **Tuning** view shows the same data. |
 | POST | `/stats/perf/reset` | Clears A-record performance counters (use before measuring latency). |
 
 ### curl examples (upstream health)

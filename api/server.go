@@ -229,12 +229,12 @@ func RegisterDNSRoutes(router chi.Router) {
 	router.Get("/stats/dashboard", dashboardPageHandler)
 	router.Get("/stats/dashboard/icon", dashboardIconSVGHandler)
 	router.Get("/stats/dashboard/data", dashboardDataHandler)
+	router.Get("/stats/dashboard/ws", dashboardWebSocketHandler)
 	router.Get("/stats/dashboard/resolutions", dashboardResolutionsHandler)
 	router.Post("/stats/dashboard/resolutions/purge", dashboardResolutionsPurgeHandler)
 	router.Get("/stats/dashboard/fullstats/data", fullstatsBrowseHandler)
 	router.Get("/stats/perf", perfStatsHandler)
 	router.Post("/stats/perf/reset", perfResetHandler)
-	router.Get("/stats/perf/page", perfPageHandler)
 }
 
 // healthHandler returns 200 when the API is up. No dependency on DNS listener.
