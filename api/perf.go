@@ -82,7 +82,7 @@ var perfPageTemplate = template.Must(template.New("perf").Parse(`<!DOCTYPE html>
 </head>
 <body>
   <h1>Tuning (fast path)</h1>
-  <p class="muted">Updates are pushed in real time over WebSocket. If WebSocket is unavailable or disconnects, this page falls back to HTTP refresh every 2s. · <a href="/stats/perf">JSON</a>
+  <p class="muted"><span id="perf-updates-mode" aria-live="polite">Updates: 2s</span> · <a href="/stats/perf">JSON</a>
     · <button type="button" id="reset">Reset counters</button></p>
   <p id="err"></p>
   <div id="root"></div>
@@ -148,6 +148,10 @@ var perfPageTemplate = template.Must(template.New("perf").Parse(`<!DOCTYPE html>
     }
     var perfPollTimer = null;
     var perfWebSocket = null;
+    function setPerfUpdatesLabel(ws) {
+      var el = document.getElementById('perf-updates-mode');
+      if (el) el.textContent = ws ? 'Updates: WS' : 'Updates: 2s';
+    }
     function stopPerfPoll() {
       if (perfPollTimer) {
         clearInterval(perfPollTimer);
@@ -224,6 +228,7 @@ var perfPageTemplate = template.Must(template.New("perf").Parse(`<!DOCTYPE html>
     }
     function tryStartPerfWebSocket() {
       if (!window.WebSocket) {
+        setPerfUpdatesLabel(false);
         return;
       }
       if (perfWebSocket && (perfWebSocket.readyState === WebSocket.CONNECTING || perfWebSocket.readyState === WebSocket.OPEN)) {
@@ -240,16 +245,20 @@ var perfPageTemplate = template.Must(template.New("perf").Parse(`<!DOCTYPE html>
       try {
         perfWebSocket = new WebSocket(u.toString());
       } catch (e) {
+        setPerfUpdatesLabel(false);
         return;
       }
+      setPerfUpdatesLabel(false);
       perfWebSocket.onopen = function() {
         stopPerfPoll();
+        setPerfUpdatesLabel(true);
         try {
           perfWebSocket.send(JSON.stringify({ op: 'sub', stats: false, resolutions: false, perf: true }));
         } catch (e2) {}
       };
       perfWebSocket.onclose = function() {
         perfWebSocket = null;
+        setPerfUpdatesLabel(false);
         stopPerfPoll();
         load();
         perfPollTimer = setInterval(load, 2000);

@@ -955,10 +955,10 @@ const dashboardHTML = `<!DOCTYPE html>
     </aside>
     <main class="main-shell">
       <div id="err" class="err"></div>
-      <div id="ws-status" class="ws-status" aria-live="polite"></div>
+      <div id="ws-status" class="ws-status" aria-live="polite">Updates: 2s</div>
       <div id="view-status">
         <h1>Status</h1>
-        <p class="muted-link" style="margin:-0.5rem 0 1rem 0">Listeners, readiness, and feature flags · real-time WebSocket; HTTP every 2s only if WebSocket fails · <a href="/stats/dashboard/data">JSON</a></p>
+        <p class="muted-link" style="margin:-0.5rem 0 1rem 0">Listeners, readiness, and feature flags · <a href="/stats/dashboard/data">JSON</a></p>
 
         <div class="dashboard-section">
           <h2 class="section-kicker">§Ic:sec_status§Core</h2>
@@ -1007,7 +1007,7 @@ const dashboardHTML = `<!DOCTYPE html>
 
       <div id="view-dashboard" class="hidden">
         <h1>Statistics</h1>
-        <p class="muted-link" style="margin:-0.5rem 0 1rem 0">Counters, charts, and activity · real-time WebSocket; HTTP every 2s only if WebSocket fails · <a href="/stats/dashboard/data">JSON</a></p>
+        <p class="muted-link" style="margin:-0.5rem 0 1rem 0">Counters, charts, and activity · <a href="/stats/dashboard/data">JSON</a></p>
 
         <div class="dashboard-section">
           <h2 class="section-kicker">§Ic:sec_rates§Live rates</h2>
@@ -1139,7 +1139,7 @@ const dashboardHTML = `<!DOCTYPE html>
       <div id="view-resolutions" class="hidden">
         <h1>Log</h1>
         <p class="res-note">This list is <strong>in memory only</strong> (last <span id="res-cap-note">1000</span> queries, newest first). It is lost on process restart and is not written to disk.</p>
-        <p class="muted-link" style="margin:-0.5rem 0 1rem 0"><a href="/stats/dashboard/resolutions" target="_blank" rel="noopener">JSON</a> · real-time WebSocket; HTTP every 2s only if WebSocket fails</p>
+        <p class="muted-link" style="margin:-0.5rem 0 1rem 0"><a href="/stats/dashboard/resolutions" target="_blank" rel="noopener">JSON</a></p>
         <div class="res-toolbar">
           <label>Source IP <input type="search" id="res-in-ip" placeholder="Partial match" autocomplete="off" spellcheck="false" aria-label="Filter by source IP"></label>
           <label>Type <input type="search" id="res-in-qtype" placeholder="e.g. A, AAAA" autocomplete="off" spellcheck="false" aria-label="Filter by query type"></label>
@@ -1264,6 +1264,13 @@ const dashboardHTML = `<!DOCTYPE html>
       var el = document.getElementById('ws-status');
       if (el) el.textContent = text || '';
     }
+    function syncDashboardUpdatesLabel() {
+      if (dashboardWebSocket && dashboardWebSocket.readyState === 1) {
+        setWsStreamStatus('Updates: WS');
+      } else {
+        setWsStreamStatus('Updates: 2s');
+      }
+    }
     function stopDashboardPollOnly() {
       if (dashboardTimer) {
         clearInterval(dashboardTimer);
@@ -1292,7 +1299,7 @@ const dashboardHTML = `<!DOCTYPE html>
     }
     function tryStartDashboardWebSocket() {
       if (!window.WebSocket) {
-        setWsStreamStatus('Polling (HTTP · no WebSocket)');
+        syncDashboardUpdatesLabel();
         return;
       }
       if (dashboardWebSocket && (dashboardWebSocket.readyState === WebSocket.CONNECTING || dashboardWebSocket.readyState === WebSocket.OPEN)) {
@@ -1309,21 +1316,22 @@ const dashboardHTML = `<!DOCTYPE html>
       try {
         dashboardWebSocket = new WebSocket(u.toString());
       } catch (e) {
-        setWsStreamStatus('Polling (HTTP)');
+        syncDashboardUpdatesLabel();
         return;
       }
+      syncDashboardUpdatesLabel();
       dashboardWebSocket.onopen = function() {
-        setWsStreamStatus('Live (WebSocket)');
         stopDashboardPollOnly();
         stopResolutionsRefresh();
         notifyDashboardWSSubscription();
         if (!document.getElementById('view-resolutions').classList.contains('hidden')) {
           loadResolutionsData();
         }
+        syncDashboardUpdatesLabel();
       };
       dashboardWebSocket.onclose = function() {
         dashboardWebSocket = null;
-        setWsStreamStatus('Polling (HTTP)');
+        syncDashboardUpdatesLabel();
         var st = !document.getElementById('view-status').classList.contains('hidden');
         var da = !document.getElementById('view-dashboard').classList.contains('hidden');
         var lo = !document.getElementById('view-resolutions').classList.contains('hidden');
@@ -1404,6 +1412,7 @@ const dashboardHTML = `<!DOCTYPE html>
       resolutionsTimer = setInterval(loadResolutionsData, 2000);
       tryStartDashboardWebSocket();
       notifyDashboardWSSubscription();
+      syncDashboardUpdatesLabel();
     }
     function resSubMatch(hay, needle) {
       if (!needle || !String(needle).trim()) return true;
@@ -1634,6 +1643,7 @@ const dashboardHTML = `<!DOCTYPE html>
       dashboardTimer = setInterval(load, 2000);
       tryStartDashboardWebSocket();
       notifyDashboardWSSubscription();
+      syncDashboardUpdatesLabel();
     }
     function setActiveNav(el) {
       document.querySelectorAll('aside nav a').forEach(function(a) {
