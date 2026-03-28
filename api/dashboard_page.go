@@ -958,7 +958,7 @@ const dashboardHTML = `<!DOCTYPE html>
       <div id="ws-status" class="ws-status" aria-live="polite"></div>
       <div id="view-status">
         <h1>Status</h1>
-        <p class="muted-link" style="margin:-0.5rem 0 1rem 0">Listeners, readiness, and feature flags · live WebSocket when supported, else HTTP every 2s · <a href="/stats/dashboard/data">JSON</a></p>
+        <p class="muted-link" style="margin:-0.5rem 0 1rem 0">Listeners, readiness, and feature flags · real-time WebSocket; HTTP every 2s only if WebSocket fails · <a href="/stats/dashboard/data">JSON</a></p>
 
         <div class="dashboard-section">
           <h2 class="section-kicker">§Ic:sec_status§Core</h2>
@@ -1007,7 +1007,7 @@ const dashboardHTML = `<!DOCTYPE html>
 
       <div id="view-dashboard" class="hidden">
         <h1>Statistics</h1>
-        <p class="muted-link" style="margin:-0.5rem 0 1rem 0">Counters, charts, and activity · live WebSocket when supported, else HTTP every 2s · <a href="/stats/dashboard/data">JSON</a></p>
+        <p class="muted-link" style="margin:-0.5rem 0 1rem 0">Counters, charts, and activity · real-time WebSocket; HTTP every 2s only if WebSocket fails · <a href="/stats/dashboard/data">JSON</a></p>
 
         <div class="dashboard-section">
           <h2 class="section-kicker">§Ic:sec_rates§Live rates</h2>
@@ -1139,7 +1139,7 @@ const dashboardHTML = `<!DOCTYPE html>
       <div id="view-resolutions" class="hidden">
         <h1>Log</h1>
         <p class="res-note">This list is <strong>in memory only</strong> (last <span id="res-cap-note">1000</span> queries, newest first). It is lost on process restart and is not written to disk.</p>
-        <p class="muted-link" style="margin:-0.5rem 0 1rem 0"><a href="/stats/dashboard/resolutions" target="_blank" rel="noopener">JSON</a> · live WebSocket when supported, else HTTP every 2s</p>
+        <p class="muted-link" style="margin:-0.5rem 0 1rem 0"><a href="/stats/dashboard/resolutions" target="_blank" rel="noopener">JSON</a> · real-time WebSocket; HTTP every 2s only if WebSocket fails</p>
         <div class="res-toolbar">
           <label>Source IP <input type="search" id="res-in-ip" placeholder="Partial match" autocomplete="off" spellcheck="false" aria-label="Filter by source IP"></label>
           <label>Type <input type="search" id="res-in-qtype" placeholder="e.g. A, AAAA" autocomplete="off" spellcheck="false" aria-label="Filter by query type"></label>

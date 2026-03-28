@@ -82,7 +82,7 @@ var perfPageTemplate = template.Must(template.New("perf").Parse(`<!DOCTYPE html>
 </head>
 <body>
   <h1>Tuning (fast path)</h1>
-  <p class="muted">Live WebSocket (<code>/stats/dashboard/ws</code>, <code>perf: true</code>) when supported, else HTTP every 2s · <a href="/stats/perf">JSON</a>
+  <p class="muted">Updates are pushed in real time over WebSocket. If WebSocket is unavailable or disconnects, this page falls back to HTTP refresh every 2s. · <a href="/stats/perf">JSON</a>
     · <button type="button" id="reset">Reset counters</button></p>
   <p id="err"></p>
   <div id="root"></div>
