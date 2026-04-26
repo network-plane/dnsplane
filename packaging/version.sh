@@ -1,8 +1,30 @@
 #!/usr/bin/env bash
 # Emit dnsplane version parts for RPM/DEB/CI. FULL = BASE-SHORTSHA (e.g. 1.4.175-d977f1b).
+# Go version: ./packaging/version.sh go → from go.mod (toolchain line, else "go" directive).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Effective Go version for builds (toolchain line wins, else "go" directive). Matches go.mod only.
+go_mod_go_version() {
+	awk '
+		/^toolchain go/ {
+			t = $2
+			sub(/^go/, "", t)
+			print t
+			exit
+		}
+		/^go[ \t]/ { g = $2 }
+		END {
+			if (g != "") {
+				print g
+				exit
+			}
+			print "go.mod: missing go directive" > "/dev/stderr"
+			exit 1
+		}
+	' "$ROOT/go.mod"
+}
 
 short_sha() {
 	# GitHub Actions container checkouts often have no .git; use workflow commit SHA.
@@ -55,6 +77,7 @@ base_version() {
 SHORTSHA="$(short_sha)"
 BASE="$(base_version)"
 FULL="${BASE}-${SHORTSHA}"
+GO_MOD="$(go_mod_go_version)"
 
 cmd="${1:-export}"
 case "$cmd" in
@@ -62,12 +85,14 @@ export)
 	printf "export DNSPLANE_VERSION_BASE=%q\n" "$BASE"
 	printf "export DNSPLANE_GIT_SHORT=%q\n" "$SHORTSHA"
 	printf "export DNSPLANE_VERSION_FULL=%q\n" "$FULL"
+	printf "export DNSPLANE_GO_MOD=%q\n" "$GO_MOD"
 	;;
 base) echo "$BASE" ;;
 short | sha) echo "$SHORTSHA" ;;
 full) echo "$FULL" ;;
+go) echo "$GO_MOD" ;;
 *)
-	echo "usage: $0 {export|base|short|full}" >&2
+	echo "usage: $0 {export|base|short|full|go}" >&2
 	exit 1
 	;;
 esac

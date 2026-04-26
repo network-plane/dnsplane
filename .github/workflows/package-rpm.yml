@@ -44,7 +44,9 @@ jobs:
 
       - name: Install RPM build tools
         run: |
-          dnf install -y rpm-build git systemd-rpm-macros
+          # rpmbuild checks BuildRequires against installed RPMs; distro golang
+          # satisfies the spec. setup-go prepends a newer go to PATH for %build.
+          dnf install -y rpm-build git systemd-rpm-macros golang
 
       - name: Build RPMs
         run: |
@@ -57,7 +59,8 @@ jobs:
           cp packaging/dnsplane.spec "${HOME}/rpmbuild/SPECS/"
           rpmbuild -ba "${HOME}/rpmbuild/SPECS/dnsplane.spec" \
             --define "dnsplane_base ${DNSPLANE_VERSION_BASE}" \
-            --define "dnsplane_short ${DNSPLANE_GIT_SHORT}"
+            --define "dnsplane_short ${DNSPLANE_GIT_SHORT}" \
+            --define "dnsplane_go_min ${DNSPLANE_GO_MOD}"
           mkdir -p "${GITHUB_WORKSPACE}/rpm-artifacts"
           shopt -s nullglob
           for f in "${HOME}/rpmbuild/RPMS"/*/*.rpm "${HOME}/rpmbuild/SRPMS"/*.src.rpm; do

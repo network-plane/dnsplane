@@ -3,6 +3,7 @@ Section: net
 Priority: optional
 Maintainer: dnsplane packagers <dnsplane@users.noreply.github.com>
 Rules-Requires-Root: no
+# Minimum Go matches go.mod (toolchain / go line); install a new enough golang before debuild.
 Build-Depends: debhelper-compat (= 13), golang-go
 Standards-Version: 4.6.2
 Homepage: https://github.com/network-plane/dnsplane
