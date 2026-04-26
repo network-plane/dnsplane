@@ -10,6 +10,8 @@ import (
 	"dnsplane/config"
 
 	"github.com/miekg/dns"
+
+	"dnsplane/safecast"
 )
 
 // Outcome values for metrics/logging.
@@ -87,7 +89,7 @@ func rrsigTimeValid(sig *dns.RRSIG, now time.Time) bool {
 	if sig == nil {
 		return false
 	}
-	now32 := uint32(now.Unix())
+	now32 := safecast.UnixSecondsToDNSUint32(now.Unix())
 	return sig.Inception <= now32 && now32 <= sig.Expiration
 }
 

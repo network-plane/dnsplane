@@ -16,6 +16,7 @@ import (
 	"dnsplane/cliutil"
 	"dnsplane/converters"
 	"dnsplane/ipvalidator"
+	"dnsplane/safecast"
 
 	"github.com/miekg/dns"
 )
@@ -70,8 +71,9 @@ func NewRecordID() string {
 	if _, err := io.ReadFull(rand.Reader, b[:]); err != nil {
 		// Unlikely; still produce a distinct value.
 		now := time.Now().UnixNano()
+		u := safecast.NonNegativeInt64ToUint64(now)
 		for i := 0; i < 8; i++ {
-			b[i] = byte(now >> (8 * i))
+			b[i] = byte(u>>(8*i)) & 0xff // #nosec G115 -- low bytes of fallback entropy only
 		}
 		_, _ = rand.Read(b[8:])
 	}

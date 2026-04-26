@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"dnsplane/safecast"
 )
 
 // A-query resolve outcomes (IPv4 parallel path in resolver).
@@ -135,7 +137,7 @@ func RecordResolverAResolve(outcome int, totalNs, prepNs, maxUpstreamNs, upstrea
 		perfOutcomeUpstream.Add(1)
 		perfSumMaxUpstreamNs.Add(maxUpstreamNs)
 		perfSumUpstreamWaitNs.Add(upstreamWaitNs)
-		perfUpstreamCountSum.Add(uint64(upstreamServers))
+		perfUpstreamCountSum.Add(safecast.NonNegativeIntToUint64(upstreamServers))
 	case PerfOutcomeNone:
 		perfOutcomeNone.Add(1)
 	}
