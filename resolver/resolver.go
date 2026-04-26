@@ -21,6 +21,7 @@ import (
 	"dnsplane/dnssecsign"
 	"dnsplane/dnssecvalidate"
 	"dnsplane/dnsservers"
+	"dnsplane/safecast"
 )
 
 // ErrorLogger logs errors (e.g. conversion failures). Optional.
@@ -168,7 +169,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 		if handled {
 			if len(loc) > 0 {
 				r.processCachedRecords(ctx, question, loc, response)
-				prep := uint64(time.Since(t0))
+				prep := safecast.DurationToUint64(time.Since(t0))
 				data.RecordResolverAResolve(data.PerfOutcomeLocal, prep, prep, 0, 0, 0, qtypeKey)
 				r.observeQuery(ctx, question, "local", "", rrOneLine(loc[0]), t0)
 				return
@@ -176,22 +177,22 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 			if len(crs) > 0 {
 				r.store.IncrementCacheHits()
 				r.processCachedUpstreamRRs(question, crs, response)
-				prep := uint64(time.Since(t0))
+				prep := safecast.DurationToUint64(time.Since(t0))
 				data.RecordResolverAResolve(data.PerfOutcomeCache, prep, prep, 0, 0, 0, qtypeKey)
 				r.observeQuery(ctx, question, "cache", "", rrOneLine(crs[0]), t0)
 				if isStale {
-					go r.backgroundRefresh(question)
+					go r.backgroundRefresh(context.WithoutCancel(ctx), question)
 				}
 				return
 			}
 			if crr != nil {
 				r.store.IncrementCacheHits()
 				r.processCacheRecord(question, crr, response)
-				prep := uint64(time.Since(t0))
+				prep := safecast.DurationToUint64(time.Since(t0))
 				data.RecordResolverAResolve(data.PerfOutcomeCache, prep, prep, 0, 0, 0, qtypeKey)
 				r.observeQuery(ctx, question, "cache", "", rrOneLine(*crr), t0)
 				if isStale {
-					go r.backgroundRefresh(question)
+					go r.backgroundRefresh(context.WithoutCancel(ctx), question)
 				}
 				return
 			}
@@ -203,7 +204,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 		if loc := builtinLocalhostRRs(question); len(loc) > 0 {
 			response.Answer = append(response.Answer, loc...)
 			response.Rcode = dns.RcodeSuccess
-			prep := uint64(time.Since(t0))
+			prep := safecast.DurationToUint64(time.Since(t0))
 			data.RecordResolverAResolve(data.PerfOutcomeLocal, prep, prep, 0, 0, 0, qtypeKey)
 			r.observeQuery(ctx, question, "local", "", rrOneLine(loc[0]), t0)
 			return
@@ -312,7 +313,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 		switch pr.kind {
 		case parKindLocal:
 			localDone = true
-			localNs = uint64(pr.elapsed)
+			localNs = safecast.DurationToUint64(pr.elapsed)
 			if len(pr.local) > 0 {
 				cancel()
 				r.processCachedRecords(ctx, question, pr.local, response)
@@ -320,20 +321,20 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 				if cacheDone && cacheNs > prep {
 					prep = cacheNs
 				}
-				recordPerf(data.PerfOutcomeLocal, uint64(time.Since(t0)), prep, 0, 0)
+				recordPerf(data.PerfOutcomeLocal, safecast.DurationToUint64(time.Since(t0)), prep, 0, 0)
 				r.observeQuery(ctx, question, "local", "", rrOneLine(pr.local[0]), t0)
 				return
 			}
 		case parKindCache:
 			cacheDone = true
-			cacheNs = uint64(pr.elapsed)
+			cacheNs = safecast.DurationToUint64(pr.elapsed)
 			if pr.cache != nil {
 				cacheHit = pr.cache
 			}
 		case parKindUpstream:
 			upstreamSeen++
-			if uint64(pr.elapsed) > maxUpNs {
-				maxUpNs = uint64(pr.elapsed)
+			if safecast.DurationToUint64(pr.elapsed) > maxUpNs {
+				maxUpNs = safecast.DurationToUint64(pr.elapsed)
 			}
 			if pr.up != nil && pr.up.err == nil && pr.up.msg != nil &&
 				pr.up.msg.Rcode == dns.RcodeSuccess && len(pr.up.msg.Answer) > 0 {
@@ -357,7 +358,7 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 			r.store.IncrementCacheHits()
 			r.processCacheRecord(question, cacheHit, response)
 			p := prepNs()
-			recordPerf(data.PerfOutcomeCache, uint64(time.Since(t0)), p, maxUpNs, 0)
+			recordPerf(data.PerfOutcomeCache, safecast.DurationToUint64(time.Since(t0)), p, maxUpNs, 0)
 			r.observeQuery(ctx, question, "cache", "", rrOneLine(*cacheHit), t0)
 			return
 		}
@@ -370,14 +371,14 @@ func (r *Resolver) resolveFastPath(ctx context.Context, question dns.Question, r
 			if maxUpNs > p {
 				w = maxUpNs - p
 			}
-			recordPerf(data.PerfOutcomeUpstream, uint64(time.Since(t0)), p, maxUpNs, w)
+			recordPerf(data.PerfOutcomeUpstream, safecast.DurationToUint64(time.Since(t0)), p, maxUpNs, w)
 			r.observeQuery(ctx, question, "upstream", firstUp.endpoint.HealthKey(), firstAnswerSummary(firstUp.msg), t0)
 			return
 		}
 		if localDone && cacheDone && cacheHit == nil && upstreamSeen == upstreamTotal && firstUp == nil {
 			cancel()
 			r.log("Query: %s, No response\n", question.Name)
-			recordPerf(data.PerfOutcomeNone, uint64(time.Since(t0)), prepNs(), maxUpNs, 0)
+			recordPerf(data.PerfOutcomeNone, safecast.DurationToUint64(time.Since(t0)), prepNs(), maxUpNs, 0)
 			r.observeQuery(ctx, question, "none", "", "no answer", t0)
 			return
 		}
@@ -488,7 +489,7 @@ func cacheSyntheticRRSetAnswer(store Store, question dns.Question, answer []dns.
 	if !settings.CacheRecords {
 		return
 	}
-	minTTL := uint32(settings.MinCacheTTLSeconds)
+	minTTL := safecast.IntToUint32Clamp(settings.MinCacheTTLSeconds)
 	if settings.MinCacheTTLSeconds == 0 {
 		minTTL = 600
 	}
@@ -557,7 +558,7 @@ func cacheDNSResponse(store Store, rrs []dns.RR) {
 	if !settings.CacheRecords {
 		return
 	}
-	minTTL := uint32(settings.MinCacheTTLSeconds)
+	minTTL := safecast.IntToUint32Clamp(settings.MinCacheTTLSeconds)
 	if settings.MinCacheTTLSeconds == 0 {
 		minTTL = 600
 	}
@@ -570,7 +571,7 @@ func cacheDNSResponse(store Store, rrs []dns.RR) {
 }
 
 // backgroundRefresh queries upstream for a stale cache entry and updates the cache.
-func (r *Resolver) backgroundRefresh(question dns.Question) {
+func (r *Resolver) backgroundRefresh(detachCtx context.Context, question dns.Question) {
 	if r == nil || r.store == nil || r.upstream == nil {
 		return
 	}
@@ -588,7 +589,7 @@ func (r *Resolver) backgroundRefresh(question dns.Question) {
 	if len(servers) == 0 {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), r.upstreamTimeout)
+	ctx, cancel := context.WithTimeout(detachCtx, r.upstreamTimeout)
 	defer cancel()
 	for _, srv := range servers {
 		resp, err := r.upstream.Query(ctx, question, srv)
