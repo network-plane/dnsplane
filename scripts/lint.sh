@@ -20,3 +20,7 @@ if [ ! -x "$GOLANGCI_LINT" ]; then
 fi
 "$GOLANGCI_LINT" run --timeout=5m
 echo "golangci-lint: OK"
+
+echo ""
+"$ROOT/scripts/gosec.sh"
+echo "gosec: OK"
