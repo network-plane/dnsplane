@@ -3,8 +3,9 @@
 package abuse
 
 import (
+	crand "crypto/rand"
+	"encoding/binary"
 	"hash/fnv"
-	"math/rand"
 	"sync"
 	"time"
 )
@@ -18,7 +19,6 @@ type RRL struct {
 	slip       float64       // probability to allow when over (0-1)
 	maxBuckets int
 	now        func() time.Time
-	rnd        *rand.Rand
 }
 
 type rrlEntry struct {
@@ -38,8 +38,22 @@ func NewRRL(maxPerWindow int, window time.Duration, slip float64, maxBuckets int
 		slip:       slip,
 		maxBuckets: maxBuckets,
 		now:        time.Now,
-		rnd:        rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
+}
+
+// slipPass returns true with probability slip (0–1) using crypto/rand.
+func slipPass(slip float64) bool {
+	if slip <= 0 {
+		return false
+	}
+	var b [8]byte
+	if _, err := crand.Read(b[:]); err != nil {
+		return false
+	}
+	u := binary.LittleEndian.Uint64(b[:])
+	// Map to [0,1) with 53-bit precision (similar to math/rand Float64).
+	p := float64(u>>11) * (1.0 / (1 << 53))
+	return p < slip
 }
 
 func rrlKey(ip, qname string) uint64 {
@@ -72,7 +86,7 @@ func (r *RRL) Allow(ip, qname string) bool {
 	if e.count < r.maxPerWin {
 		return true
 	}
-	if r.slip > 0 && r.rnd.Float64() < r.slip {
+	if r.slip > 0 && slipPass(r.slip) {
 		return true
 	}
 	return false
