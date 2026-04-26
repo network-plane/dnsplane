@@ -51,8 +51,9 @@ jobs:
           set -euo pipefail
           eval "$(./packaging/version.sh export)"
           mkdir -p "${HOME}/rpmbuild/"{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-          git archive --format=tar --prefix="dnsplane-${DNSPLANE_VERSION_BASE}/" HEAD \
-            | gzip -c > "${HOME}/rpmbuild/SOURCES/dnsplane-${DNSPLANE_VERSION_BASE}.tar.gz"
+          # Container jobs may not have .git; source-tarball.sh falls back to a tree copy.
+          bash ./packaging/source-tarball.sh "${DNSPLANE_VERSION_BASE}" \
+            "${HOME}/rpmbuild/SOURCES/dnsplane-${DNSPLANE_VERSION_BASE}.tar.gz"
           cp packaging/dnsplane.spec "${HOME}/rpmbuild/SPECS/"
           rpmbuild -ba "${HOME}/rpmbuild/SPECS/dnsplane.spec" \
             --define "dnsplane_base ${DNSPLANE_VERSION_BASE}" \
