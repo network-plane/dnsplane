@@ -312,7 +312,7 @@ func LoadFromPath(path string) (*Loaded, error) {
 		return nil, fmt.Errorf("config: failed to read %s: %w", configPath, err)
 	}
 	dir := filepath.Dir(configPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("config: ensure config directory %s: %w", dir, err)
 	}
 	defaultCfg := defaultConfig(dir)
@@ -337,7 +337,7 @@ func Read(path string) (*Config, error) {
 // Save writes the supplied configuration back to the given path.
 func Save(path string, cfg Config) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("config: ensure config directory %s: %w", dir, err)
 	}
 	cfg.applyDefaults(dir)
@@ -377,7 +377,7 @@ func userConfigPath() (string, error) {
 }
 
 func readConfig(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path from operator (config file)
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +401,7 @@ func writeConfig(path string, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("config: marshal config: %w", err)
 	}
-	if err := os.WriteFile(path, payload, 0o644); err != nil {
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
 		return fmt.Errorf("config: write %s: %w", path, err)
 	}
 	return nil
