@@ -482,7 +482,7 @@ func (d *DNSResolverData) ClearAdblockSources() {
 // LoadFromJSON reads a JSON file and unmarshals it into a struct
 func LoadFromJSON[T any](filePath string) (T, error) {
 	var result T
-	data, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(filePath) // #nosec G304 -- path from operator/config
 	if err != nil {
 		return result, err
 	}
@@ -502,10 +502,10 @@ func SaveToJSON[T any](filePath string, data T) error {
 
 // writeJSONFile writes JSON to path. indent=false avoids SetIndent for large machine-written files (e.g. dnscache.json).
 func writeJSONFile[T any](filePath string, data T, indent bool) error {
-	if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0o750); err != nil {
 		return err
 	}
-	file, err := os.Create(filePath)
+	file, err := os.Create(filePath) // #nosec G304 -- path from operator/config
 	if err != nil {
 		return err
 	}
@@ -726,10 +726,10 @@ func CreateFileIfNotExists(filename, content string) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		fatalResolver("failed to stat data file before create", "path", filename, "error", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(filename), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(filename), 0o750); err != nil {
 		fatalResolver("failed to create directory for data file", "path", filename, "error", err)
 	}
-	if err := os.WriteFile(filename, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(filename, []byte(content), 0o600); err != nil {
 		fatalResolver("failed to create data file", "path", filename, "error", err)
 	}
 }

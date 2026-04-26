@@ -66,7 +66,7 @@ func loadRecordsFromGit(repoURL string) ([]dnsrecords.DNSRecord, error) {
 	_, err := os.Stat(filepath.Join(cacheDir, ".git"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			_ = os.MkdirAll(filepath.Dir(cacheDir), 0o755)
+			_ = os.MkdirAll(filepath.Dir(cacheDir), 0o750)
 			_, err = git.PlainClone(cacheDir, false, &git.CloneOptions{
 				URL:   repoURL,
 				Depth: 1,
@@ -92,7 +92,7 @@ func loadRecordsFromGit(repoURL string) ([]dnsrecords.DNSRecord, error) {
 		}
 	}
 	path := filepath.Join(cacheDir, recordsFileName)
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path under operator-controlled cache dir
 	if err != nil {
 		return nil, fmt.Errorf("records git read file: %w", err)
 	}

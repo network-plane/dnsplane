@@ -20,11 +20,11 @@ zone "example.com" {
     file "zones/example.com.db";
 };
 `
-	if err := os.WriteFile(nc, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(nc, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	zonesDir := filepath.Join(dir, "zones")
-	if err := os.MkdirAll(zonesDir, 0o755); err != nil {
+	if err := os.MkdirAll(zonesDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	db := filepath.Join(zonesDir, "example.com.db")
@@ -33,7 +33,7 @@ zone "example.com" {
 @ IN NS ns1.example.com.
 www IN A 192.0.2.1
 `
-	if err := os.WriteFile(db, []byte(zoneBody), 0o644); err != nil {
+	if err := os.WriteFile(db, []byte(zoneBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -62,13 +62,13 @@ func TestLoadRecordsBindDirGlobMerge(t *testing.T) {
 	if err := os.WriteFile(z1, []byte(`$ORIGIN x.example.
 @ IN SOA ns1.x.example. h.x.example. 1 7200 900 1209600 3600
 dup 100 IN A 192.0.2.1
-`), 0o644); err != nil {
+`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(z2, []byte(`$ORIGIN x.example.
 @ IN SOA ns1.x.example. h.x.example. 2 7200 900 1209600 3600
 dup 200 IN A 192.0.2.1
-`), 0o644); err != nil {
+`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	rs := &config.RecordsSourceConfig{Type: config.RecordsSourceBindDir, Location: dir, IncludePattern: "*.db"}
