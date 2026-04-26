@@ -14,7 +14,9 @@ License:        GPL-2.0-only
 URL:            https://github.com/network-plane/dnsplane
 Source0:        %{name}-%{version}.tar.gz
 
-BuildRequires:  golang >= 1.22
+# Minimum Go: must match go.mod (toolchain or "go" line). CI passes --define dnsplane_go_min from packaging/version.sh go.
+%{!?dnsplane_go_min:%global dnsplane_go_min 1.26.2}
+BuildRequires:  golang >= %{dnsplane_go_min}
 BuildRequires:  git
 BuildRequires:  systemd-rpm-macros
 
@@ -24,6 +26,7 @@ BuildRequires:  systemd-rpm-macros
 dnsplane is a DNS resolver with optional local records, DoT/DoH, and clustering.
 
 Packaged build id (version-git): %{dnsplane_full}
+Build expects Go >= %{dnsplane_go_min} per go.mod (use matching toolchain on PATH).
 
 %prep
 %autosetup -n %{name}-%{version}
@@ -31,6 +34,7 @@ Packaged build id (version-git): %{dnsplane_full}
 %build
 export CGO_ENABLED=0
 export GOFLAGS=-buildvcs=false
+go version
 go build -trimpath -ldflags "-X main.appVersion=%{dnsplane_full}" -o dnsplane .
 
 %install

@@ -9,6 +9,7 @@
 | `DNSPLANE_VERSION_BASE` | `1.4.175` | Semver core from the latest matching `v*.*.*` tag on `HEAD` when `.git` exists (suffixes after `X.Y.Z` ignored, e.g. `v1.4.175-rc1` → `1.4.175`); else `GITHUB_REF_NAME` when it looks like `vX.Y.Z` (CI tag builds without `.git`); else [VERSION](../VERSION); else `0.0.0` |
 | `DNSPLANE_GIT_SHORT` | `d977f1b` | `GITHUB_SHA` (first 7) in Actions when `.git` is absent; else `git rev-parse --short=7 HEAD`; else `unknown` |
 | `DNSPLANE_VERSION_FULL` | `1.4.175-d977f1b` | Embedded in the binary (`main.appVersion`) and shown in `%description` / docs |
+| `DNSPLANE_GO_MOD` | `1.26.2` | From `go.mod` (`toolchain` line if set, else `go`); passed to `rpmbuild` as `dnsplane_go_min` |
 
 Usage:
 
@@ -16,6 +17,7 @@ Usage:
 eval "$(./packaging/version.sh export)"
 echo "$DNSPLANE_VERSION_FULL"
 ./packaging/version.sh full   # print FULL only
+./packaging/version.sh go     # print go.mod Go version (for rpmbuild --define dnsplane_go_min)
 ```
 
 **RPM:** `Version` is `BASE`; `Release` is `1.SHORTSHA%{?dist}` so the NEVRA is policy-friendly while humans still see `FULL` in the description.
@@ -31,7 +33,7 @@ echo "$DNSPLANE_VERSION_FULL"
 
 ## RPM (Fedora, RHEL-family, openSUSE)
 
-Requirements: `git`, `golang` (see [go.mod](../go.mod); RHEL 9 may need a newer Go from AppStream or module streams), `rpm-build`, `systemd-rpm-macros`.
+Requirements: `git`, `golang` (install the distro package so `rpmbuild` satisfies `BuildRequires`; the compiler must still meet [go.mod](../go.mod) — use a newer Go on `PATH` first, e.g. from [go.dev](https://go.dev/dl/) or `actions/setup-go`), `rpm-build`, `systemd-rpm-macros`.
 
 From the repository root:
 
@@ -43,12 +45,13 @@ bash ./packaging/source-tarball.sh "${DNSPLANE_VERSION_BASE}" \
 cp packaging/dnsplane.spec ~/rpmbuild/SPECS/
 rpmbuild -ba ~/rpmbuild/SPECS/dnsplane.spec \
   --define "dnsplane_base ${DNSPLANE_VERSION_BASE}" \
-  --define "dnsplane_short ${DNSPLANE_GIT_SHORT}"
+  --define "dnsplane_short ${DNSPLANE_GIT_SHORT}" \
+  --define "dnsplane_go_min ${DNSPLANE_GO_MOD}"
 ```
 
 Artifacts under `~/rpmbuild/RPMS/` and `~/rpmbuild/SRPMS/`.
 
-**RHEL / Rocky / Alma:** If the distro’s `golang` is older than required by `go.mod`, install a supported toolchain (vendor docs, EPEL, or upstream Go) before `rpmbuild`.
+**RHEL / Rocky / Alma:** `BuildRequires` uses `dnsplane_go_min` from `go.mod` (see `version.sh go`). If the distro’s `golang` RPM is older than that (common on EL9), install a newer `golang` package (module stream, COPR, or vendor Go) so `rpm` dependency checks pass; the compiler on `PATH` must still satisfy `go.mod` / `toolchain`.
 
 ## Debian / Ubuntu
 
