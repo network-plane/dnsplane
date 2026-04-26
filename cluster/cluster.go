@@ -305,7 +305,7 @@ func (m *Manager) AdminPushConfig(peerAddr string, apply AdminConfigApplyMessage
 	}
 	apply.Type = TypeAdminConfigApply
 	apply.AdminToken = adminTok
-	payload, err := json.Marshal(apply)
+	payload, err := json.Marshal(apply) // #nosec G117 -- intentional authenticated cluster admin payload
 	if err != nil {
 		return err
 	}
