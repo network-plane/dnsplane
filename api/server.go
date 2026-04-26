@@ -151,7 +151,14 @@ func Start(state *daemon.State, port string, opts *ListenOptions, registrar Rout
 	router.Use(apiAuthMiddleware())
 	registrar(router)
 
-	srv := &http.Server{Addr: addr, Handler: router}
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           router,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	apiServerMu.Lock()
 	apiServer = srv
 	apiServerMu.Unlock()

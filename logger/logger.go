@@ -129,7 +129,7 @@ func levelFromSeverity(severity string) slog.Level {
 // It creates the directory if needed. On write failure it falls back to stderr (safeWriter).
 func newFileWriter(logPath string, logCfg config.LogConfig) (io.Writer, error) {
 	dir := filepath.Dir(logPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("create log dir %s: %w", dir, err)
 	}
 	rot := buildLumberjack(logPath, logCfg)
@@ -193,7 +193,7 @@ func NewClientLogger(logFilePath string) *slog.Logger {
 	// Build path for buildLumberjack (we need full path)
 	dir := filepath.Dir(logPath)
 	if dir != "." {
-		_ = os.MkdirAll(dir, 0o755)
+		_ = os.MkdirAll(dir, 0o750)
 	}
 	wr, err := newFileWriter(logPath, cfg)
 	if err != nil {

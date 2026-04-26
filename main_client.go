@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"os"
 	"os/signal"
@@ -108,12 +109,16 @@ func connectToInteractiveEndpoint(target string, killOther bool) {
 	}
 	fmt.Printf("Connected to %s %s\n", network, address)
 
-	stdinFD := int(os.Stdin.Fd())
+	fd := os.Stdin.Fd()
+	stdinFD := -1
+	if fd <= uintptr(math.MaxInt) {
+		stdinFD = int(fd) // #nosec G115 -- fd bounded by math.MaxInt
+	}
 	var (
 		oldState *term.State
 		restored bool
 	)
-	if term.IsTerminal(stdinFD) {
+	if stdinFD >= 0 && term.IsTerminal(stdinFD) {
 		if st, err := term.MakeRaw(stdinFD); err == nil {
 			oldState = st
 			defer func() {

@@ -64,7 +64,7 @@ func New(statsDir string, enabled bool) (*Tracker, error) {
 		return nil, nil
 	}
 
-	if err := os.MkdirAll(statsDir, 0o755); err != nil {
+	if err := os.MkdirAll(statsDir, 0o750); err != nil {
 		return nil, fmt.Errorf("fullstats: create directory: %w", err)
 	}
 

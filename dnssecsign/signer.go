@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+
+	"dnsplane/safecast"
 )
 
 // Signer holds a zone ZSK and signs RRsets for names under that zone when the client sets DO (DNSSEC OK).
@@ -27,11 +29,11 @@ func LoadSigner(zone, keyFile, privateKeyFile string) (*Signer, error) {
 	if zone == "." {
 		return nil, fmt.Errorf("dnssecsign: invalid zone")
 	}
-	keyBytes, err := os.ReadFile(keyFile)
+	keyBytes, err := os.ReadFile(keyFile) // #nosec G304 -- paths from operator (BIND key files)
 	if err != nil {
 		return nil, fmt.Errorf("dnssecsign: read key file: %w", err)
 	}
-	privBytes, err := os.ReadFile(privateKeyFile)
+	privBytes, err := os.ReadFile(privateKeyFile) // #nosec G304 -- paths from operator (BIND private key)
 	if err != nil {
 		return nil, fmt.Errorf("dnssecsign: read private key file: %w", err)
 	}
@@ -87,7 +89,7 @@ func (s *Signer) SignLocalAnswerIfDO(req *dns.Msg, q dns.Question, rrset []dns.R
 		return
 	}
 	ttl := rrset[0].Header().Ttl
-	now := uint32(time.Now().Unix())
+	now := safecast.UnixSecondsToDNSUint32(time.Now().Unix())
 	sig := &dns.RRSIG{
 		Hdr:        dns.RR_Header{Rrtype: dns.TypeRRSIG, Class: q.Qclass, Ttl: ttl},
 		Algorithm:  s.key.Algorithm,

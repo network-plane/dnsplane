@@ -9,6 +9,7 @@ import (
 	"io"
 
 	"dnsplane/dnsrecords"
+	"dnsplane/safecast"
 )
 
 // MaxFrameBytes caps a single JSON frame (records snapshot).
@@ -20,7 +21,7 @@ func WriteFrame(w io.Writer, payload []byte) error {
 		return fmt.Errorf("cluster: frame %d bytes exceeds max %d", len(payload), MaxFrameBytes)
 	}
 	var hdr [4]byte
-	binary.BigEndian.PutUint32(hdr[:], uint32(len(payload)))
+	binary.BigEndian.PutUint32(hdr[:], safecast.IntToUint32Clamp(len(payload)))
 	if _, err := w.Write(hdr[:]); err != nil {
 		return err
 	}

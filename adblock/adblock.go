@@ -132,7 +132,7 @@ func LoadFromFile(blockList *BlockList, filePath string) error {
 		return fmt.Errorf("block list is nil")
 	}
 
-	file, err := os.Open(filePath)
+	file, err := os.Open(filePath) // #nosec G304 -- path from operator (blocklist file)
 	if err != nil {
 		return fmt.Errorf("open file: %w", err)
 	}
