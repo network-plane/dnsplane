@@ -44,7 +44,7 @@ func (s *stateManager) load(cfgNodeID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	data, err := os.ReadFile(s.path)
+	data, err := os.ReadFile(s.path) // #nosec G304 -- path beside operator config (cluster_state.json)
 	if err != nil {
 		if os.IsNotExist(err) {
 			s.nodeID = strings.TrimSpace(cfgNodeID)

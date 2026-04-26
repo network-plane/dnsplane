@@ -23,7 +23,7 @@ type ParseResult struct {
 
 // ParseFile reads a zone file from path and converts supported RRs to DNSRecord.
 func ParseFile(path string) (ParseResult, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(path) // #nosec G304 -- path is caller-supplied zone file argument
 	if err != nil {
 		return ParseResult{}, err
 	}

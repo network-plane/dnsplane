@@ -107,7 +107,7 @@ func bindDirRecordKey(r dnsrecords.DNSRecord) string {
 // zoneFilesFromNamedConf extracts file "..."; paths from zone { } blocks (BIND subset).
 // Relative paths are resolved against the directory containing named.conf, then cleaned.
 func zoneFilesFromNamedConf(namedConfPath, zoneDir string) ([]string, error) {
-	b, err := os.ReadFile(namedConfPath)
+	b, err := os.ReadFile(namedConfPath) // #nosec G304 -- path from operator (named.conf)
 	if err != nil {
 		return nil, fmt.Errorf("bind_dir named_conf: read %q: %w", namedConfPath, err)
 	}
