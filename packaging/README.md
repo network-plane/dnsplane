@@ -6,8 +6,8 @@
 
 | Output | Example | Meaning |
 | --- | --- | --- |
-| `DNSPLANE_VERSION_BASE` | `1.4.175` | Semver core `X.Y.Z` from the latest matching `v*.*.*` tag on `HEAD` (suffixes on the tag name after the third number are ignored, e.g. `v1.4.175-rc1` → `1.4.175`); else [VERSION](../VERSION); else `0.0.0` |
-| `DNSPLANE_GIT_SHORT` | `d977f1b` | `git rev-parse --short=7 HEAD` |
+| `DNSPLANE_VERSION_BASE` | `1.4.175` | Semver core from the latest matching `v*.*.*` tag on `HEAD` when `.git` exists (suffixes after `X.Y.Z` ignored, e.g. `v1.4.175-rc1` → `1.4.175`); else `GITHUB_REF_NAME` when it looks like `vX.Y.Z` (CI tag builds without `.git`); else [VERSION](../VERSION); else `0.0.0` |
+| `DNSPLANE_GIT_SHORT` | `d977f1b` | `GITHUB_SHA` (first 7) in Actions when `.git` is absent; else `git rev-parse --short=7 HEAD`; else `unknown` |
 | `DNSPLANE_VERSION_FULL` | `1.4.175-d977f1b` | Embedded in the binary (`main.appVersion`) and shown in `%description` / docs |
 
 Usage:
@@ -38,8 +38,8 @@ From the repository root:
 ```bash
 eval "$(./packaging/version.sh export)"
 mkdir -p ~/rpmbuild/{SOURCES,SPECS,BUILD,RPMS,SRPMS}
-git archive --format=tar --prefix="dnsplane-${DNSPLANE_VERSION_BASE}/" HEAD \
-  | gzip -c > ~/rpmbuild/SOURCES/dnsplane-${DNSPLANE_VERSION_BASE}.tar.gz
+bash ./packaging/source-tarball.sh "${DNSPLANE_VERSION_BASE}" \
+  ~/rpmbuild/SOURCES/dnsplane-${DNSPLANE_VERSION_BASE}.tar.gz
 cp packaging/dnsplane.spec ~/rpmbuild/SPECS/
 rpmbuild -ba ~/rpmbuild/SPECS/dnsplane.spec \
   --define "dnsplane_base ${DNSPLANE_VERSION_BASE}" \
@@ -62,3 +62,5 @@ Produces `../dnsplane_*.deb` from the parent directory. Bump `debian/changelog` 
 ## CI
 
 GitHub Actions workflow [.github/workflows/package-rpm.yml](../.github/workflows/package-rpm.yml) builds RPMs on Fedora and Rocky Linux with the same spec and version macros.
+
+**Container jobs** (Fedora/Rocky images) often have a checkout **without a `.git` directory**, so `git archive` fails. The workflow uses [source-tarball.sh](source-tarball.sh), which runs `git archive` when `.git` exists and otherwise copies the tree into `dnsplane-${BASE}/` before `tar`. `version.sh` reads `GITHUB_SHA` / `GITHUB_REF_NAME` when git metadata is missing.
