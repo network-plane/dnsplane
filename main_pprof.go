@@ -7,10 +7,9 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/http/pprof"
 	"sync"
 	"time"
-
-	_ "net/http/pprof" // registers /debug/pprof/* on DefaultServeMux
 )
 
 var (
@@ -25,9 +24,15 @@ func startPprof(addr string, logger *slog.Logger) {
 	if pprofServer != nil {
 		return
 	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           http.DefaultServeMux,
+		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       60 * time.Second,
 		WriteTimeout:      60 * time.Second,
