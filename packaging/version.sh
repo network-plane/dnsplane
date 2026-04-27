@@ -26,6 +26,20 @@ go_mod_go_version() {
 	' "$ROOT/go.mod"
 }
 
+# RPM package repos typically provide Go at major.minor granularity.
+# Convert go.mod version (e.g. 1.26.2) to 1.26 for BuildRequires.
+go_rpm_min_version() {
+	local v="$1"
+	awk -v ver="$v" 'BEGIN {
+		n = split(ver, a, ".")
+		if (n < 2) {
+			print "invalid go version: " ver > "/dev/stderr"
+			exit 1
+		}
+		print a[1] "." a[2]
+	}'
+}
+
 short_sha() {
 	# GitHub Actions container checkouts often have no .git; use workflow commit SHA.
 	if [[ -n "${GITHUB_SHA:-}" ]] && [[ "${#GITHUB_SHA}" -ge 7 ]]; then
@@ -78,6 +92,7 @@ SHORTSHA="$(short_sha)"
 BASE="$(base_version)"
 FULL="${BASE}-${SHORTSHA}"
 GO_MOD="$(go_mod_go_version)"
+GO_RPM_MIN="$(go_rpm_min_version "$GO_MOD")"
 
 cmd="${1:-export}"
 case "$cmd" in
@@ -86,6 +101,7 @@ export)
 	printf "export DNSPLANE_GIT_SHORT=%q\n" "$SHORTSHA"
 	printf "export DNSPLANE_VERSION_FULL=%q\n" "$FULL"
 	printf "export DNSPLANE_GO_MOD=%q\n" "$GO_MOD"
+	printf "export DNSPLANE_GO_RPM_MIN=%q\n" "$GO_RPM_MIN"
 	;;
 base) echo "$BASE" ;;
 short | sha) echo "$SHORTSHA" ;;

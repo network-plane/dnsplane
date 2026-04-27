@@ -14,8 +14,9 @@ License:        GPL-2.0-only
 URL:            https://github.com/network-plane/dnsplane
 Source0:        %{name}-%{version}.tar.gz
 
-# Minimum Go: must match go.mod (toolchain or "go" line). CI passes --define dnsplane_go_min from packaging/version.sh go.
-%{!?dnsplane_go_min:%global dnsplane_go_min 1.26.2}
+# Minimum Go package version for RPM dependency checks.
+# CI passes --define dnsplane_go_min from packaging/version.sh (major.minor floor).
+%{!?dnsplane_go_min:%global dnsplane_go_min 1.26}
 BuildRequires:  golang >= %{dnsplane_go_min}
 BuildRequires:  git
 BuildRequires:  systemd-rpm-macros
