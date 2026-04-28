@@ -60,7 +60,7 @@ jobs:
           rpmbuild -ba "${HOME}/rpmbuild/SPECS/dnsplane.spec" \
             --define "dnsplane_base ${DNSPLANE_VERSION_BASE}" \
             --define "dnsplane_short ${DNSPLANE_GIT_SHORT}" \
-            --define "dnsplane_go_min ${DNSPLANE_GO_MOD}"
+            --define "dnsplane_go_min ${DNSPLANE_GO_RPM_MIN}"
           mkdir -p "${GITHUB_WORKSPACE}/rpm-artifacts"
           shopt -s nullglob
           for f in "${HOME}/rpmbuild/RPMS"/*/*.rpm "${HOME}/rpmbuild/SRPMS"/*.src.rpm; do
