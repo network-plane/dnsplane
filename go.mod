@@ -4,7 +4,7 @@ go 1.26.2
 
 require (
 	github.com/chzyer/readline v1.5.1
-	github.com/fsnotify/fsnotify v1.9.0
+	github.com/fsnotify/fsnotify v1.10.0
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/go-git/go-git/v5 v5.18.0
 	github.com/gorilla/websocket v1.5.3
