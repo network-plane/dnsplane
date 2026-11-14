@@ -383,7 +383,6 @@ func (c *Config) Normalize(configDir string) {
 	c.applyDefaults(configDir)
 }
 
-
 func defaultConfig(baseDir string) *Config {
 	logDir := "/var/log/dnsplane"
 	if !isSystemConfigDir(baseDir) {
