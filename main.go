@@ -15,6 +15,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chzyer/readline"
+	"github.com/inconshreveable/mousetrap"
+	tui "github.com/network-plane/planetui"
+	"github.com/spf13/cobra"
+
 	"dnsplane/api"
 	"dnsplane/cluster"
 	"dnsplane/commandhandler"
@@ -26,11 +31,6 @@ import (
 	"dnsplane/logger"
 	"dnsplane/ratelimit"
 	"dnsplane/resolver"
-
-	"github.com/chzyer/readline"
-	"github.com/inconshreveable/mousetrap"
-	tui "github.com/network-plane/planetui"
-	"github.com/spf13/cobra"
 )
 
 const (
@@ -43,7 +43,7 @@ const (
 )
 
 // Default release string for normal builds; RPM/DEB may override with -ldflags "-X main.appVersion=..." (see packaging/version.sh).
-var appVersion = "1.4.193"
+var appVersion = "1.4.201"
 
 var (
 	appState         = daemon.NewState()
@@ -463,7 +463,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	}
 
 	clusterCtx, clusterCancel := context.WithCancel(context.Background())
-	clusterMgr := cluster.NewManager(loadedCfg.Path, dnsData, dnsLogger)
+	clusterMgr := cluster.NewManager(loadedCfg.WriteConfigPath(), dnsData, dnsLogger)
 	cluster.SetGlobalManager(clusterMgr)
 	sCluster := dnsData.GetResolverSettings()
 	if err := clusterMgr.Start(clusterCtx, sCluster); err != nil && dnsLogger != nil {
