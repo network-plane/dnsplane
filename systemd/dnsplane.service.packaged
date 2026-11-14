@@ -15,7 +15,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 RuntimeDirectory=dnsplane
-ExecStart=/usr/bin/dnsplane server --config /etc/dnsplane/dnsplane.json --server-socket /run/dnsplane/dnsplane.socket --dnsservers /etc/dnsplane/dnsservers.json --dnsrecords /etc/dnsplane/dnsrecords.json --cache /etc/dnsplane/dnscache.json
+ExecStart=/usr/bin/dnsplane server --config /etc/dnsplane/dnsplane.yaml --server-socket /run/dnsplane/dnsplane.socket --dnsservers /etc/dnsplane/dnsservers.json --dnsrecords /etc/dnsplane/dnsrecords.json --cache /etc/dnsplane/dnscache.json
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
