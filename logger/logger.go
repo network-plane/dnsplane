@@ -3,6 +3,7 @@
 package logger
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -16,6 +17,31 @@ import (
 
 	lj "gopkg.in/natefinch/lumberjack.v2"
 )
+
+// stderrTeeHandler duplicates Error and above to stderr while still writing through primary.
+type stderrTeeHandler struct {
+	primary slog.Handler
+	stderr  slog.Handler
+}
+
+func (h *stderrTeeHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.primary.Enabled(ctx, level) || (level >= slog.LevelError && h.stderr.Enabled(ctx, level))
+}
+
+func (h *stderrTeeHandler) Handle(ctx context.Context, r slog.Record) error {
+	if r.Level >= slog.LevelError {
+		_ = h.stderr.Handle(ctx, r.Clone())
+	}
+	return h.primary.Handle(ctx, r)
+}
+
+func (h *stderrTeeHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &stderrTeeHandler{primary: h.primary.WithAttrs(attrs), stderr: h.stderr}
+}
+
+func (h *stderrTeeHandler) WithGroup(name string) slog.Handler {
+	return &stderrTeeHandler{primary: h.primary.WithGroup(name), stderr: h.stderr}
+}
 
 const defaultAsyncLogQueueSize = 10000
 
@@ -150,9 +176,9 @@ func newFileWriter(logPath string, logCfg config.LogConfig) (io.Writer, error) {
 // If severity is "none", no files are created and all log output is discarded.
 // If the file cannot be created or written (and severity is not "none"), logs are written to stderr instead.
 func NewServerLogger(serviceLogName, logDir string, logCfg config.LogConfig) *slog.Logger {
+	stderrErr := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})
 	if isSeverityNone(logCfg.Severity) {
-		h := slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError + 1000})
-		return slog.New(h)
+		return slog.New(stderrErr)
 	}
 	logPath := filepath.Join(logDir, serviceLogName)
 	wr, err := newFileWriter(logPath, logCfg)
@@ -161,7 +187,8 @@ func NewServerLogger(serviceLogName, logDir string, logCfg config.LogConfig) *sl
 		wr = os.Stderr
 	}
 	level := levelFromSeverity(logCfg.Severity)
-	h := slog.NewTextHandler(wr, &slog.HandlerOptions{Level: level})
+	primary := slog.NewTextHandler(wr, &slog.HandlerOptions{Level: level})
+	h := &stderrTeeHandler{primary: primary, stderr: stderrErr}
 	return slog.New(h)
 }
 
