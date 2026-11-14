@@ -9,7 +9,7 @@
 #   3. Add StateDirectory=dnsplane (creates /var/lib/dnsplane, owned by dnsplane)
 #   4. Use data paths under /var/lib/dnsplane so the service can write without root.
 #   Example ExecStart for non-root (config in /etc, data in /var/lib/dnsplane):
-#   ExecStart=/usr/local/dnsplane/dnsplane server --config /etc/dnsplane/dnsplane.json --server-socket /run/dnsplane/dnsplane.socket --dnsservers /var/lib/dnsplane/dnsservers.json --dnsrecords /var/lib/dnsplane/dnsrecords.json --cache /var/lib/dnsplane/dnscache.json
+#   ExecStart=/usr/local/dnsplane/dnsplane server --config /etc/dnsplane/dnsplane.yaml --server-socket /run/dnsplane/dnsplane.socket --dnsservers /var/lib/dnsplane/dnsservers.json --dnsrecords /var/lib/dnsplane/dnsrecords.json --cache /var/lib/dnsplane/dnscache.json
 #   Ensure /etc/dnsplane (and dnsplane.json) is readable by dnsplane.
 
 [Unit]
@@ -21,7 +21,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 RuntimeDirectory=dnsplane
-ExecStart=/usr/local/dnsplane/dnsplane server --config /etc/dnsplane/dnsplane.json --server-socket /run/dnsplane/dnsplane.socket --dnsservers /etc/dnsplane/dnsservers.json --dnsrecords /etc/dnsplane/dnsrecords.json --cache /etc/dnsplane/dnscache.json
+ExecStart=/usr/local/dnsplane/dnsplane server --config /etc/dnsplane/dnsplane.yaml --server-socket /run/dnsplane/dnsplane.socket --dnsservers /etc/dnsplane/dnsservers.json --dnsrecords /etc/dnsplane/dnsrecords.json --cache /etc/dnsplane/dnscache.json
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30

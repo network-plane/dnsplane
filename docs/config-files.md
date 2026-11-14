@@ -1,6 +1,6 @@
 # Config files and API reference
 
-JSON data files, `dnsplane.json` keys, REST paths, and curl samples. For resolution order and the diagram see [resolution.md](resolution.md). For CLI paths and the TUI see [usage.md](usage.md). For logging options see [logging.md](logging.md). **RPM/Debian packages** and version strings (`BASE-SHORTSHA`): [packaging/README.md](../packaging/README.md).
+`dnsplane.yaml` (canonical; `dnsplane.json` still loads with startup nags), JSON data files, REST paths, and curl samples. For resolution order and the diagram see [resolution.md](resolution.md). For CLI paths and the TUI see [usage.md](usage.md). For logging options see [logging.md](logging.md). **RPM/Debian packages** and version strings (`BASE-SHORTSHA`): [packaging/README.md](../packaging/README.md).
 
 ## Config Files
 
@@ -9,7 +9,7 @@ JSON data files, `dnsplane.json` keys, REST paths, and curl samples. For resolut
 | dnsrecords.json | holds dns records |
 | dnsservers.json | holds the dns servers used for queries (see [Upstream servers and domain whitelist](#upstream-servers-dnsserversjson-and-domain-whitelist)) |
 | dnscache.json | Cached answers while still valid (TTL not expired), when caching is enabled |
-| dnsplane.json | the app config |
+| dnsplane.yaml | the app config (YAML; legacy `dnsplane.json` is migrated to YAML on first start; saves go to YAML) |
 
 Starter copies in the repo: **[examples/dnsplane-example.json](../examples/dnsplane-example.json)** and **[examples/dnsservers-example.json](../examples/dnsservers-example.json)** (point `file_locations.dnsservers` at your real path, e.g. `./dnsservers.json`).
 
