@@ -5,11 +5,13 @@
 package data
 
 import (
+	"bytes"
 	"dnsplane/adblock"
 	"dnsplane/config"
 	"dnsplane/dnsrecordcache"
 	"dnsplane/dnsrecords"
 	"dnsplane/dnsservers"
+	"dnsplane/internal/atomicfile"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -169,15 +171,19 @@ func (d *DNSResolverData) Initialize() error {
 
 	servers, err := LoadDNSServers()
 	if err != nil {
-		return fmt.Errorf("load dns servers: %w", err)
+		return fmt.Errorf("load dns servers from %s: %w", cfg.Config.FileLocations.DNSServerFile, err)
 	}
 	records, err := LoadDNSRecords()
 	if err != nil {
-		return fmt.Errorf("load dns records: %w", err)
+		loc := ""
+		if rs := cfg.Config.FileLocations.RecordsSource; rs != nil {
+			loc = rs.Location
+		}
+		return fmt.Errorf("load dns records from %s: %w", loc, err)
 	}
 	cache, err := LoadCacheRecords()
 	if err != nil {
-		return fmt.Errorf("load cache records: %w", err)
+		return fmt.Errorf("load cache records from %s: %w", cfg.Config.FileLocations.CacheFile, err)
 	}
 
 	d.DNSServers = servers
@@ -502,20 +508,15 @@ func SaveToJSON[T any](filePath string, data T) error {
 
 // writeJSONFile writes JSON to path. indent=false avoids SetIndent for large machine-written files (e.g. dnscache.json).
 func writeJSONFile[T any](filePath string, data T, indent bool) error {
-	if err := os.MkdirAll(filepath.Dir(filePath), 0o750); err != nil {
-		return err
-	}
-	file, err := os.Create(filePath) // #nosec G304 -- path from operator/config
-	if err != nil {
-		return err
-	}
-	defer func() { _ = file.Close() }()
-
-	encoder := json.NewEncoder(file)
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
 	if indent {
 		encoder.SetIndent("", "  ")
 	}
-	return encoder.Encode(data)
+	if err := encoder.Encode(data); err != nil {
+		return err
+	}
+	return atomicfile.Write(filePath, buf.Bytes(), 0o600)
 }
 
 // LoadDNSServers reads the dnsservers.json file and returns the list of DNS servers
@@ -618,9 +619,15 @@ func LoadCacheRecords() ([]dnsrecordcache.CacheRecord, error) {
 		Cache []dnsrecordcache.CacheRecord `json:"cache"`
 	}
 	paths := currentConfig().Config.FileLocations
-	cache, err := LoadFromJSON[cacheType](paths.CacheFile)
+	path := paths.CacheFile
+	cache, err := LoadFromJSON[cacheType](path)
 	if err != nil {
-		return nil, err
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+		resolverSlog().Error("cache file unreadable or corrupt; starting with empty cache", "path", path, "error", err)
+		_, _ = fmt.Fprintf(os.Stderr, "dnsplane: cache file %s is corrupt (%v); starting with empty cache\n", path, err)
+		return nil, nil
 	}
 	return cache.Cache, nil
 }
@@ -729,7 +736,7 @@ func CreateFileIfNotExists(filename, content string) {
 	if err := os.MkdirAll(filepath.Dir(filename), 0o750); err != nil {
 		fatalResolver("failed to create directory for data file", "path", filename, "error", err)
 	}
-	if err := os.WriteFile(filename, []byte(content), 0o600); err != nil {
+	if err := atomicfile.Write(filename, []byte(content), 0o600); err != nil {
 		fatalResolver("failed to create data file", "path", filename, "error", err)
 	}
 }
@@ -748,7 +755,7 @@ func LoadSettings() DNSResolverSettings {
 // SaveSettings saves the DNS server settings to the dnsplane.json file
 func SaveSettings(settings DNSResolverSettings) {
 	info := currentConfig()
-	if err := config.Save(info.Path, settings); err != nil {
+	if err := config.Save(info.WriteConfigPath(), settings); err != nil {
 		fatalResolver("failed to save settings", "error", err)
 	}
 	updateStoredConfig(info.Path, settings)
