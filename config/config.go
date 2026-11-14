@@ -12,10 +12,14 @@ import (
 )
 
 const (
-	// FileName is the canonical name of the configuration file.
-	FileName = "dnsplane.json"
-	// systemConfigPath is the location checked last when resolving the config.
-	systemConfigPath = "/etc/" + FileName
+	// FileName is the canonical name of new configuration files (YAML).
+	FileName = "dnsplane.yaml"
+	// FileNameYML is an alternate YAML extension.
+	FileNameYML = "dnsplane.yml"
+	// FileNameJSON is the legacy JSON configuration file name.
+	FileNameJSON = "dnsplane.json"
+	// systemConfigDir is the packaged system config directory.
+	systemConfigDir = "/etc/dnsplane"
 )
 
 // RecordsSourceType is how the DNS records file is provided: local file, HTTP(S) URL, git repo, or BIND zone directory.
@@ -230,27 +234,46 @@ type Config struct {
 
 // Loaded contains the configuration together with metadata about the source file.
 type Loaded struct {
-	Path    string
-	Created bool
-	Config  Config
+	Path      string // file read for this session
+	WritePath string // file used for Save (always YAML once present or migrated)
+	Created   bool
+	Config    Config
+}
+
+// WriteConfigPath returns the path settings and saves should use.
+func (l *Loaded) WriteConfigPath() string {
+	if l == nil {
+		return ""
+	}
+	if l.WritePath != "" {
+		return l.WritePath
+	}
+	return l.Path
 }
 
 // Load resolves the dnsplane configuration file, creating a default one if
 // necessary, and returns the parsed configuration alongside metadata.
 func Load() (*Loaded, error) {
-	candidates, err := candidatePaths()
+	dirs, err := candidateSearchPaths()
 	if err != nil {
 		return nil, err
 	}
-
-	for _, path := range candidates {
-		cfg, err := readConfig(path)
+	for _, dir := range dirs {
+		loaded, err := resolveLoadedConfig(dir, "")
 		if err == nil {
-			cfg.applyDefaults(filepath.Dir(path))
-			return &Loaded{Path: path, Config: *cfg}, nil
+			return loaded, nil
 		}
 		if !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("config: failed to read %s: %w", path, err)
+			return nil, err
+		}
+	}
+	if fileExists(legacyEtcConfig()) {
+		loaded, err := tryLoadFromResolvedPath(legacyEtcConfig())
+		if err == nil {
+			return loaded, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
 		}
 	}
 
@@ -258,69 +281,79 @@ func Load() (*Loaded, error) {
 	if err != nil {
 		return nil, fmt.Errorf("config: determine working directory: %w", err)
 	}
-
-	defaultPath := filepath.Join(defaultDir, FileName)
-	cfg := defaultConfig(defaultDir)
-	if err := writeConfig(defaultPath, cfg); err != nil {
-		return nil, err
-	}
-	cfg.applyDefaults(defaultDir)
-	return &Loaded{Path: defaultPath, Created: true, Config: *cfg}, nil
+	return createDefaultInDir(defaultDir)
 }
 
-// resolveConfigPath returns the config file path. If path is a directory (ends
-// with /, exists as dir, or path has no extension), returns path/FileName;
-// otherwise returns path as the config file path.
-func resolveConfigPath(path string) (string, error) {
+// resolveConfigInput returns the directory or explicit config file path.
+func resolveConfigInput(path string) (resolved string, isDir bool, err error) {
 	path = filepath.Clean(strings.TrimSpace(path))
 	if path == "" || path == "." {
-		return "", fmt.Errorf("config: path is empty")
+		return "", false, fmt.Errorf("config: path is empty")
 	}
-	isDir := strings.HasSuffix(path, string(filepath.Separator))
+	isDir = strings.HasSuffix(path, string(filepath.Separator))
 	if !isDir {
-		if info, err := os.Stat(path); err == nil && info.IsDir() {
+		if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
 			isDir = true
 		} else if !strings.Contains(filepath.Base(path), ".") {
 			isDir = true
 		}
 	}
 	if isDir {
-		path = strings.TrimSuffix(path, string(filepath.Separator))
-		return filepath.Join(path, FileName), nil
+		return strings.TrimSuffix(path, string(filepath.Separator)), true, nil
 	}
-	return path, nil
+	return path, false, nil
+}
+
+func isStandardConfigName(p string) bool {
+	switch filepath.Base(p) {
+	case FileName, FileNameYML, FileNameJSON:
+		return true
+	default:
+		return false
+	}
 }
 
 // LoadFromPath loads configuration from the given path, or creates a default
 // config at that path if the file does not exist. Path may be a directory
-// (then config is path/dnsplane.json) or a file path (then that file is used).
+// (then config is path/dnsplane.yaml) or a file path (then that file is used).
 func LoadFromPath(path string) (*Loaded, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil, fmt.Errorf("config: path is empty")
 	}
-	configPath, err := resolveConfigPath(path)
+	resolved, isDir, err := resolveConfigInput(path)
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := readConfig(configPath)
+	if isDir {
+		loaded, loadErr := resolveLoadedConfig(resolved, "")
+		if loadErr == nil {
+			return loaded, nil
+		}
+		if !errors.Is(loadErr, os.ErrNotExist) {
+			return nil, loadErr
+		}
+		return createDefaultInDir(resolved)
+	}
+	dir := filepath.Dir(resolved)
+	if isStandardConfigName(resolved) {
+		loaded, loadErr := resolveLoadedConfig(dir, resolved)
+		if loadErr == nil {
+			return loaded, nil
+		}
+		if !errors.Is(loadErr, os.ErrNotExist) {
+			return nil, loadErr
+		}
+		return createDefaultInDir(dir)
+	}
+	loaded, err := tryLoadFromResolvedPath(resolved)
 	if err == nil {
-		cfg.applyDefaults(filepath.Dir(configPath))
-		return &Loaded{Path: configPath, Config: *cfg}, nil
+		return loaded, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("config: failed to read %s: %w", configPath, err)
-	}
-	dir := filepath.Dir(configPath)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return nil, fmt.Errorf("config: ensure config directory %s: %w", dir, err)
-	}
-	defaultCfg := defaultConfig(dir)
-	if err := writeConfig(configPath, defaultCfg); err != nil {
 		return nil, err
 	}
-	defaultCfg.applyDefaults(dir)
-	return &Loaded{Path: configPath, Created: true, Config: *defaultCfg}, nil
+	return createDefaultInDir(dir)
 }
 
 // Read loads and normalises configuration from the specified path without
@@ -350,62 +383,6 @@ func (c *Config) Normalize(configDir string) {
 	c.applyDefaults(configDir)
 }
 
-func candidatePaths() ([]string, error) {
-	execPath, err := os.Executable()
-	if err != nil {
-		return nil, fmt.Errorf("config: determine executable path: %w", err)
-	}
-	execDir := filepath.Dir(execPath)
-
-	var paths []string
-	paths = appendIfMissing(paths, filepath.Join(execDir, FileName))
-
-	if userPath, err := userConfigPath(); err == nil && userPath != "" {
-		paths = appendIfMissing(paths, userPath)
-	}
-
-	paths = appendIfMissing(paths, systemConfigPath)
-	return paths, nil
-}
-
-func userConfigPath() (string, error) {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("config: determine user config dir: %w", err)
-	}
-	return filepath.Join(dir, "dnsplane", FileName), nil
-}
-
-func readConfig(path string) (*Config, error) {
-	data, err := os.ReadFile(path) // #nosec G304 -- path from operator (config file)
-	if err != nil {
-		return nil, err
-	}
-	if len(strings.TrimSpace(string(data))) == 0 {
-		return nil, fmt.Errorf("config: file %s is empty", path)
-	}
-
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("config: parse %s: %w", path, err)
-	}
-
-	if legacy := extractLegacyRecordSettings(data); legacy != nil {
-		cfg.DNSRecordSettings = *legacy
-	}
-	return &cfg, nil
-}
-
-func writeConfig(path string, cfg *Config) error {
-	payload, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("config: marshal config: %w", err)
-	}
-	if err := os.WriteFile(path, payload, 0o600); err != nil {
-		return fmt.Errorf("config: write %s: %w", path, err)
-	}
-	return nil
-}
 
 func defaultConfig(baseDir string) *Config {
 	logDir := "/var/log/dnsplane"
