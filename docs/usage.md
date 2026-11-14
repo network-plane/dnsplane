@@ -41,15 +41,15 @@ The daemon keeps the resolver running, exposes a UNIX control socket for the TUI
 
 ## config and data file paths
 
-When you do not pass any path flags, dnsplane looks for an existing `dnsplane.json` in the executable directory, then the user config dir (e.g. `~/.config/dnsplane/`), then `/etc/dnsplane.json`. If none is found, it creates the config and data files in the **current directory only** (never in `/etc` or elsewhere). You can override the config file and the JSON data files with server flags:
+When you do not pass any path flags, dnsplane looks for `dnsplane.yaml` (then `dnsplane.yml`, then legacy `dnsplane.json`) in the executable directory, then `~/.config/dnsplane/`, then `/etc/dnsplane/`. If none is found, it creates YAML config and JSON data files in the **current directory only** (never in `/etc` or elsewhere). Legacy JSON-only configs are copied to YAML on startup; settings saves always write YAML. You can override paths with server flags:
 
 ```bash
-./dnsplane server --config ./myconfig.json --dnsrecords ./records.json --cache ./cache.json --dnsservers ./servers.json
+./dnsplane server --config ./myconfig.yaml --dnsrecords ./records.json --cache ./cache.json --dnsservers ./servers.json
 ```
 
 | Flag | Purpose |
 | --- | --- |
-| `--config` | Path to config file; if the file does not exist, a default config is created there (server only) |
+| `--config` | Path to config file or directory; if missing, default `dnsplane.yaml` is created there (server only). Passing `dnsplane.json` still works but prefers YAML when both exist. |
 | `--dnsservers` | Path to dnsservers.json (overrides config) |
 | `--dnsrecords` | Path to dnsrecords.json (overrides config) |
 | `--cache` | Path to dnscache.json (overrides config) |

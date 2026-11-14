@@ -4,6 +4,7 @@
 package data
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"sync/atomic"
@@ -25,6 +26,11 @@ func resolverSlog() *slog.Logger {
 }
 
 func fatalResolver(msg string, args ...any) {
+	_, _ = fmt.Fprintf(os.Stderr, "FATAL: %s", msg)
+	for i := 0; i+1 < len(args); i += 2 {
+		_, _ = fmt.Fprintf(os.Stderr, " %v=%v", args[i], args[i+1])
+	}
+	_, _ = fmt.Fprintln(os.Stderr)
 	resolverSlog().Error(msg, args...)
 	os.Exit(1)
 }
